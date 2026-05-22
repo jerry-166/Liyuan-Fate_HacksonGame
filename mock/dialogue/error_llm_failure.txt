@@ -1,0 +1,2 @@
+event: error
+data: {"code": "LLM_ERROR", "message": "AI 生成超时，请重试"}

@@ -1,0 +1,14 @@
+event: delta
+data: {"chunk": "……"}
+
+event: delta
+data: {"chunk": "今天就这样吧。"}
+
+event: delta
+data: {"chunk": "我累了。"}
+
+event: delta
+data: {"chunk": "你明天再来。"}
+
+event: done
+data: {"full_text": "……今天就这样吧。我累了。你明天再来。","relationship_change": {},"options": null,"stage_changed": false,"new_stage": null,"ending_triggered": false,"events_triggered": []}

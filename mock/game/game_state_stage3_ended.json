@@ -1,0 +1,78 @@
+{
+  "session_id": "sess_mock_001",
+  "player_name": "玩家",
+  "current_stage": 3,
+  "stage_params": {
+    "id": 3,
+    "name": "抉择",
+    "description": "戏班的命运悬于一线，你的每一个决定都将改变所有人的未来",
+    "color_tone": "dramatic",
+    "bgm_mood": "intense",
+    "dialogue_tone": "情感浓烈、语气沉重、字字千钧"
+  },
+  "npcs": [
+    {
+      "id": "npc_chen",
+      "name": "陈师傅",
+      "role": "老琴师",
+      "scene": "shrine",
+      "position": { "x": 300, "y": 500 },
+      "sprite_key": "npc_chen_idle",
+      "relationship": 85,
+      "is_available": false,
+      "current_greeting": "（陈师傅满脸泪痕，对你深深一揖）"
+    },
+    {
+      "id": "npc_xiaohua",
+      "name": "小华",
+      "role": "年轻学徒",
+      "scene": "shrine",
+      "position": { "x": 380, "y": 520 },
+      "sprite_key": "npc_xiaohua_idle",
+      "relationship": 60,
+      "is_available": false,
+      "current_greeting": "（小华用力点了点头，眼眶通红）"
+    }
+  ],
+  "events_triggered": [
+    "first_enter_town",
+    "chen_first_talk",
+    "xiaohua_opened_up",
+    "chen_told_past",
+    "shrine_ritual",
+    "final_choice_made"
+  ],
+  "game_ended": true,
+  "ending": {
+    "type": "accept_leader",
+    "title": "梨园新火",
+    "summary": "你跪在祖宗牌位前，一字一句许下了重振戏班的誓言。陈师傅颤抖着双手将那把传了三代的老京胡递到你手中。从今天起，梨园的这盏灯，由你来掌。",
+    "key_moments": [
+      {
+        "stage": 1,
+        "description": "你第一次踏入破旧的戏台，小华用警惕的眼神打量着你"
+      },
+      {
+        "stage": 2,
+        "description": "陈师傅终于卸下心防，在茶馆里讲起了戏班三十年前的荣光与屈辱"
+      },
+      {
+        "stage": 3,
+        "description": "祠堂里烛火摇曳，你在祖宗牌位前接过了那把关乎传承的京胡"
+      }
+    ],
+    "life_lesson": "传承不是守住灰烬，而是让火焰在另一片土地上继续燃烧。有些东西，一旦断了，就真的从这世上消失了。",
+    "npc_endings": [
+      {
+        "npc_id": "npc_chen",
+        "final_relationship": 85,
+        "summary": "陈师傅在晚年终于等到了传人。他把毕生所学倾囊相授，走的那天嘴角带着满足的笑。"
+      },
+      {
+        "npc_id": "npc_xiaohua",
+        "final_relationship": 60,
+        "summary": "小华从一开始的敌意，逐渐成为你最忠实的搭档。他说：'原来你不是来抢东西的，你是来救我们的。'"
+      }
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+event: delta
+data: {"chunk": "……"}
+
+event: delta
+data: {"chunk": "（陈师傅停下手中的活，缓缓抬起头）"}
+
+event: delta
+data: {"chunk": "你就是老班主的儿子？"}
+
+event: delta
+data: {"chunk": "模样倒是有点像他。"}
+
+event: done
+data: {"full_text": "……（陈师傅停下手中的活，缓缓抬起头）你就是老班主的儿子？模样倒是有点像他。","relationship_change": {"npc_chen": 2},"options": [{"id": 1, "text": "您认识我父亲？"}, {"id": 2, "text": "我是来看看戏班现在的情况"}, {"id": 3, "text": "（沉默地看着他）"}],"stage_changed": false,"new_stage": null,"ending_triggered": false,"events_triggered": ["chen_first_talk"]}

@@ -1,0 +1,29 @@
+event: delta
+data: {"chunk": "三十年了啊……"}
+
+event: delta
+data: {"chunk": "那时候戏班三十来号人，"}
+
+event: delta
+data: {"chunk": "每到初一十五，镇上的人挤破了头也要来听戏。"}
+
+event: delta
+data: {"chunk": "你父亲站在台上，一嗓子能镇住整条街。"}
+
+event: delta
+data: {"chunk": "后来打仗了，"}
+
+event: delta
+data: {"chunk": "年轻人都走了，"}
+
+event: delta
+data: {"chunk": "听戏的人也……越来越少。"}
+
+event: delta
+data: {"chunk": "（陈师傅长叹一声，眼眶微红）"}
+
+event: delta
+data: {"chunk": "到今天，就剩我和小华两个人了。"}
+
+event: done
+data: {"full_text": "三十年了啊……那时候戏班三十来号人，每到初一十五，镇上的人挤破了头也要来听戏。你父亲站在台上，一嗓子能镇住整条街。后来打仗了，年轻人都走了，听戏的人也……越来越少。（陈师傅长叹一声，眼眶微红）到今天，就剩我和小华两个人了。","relationship_change": {"npc_chen": 10},"options": [{"id": 1, "text": "我可以留在戏班帮忙吗？"}, {"id": 2, "text": "小华是怎么留下来的？"}, {"id": 3, "text": "这戏班……还有救吗？"}],"stage_changed": true,"new_stage": {"id": 2,"name": "了解","description": "你开始走近这个戏班，有人愿意跟你说几句真心话了","color_tone": "warm","bgm_mood": "hopeful","dialogue_tone": "温和、敞开、偶有真情流露"},"ending_triggered": false,"events_triggered": ["chen_told_full_story"]}

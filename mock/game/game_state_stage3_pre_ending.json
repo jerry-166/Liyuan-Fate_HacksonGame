@@ -1,0 +1,47 @@
+{
+  "session_id": "sess_mock_001",
+  "player_name": "玩家",
+  "current_stage": 3,
+  "stage_params": {
+    "id": 3,
+    "name": "抉择",
+    "description": "戏班的命运悬于一线，你的每一个决定都将改变所有人的未来",
+    "color_tone": "dramatic",
+    "bgm_mood": "intense",
+    "dialogue_tone": "情感浓烈、语气沉重、字字千钧"
+  },
+  "npcs": [
+    {
+      "id": "npc_chen",
+      "name": "陈师傅",
+      "role": "老琴师",
+      "scene": "shrine",
+      "position": { "x": 300, "y": 500 },
+      "sprite_key": "npc_chen_idle",
+      "relationship": 70,
+      "is_available": true,
+      "current_greeting": "孩子，是时候做个决定了……祖宗牌位前，我不能替你做这个主。"
+    },
+    {
+      "id": "npc_xiaohua",
+      "name": "小华",
+      "role": "年轻学徒",
+      "scene": "shrine",
+      "position": { "x": 380, "y": 520 },
+      "sprite_key": "npc_xiaohua_idle",
+      "relationship": 55,
+      "is_available": true,
+      "current_greeting": "不管你做什么决定，我都……我都认了。"
+    }
+  ],
+  "events_triggered": [
+    "first_enter_town",
+    "chen_first_talk",
+    "xiaohua_opened_up",
+    "chen_told_past",
+    "shrine_ritual",
+    "final_choice_pending"
+  ],
+  "game_ended": true,
+  "ending": null
+}

@@ -1,0 +1,6 @@
+{
+  "error": true,
+  "code": "SESSION_NOT_FOUND",
+  "message": "游戏会话不存在: sess_nonexistent",
+  "detail": null
+}
