@@ -23,7 +23,6 @@ load_dotenv()
 #   旧版知识引擎: https://api.lkeap.cloud.tencent.com/v1
 LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "https://tokenhub.tencentmaas.com/v1")
 LLM_MODEL: str = os.getenv("LLM_MODEL", "deepseek-v4-flash")
-LLM_MODEL: str = os.getenv("LLM_MODEL", "deepseek-v4-flash")
 LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "1024"))
 LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.8"))
 # 全局 fallback API Key（从 .env 或系统环境变量读取，不再硬编码）
