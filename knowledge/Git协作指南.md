@@ -289,6 +289,19 @@ git pull origin main --no-edit
 git push origin main
 ```
 
+## 移除已追踪的 node_modules
+```bash
+# 1. 把 node_modules 从 Git 缓存中删除（但保留本地文件）
+git rm -r --cached frontend/node_modules
+
+# 2. 提交这次变更
+git commit -m "chore: 移除已追踪的 node_modules，改用 .gitignore 忽略"
+
+# 3. 推送到远程仓库
+git push
+```
+
+
 ---
 
 ## 📌 总结
