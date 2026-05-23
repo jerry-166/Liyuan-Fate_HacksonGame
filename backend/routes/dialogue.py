@@ -154,6 +154,88 @@ async def dialogue(req: DialogueRequest, raw_request: Request):
     )
 
 
+class ExitDialogueRequest(BaseModel):
+    session_id: str
+    npc_id: str
+    api_key: Optional[str] = None
+    model: Optional[str] = None
+
+
+@router.post("/dialogue/exit")
+async def exit_dialogue(req: ExitDialogueRequest):
+    """
+    显式退出与 NPC 的对话。
+
+    让 NPC 生成一句告别语（无 options），重置对话轮数。
+    is_available 不受影响 —— 仅由后端剧情逻辑（阶段引擎）控制，退出对话不改变 NPC 可用性。
+    不走 SSE 流式，直接返回 JSON。
+    """
+    from config import MAX_DIALOGUE_ROUNDS
+
+    manager = get_session_manager()
+    session = manager.get(req.session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail={
+            "error": True, "code": "SESSION_NOT_FOUND",
+            "message": f"游戏会话不存在: {req.session_id}"
+        })
+
+    if req.api_key and not session.api_key:
+        session.api_key = req.api_key
+    if req.model and not session.model:
+        session.model = req.model
+
+    if req.npc_id not in session.npcs:
+        raise HTTPException(status_code=404, detail={
+            "error": True, "code": "NPC_NOT_FOUND",
+            "message": f"NPC 不存在: {req.npc_id}"
+        })
+
+    npc = session.npcs[req.npc_id]
+
+    try:
+        model = session.model or LLM_MODEL
+        orchestrator = _get_orchestrator(session)
+
+        # 强制设置为结束状态，生成告别语
+        npc.dialogue_round_count = MAX_DIALOGUE_ROUNDS  # 触发收尾指令
+
+        result = await orchestrator.exit_dialogue(session, req.npc_id)
+
+        # 重置轮数计数器（下次再对话从头计数）
+        npc.dialogue_round_count = 0
+        manager.persist_session(session)
+
+        # 持久化告别语
+        from state.session import DialogueTurn
+        npc.dialogue_history.append(DialogueTurn(
+            role="npc",
+            content=result.dialogue_text,
+            npc_id=req.npc_id,
+            stage=session.current_stage,
+        ))
+        manager.persist_dialogue(session, req.npc_id, "npc", result.dialogue_text, options=[])
+
+        return {
+            "dialogue_text": result.dialogue_text,
+            "options": [],
+            "is_available": npc.is_available,
+        }
+
+    except Exception as e:
+        logger.exception(f"[Exit Dialogue] Error: {e}")
+        # 降级：返回简单告别语
+        npc.dialogue_round_count = 0
+        manager.persist_session(session)
+
+        fallback_text = f"（{npc.name}微微点头，示意你可以离开了）"
+        return {
+            "dialogue_text": fallback_text,
+            "options": [],
+            "is_available": npc.is_available,
+        }
+
+
 def _check_ending(session) -> bool:
     """判断是否触发结局。"""
     from config import ENDING_CONDITIONS

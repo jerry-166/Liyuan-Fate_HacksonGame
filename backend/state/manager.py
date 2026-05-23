@@ -121,9 +121,10 @@ class SessionManager:
 
         return session
 
-    def persist_dialogue(self, session: GameSession, npc_id: str, role: str, content: str) -> None:
-        """持久化一条对话记录。"""
-        self._db.save_dialogue(session.session_id, npc_id, role, content, session.current_stage)
+    def persist_dialogue(self, session: GameSession, npc_id: str, role: str, content: str,
+                         options: list[str] = None) -> None:
+        """持久化一条对话记录（含选项）。"""
+        self._db.save_dialogue(session.session_id, npc_id, role, content, session.current_stage, options=options)
 
     def persist_event(self, session: GameSession, event_id: str, description: str = "",
                       triggered_by_npc: str = "") -> None:
@@ -142,6 +143,17 @@ class SessionManager:
             ending_type=session.ending_type,
             ending_data=session.ending_data,
         )
+
+    def list_sessions(self) -> list[dict]:
+        """列出所有未删除的存档摘要。"""
+        return self._db.list_sessions()
+
+    def soft_delete(self, session_id: str) -> bool:
+        """软删除会话（同时从内存移除）。"""
+        ok = self._db.soft_delete_session(session_id)
+        if ok:
+            self._sessions.pop(session_id, None)
+        return ok
 
     # ─── TTL 淘汰 ───────────────────────────────────────
 

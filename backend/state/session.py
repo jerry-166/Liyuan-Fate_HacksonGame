@@ -20,6 +20,10 @@ class NPCState:
     current_greeting: str = ""
     # 对话历史（最近 N 轮，仅内存）
     dialogue_history: list = field(default_factory=list)
+    # 上次对话的选项（持久化用）
+    last_options: list[str] = field(default_factory=list)
+    # 当前对话轮数计数器（同一 NPC 连续对话轮数）
+    dialogue_round_count: int = 0
 
     def clamp_relationship(self) -> None:
         """将关系值 clamp 在 [-100, 100] 范围内。"""
@@ -62,6 +66,10 @@ class GameSession:
     def to_api_response(self) -> dict:
         """序列化为 API 响应格式（与 API 文档完全对齐）。"""
         stage_params = self._get_stage_params()
+
+        # 查询每个 NPC 的最近对话
+        npc_last_dialogues = self._get_npc_last_dialogues()
+
         return {
             "session_id": self.session_id,
             "player_name": self.player_name,
@@ -78,6 +86,9 @@ class GameSession:
                     "relationship": npc.relationship,
                     "is_available": npc.is_available,
                     "current_greeting": npc.current_greeting,
+                    "last_dialogue": npc_last_dialogues.get(npc.id, {}).get("content", ""),
+                    "last_options": npc_last_dialogues.get(npc.id, {}).get("options", []),
+                    "dialogue_round_count": npc.dialogue_round_count,
                 }
                 for npc in self.npcs.values()
             ],
@@ -85,6 +96,14 @@ class GameSession:
             "game_ended": self.game_ended,
             "ending": self.ending_data if self.game_ended else None,
         }
+
+    def _get_npc_last_dialogues(self) -> dict[str, dict]:
+        """从 DB 查询每个 NPC 最近一条对话。"""
+        try:
+            from storage.database import get_db
+            return get_db().get_last_dialogue_per_npc(self.session_id)
+        except Exception:
+            return {}
 
     def _get_stage_params(self) -> dict:
         """获取当前阶段的参数描述。"""

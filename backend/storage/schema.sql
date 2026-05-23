@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     game_ended   INTEGER NOT NULL DEFAULT 0,  -- 0/1
     ending_type  TEXT,
     ending_data  TEXT,                         -- JSON: 缓存的结局评价
+    deleted      INTEGER NOT NULL DEFAULT 0,   -- 0/1: 软删除标记
     created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -19,6 +20,7 @@ CREATE TABLE IF NOT EXISTS dialogues (
     npc_id      TEXT NOT NULL,
     role        TEXT NOT NULL CHECK(role IN ('player', 'npc')),
     content     TEXT NOT NULL,
+    options     TEXT,                           -- JSON: NPC 回复附带的对话选项
     stage       INTEGER,
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (session_id) REFERENCES sessions(session_id)

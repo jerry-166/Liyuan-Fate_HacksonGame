@@ -42,13 +42,28 @@ class Database:
             conn.close()
 
     def _init_schema(self):
-        """执行建表 SQL。"""
+        """执行建表 SQL + 增量迁移。"""
         schema_path = os.path.join(os.path.dirname(__file__), "schema.sql")
         if os.path.exists(schema_path):
             with open(schema_path, "r", encoding="utf-8") as f:
                 sql = f.read()
             with self._conn() as conn:
                 conn.executescript(sql)
+        # 增量迁移：为已存在的表添加新列（SQLite 不支持 IF NOT EXISTS for ALTER TABLE，用 try/except）
+        self._migrate()
+
+    def _migrate(self):
+        """增量迁移：为旧表添加新列（忽略已存在的列）。"""
+        migrations = [
+            "ALTER TABLE sessions ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE dialogues ADD COLUMN options TEXT",
+        ]
+        with self._conn() as conn:
+            for sql in migrations:
+                try:
+                    conn.execute(sql)
+                except sqlite3.OperationalError:
+                    pass  # 列已存在，忽略
 
     # ─── Session CRUD ───────────────────────────────────
 
@@ -59,6 +74,26 @@ class Database:
                 "VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
                 (session_id, player_name, stage),
             )
+
+    def list_sessions(self) -> list[dict]:
+        """列出所有未删除的存档（仅摘要）。"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT session_id, player_name, current_stage, game_ended, "
+                "created_at, updated_at FROM sessions "
+                "WHERE deleted = 0 ORDER BY updated_at DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def soft_delete_session(self, session_id: str) -> bool:
+        """软删除会话，返回是否成功。"""
+        with self._conn() as conn:
+            cur = conn.execute(
+                "UPDATE sessions SET deleted = 1, updated_at = CURRENT_TIMESTAMP "
+                "WHERE session_id = ? AND deleted = 0",
+                (session_id,),
+            )
+            return cur.rowcount > 0
 
     def get_session(self, session_id: str) -> Optional[dict]:
         with self._conn() as conn:
@@ -117,13 +152,15 @@ class Database:
     # ─── Dialogue CRUD ──────────────────────────────────
 
     def save_dialogue(
-        self, session_id: str, npc_id: str, role: str, content: str, stage: int
+        self, session_id: str, npc_id: str, role: str, content: str, stage: int,
+        options: Optional[list[str]] = None,
     ) -> int:
+        options_json = json.dumps(options, ensure_ascii=False) if options else None
         with self._conn() as conn:
             cur = conn.execute(
-                "INSERT INTO dialogues (session_id, npc_id, role, content, stage) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (session_id, npc_id, role, content, stage),
+                "INSERT INTO dialogues (session_id, npc_id, role, content, options, stage) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (session_id, npc_id, role, content, options_json, stage),
             )
             return cur.lastrowid
 
@@ -145,6 +182,83 @@ class Database:
                 ).fetchall()
         # 反转回时间正序
         return [dict(r) for r in reversed(rows)]
+
+    def get_dialogue_history_paginated(
+        self, session_id: str, npc_id: Optional[str] = None,
+        page: int = 1, page_size: int = 20,
+    ) -> dict:
+        """分页查询对话历史。返回 {items, total, page, page_size}。"""
+        with self._conn() as conn:
+            if npc_id:
+                count_row = conn.execute(
+                    "SELECT COUNT(*) as cnt FROM dialogues WHERE session_id = ? AND npc_id = ?",
+                    (session_id, npc_id),
+                ).fetchone()
+            else:
+                count_row = conn.execute(
+                    "SELECT COUNT(*) as cnt FROM dialogues WHERE session_id = ?",
+                    (session_id,),
+                ).fetchone()
+            total = count_row["cnt"]
+
+            offset = (page - 1) * page_size
+            if npc_id:
+                rows = conn.execute(
+                    "SELECT * FROM dialogues WHERE session_id = ? AND npc_id = ? "
+                    "ORDER BY created_at ASC LIMIT ? OFFSET ?",
+                    (session_id, npc_id, page_size, offset),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM dialogues WHERE session_id = ? "
+                    "ORDER BY created_at ASC LIMIT ? OFFSET ?",
+                    (session_id, page_size, offset),
+                ).fetchall()
+
+        items = []
+        for r in rows:
+            d = dict(r)
+            if d.get("options"):
+                try:
+                    d["options"] = json.loads(d["options"])
+                except json.JSONDecodeError:
+                    d["options"] = []
+            else:
+                d["options"] = []
+            items.append(d)
+
+        return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+    def get_last_dialogue_per_npc(self, session_id: str) -> dict[str, dict]:
+        """获取每个 NPC 最近一条对话（含 options）。返回 {npc_id: {role, content, options, created_at}}。"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT d.* FROM dialogues d "
+                "INNER JOIN ("
+                "  SELECT npc_id, MAX(created_at) AS max_ts "
+                "  FROM dialogues WHERE session_id = ? AND role = 'npc' "
+                "  GROUP BY npc_id"
+                ") latest ON d.npc_id = latest.npc_id AND d.created_at = latest.max_ts "
+                "WHERE d.session_id = ?",
+                (session_id, session_id),
+            ).fetchall()
+
+        result = {}
+        for r in rows:
+            d = dict(r)
+            opts = []
+            if d.get("options"):
+                try:
+                    opts = json.loads(d["options"])
+                except json.JSONDecodeError:
+                    pass
+            result[d["npc_id"]] = {
+                "role": d["role"],
+                "content": d["content"],
+                "options": opts,
+                "created_at": str(d.get("created_at", "")),
+            }
+        return result
 
     # ─── Event CRUD ─────────────────────────────────────
 

@@ -95,6 +95,11 @@ ENDING_CONDITIONS = {
 }
 
 
+# ─── 对话控制 ───────────────────────────────────────────
+
+MAX_DIALOGUE_ROUNDS: int = int(os.getenv("MAX_DIALOGUE_ROUNDS", "10"))  # 单次对话最大轮数
+
+
 # ─── 会话管理 ───────────────────────────────────────────
 
 SESSION_TTL_SECONDS: float = float(os.getenv("SESSION_TTL_SECONDS", "7200"))  # 2 小时

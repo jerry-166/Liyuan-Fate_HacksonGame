@@ -163,6 +163,14 @@ class PromptBuilder:
             for ex in examples[:3]:
                 parts.append(f"- 玩家：「{ex.get('player', '')}」\n  你：「{ex.get('npc', '')}」")
 
+        # 6. 对话结束规则
+        parts.append("""
+## 对话结束规则
+- 你需要根据上下文判断对话是否已「自然结束」。当玩家没什么要说的了、话题已穷尽、或你已给出了完整的回应，就应该自然收尾。
+- 当你判断对话已自然结束时，options 必须为空数组 []，并在对话末尾说一句简短自然的告别语。
+- 不要机械地每轮都给选项，也不要突兀地结束——让你的角色以符合人设的方式自然道别。
+""")
+
         return "\n".join(parts)
 
     def _build_state_context(self, session: GameSession, current_npc_id: str) -> str:
@@ -246,6 +254,8 @@ class PromptBuilder:
 你与玩家的关系值：{relationship}
 本轮已对话数：{dialogue_rounds} 轮
 
+{self._build_round_limit_hint(npc_id, session)}
+
 请以 JSON 格式输出你的回应，格式如下（不要包含 markdown 代码块标记）：
 {{
   "dialogue_text": "你作为 {npc_name} 的自然对话回应（2-5句，保持角色风格）",
@@ -279,6 +289,25 @@ class PromptBuilder:
             return "友善"
         else:
             return "信任"
+
+    @staticmethod
+    def _build_round_limit_hint(npc_id: str, session: GameSession) -> str:
+        """当对话轮数接近上限时，注入收尾指令。"""
+        from config import MAX_DIALOGUE_ROUNDS
+        npc = session.npcs.get(npc_id)
+        rounds = npc.dialogue_round_count if npc else 0
+
+        if rounds >= MAX_DIALOGUE_ROUNDS:
+            return (
+                "⚠️ 本轮对话已进行了多轮。请在本次回复中自然地结束对话："
+                "给出一个简短收尾 + 一句得体的告别，options 留空数组 []。"
+            )
+        elif rounds >= MAX_DIALOGUE_ROUNDS - 2:
+            return (
+                "提示：本轮对话已接近尾声（还剩1-2轮），"
+                "请在接下来的回复中逐步收尾，准备结束对话。"
+            )
+        return ""
 
     @staticmethod
     def is_conversation_ending(player_message: Optional[str]) -> bool:

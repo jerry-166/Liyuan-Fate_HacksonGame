@@ -155,7 +155,13 @@ class NPCAgent:
             npc_id=npc_id,
             stage=session.current_stage,
         ))
-        manager.persist_dialogue(session, npc_id, "npc", reply_text)
+        manager.persist_dialogue(session, npc_id, "npc", reply_text, options=result.options)
+
+        # 缓存最近选项
+        npc.last_options = result.options
+
+        # 对话轮数计数
+        npc.dialogue_round_count += 1
 
         # 更新关系值
         delta = result.relationship_delta
@@ -231,3 +237,32 @@ class AgentOrchestrator:
                     "result": data,
                     "stage": stage_result,
                 })
+
+    async def exit_dialogue(self, session: GameSession, npc_id: str):
+        """
+        生成 NPC 告别语（非流式，用于显式退出对话）。
+
+        强制 is_ending=true + 轮数上限，让 LLM 生成一句自然告别语。
+        """
+        from state.session import DialogueTurn
+        from agents.response_parser import parse_dialogue_response
+
+        npc = session.npcs.get(npc_id)
+        if not npc:
+            raise ValueError(f"NPC not found: {npc_id}")
+
+        # 构建强制结束的 prompt
+        messages = self.prompt_builder.build_dialogue_messages(
+            session, npc_id, player_message="（玩家准备离开了）", is_ending=True
+        )
+
+        full_text = ""
+        api_key = session.api_key
+        async for token in self.llm.chat_stream(messages, api_key=api_key):
+            full_text += token
+
+        result = parse_dialogue_response(full_text)
+        # 强制清空 options
+        result.options = []
+
+        return result

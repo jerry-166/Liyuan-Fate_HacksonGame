@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from state.manager import get_session_manager
+from storage.database import get_db
 from llm.client import LLMClient
 from agents.prompt_builder import PromptBuilder
 
@@ -45,6 +46,30 @@ async def get_game_state(session_id: str):
             "message": f"游戏会话不存在: {session_id}"
         })
     return session.to_api_response()
+
+
+@router.get("/game/{session_id}/dialogues")
+async def get_dialogues(
+    session_id: str,
+    npc_id: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 20,
+):
+    """分页查询指定会话的对话历史。"""
+    manager = get_session_manager()
+    session = manager.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail={
+            "error": True, "code": "SESSION_NOT_FOUND",
+            "message": f"游戏会话不存在: {session_id}"
+        })
+
+    # 参数校验
+    page = max(1, page)
+    page_size = max(1, min(100, page_size))
+
+    db = get_db()
+    return db.get_dialogue_history_paginated(session_id, npc_id=npc_id, page=page, page_size=page_size)
 
 
 @router.post("/game/{session_id}/evaluate")

@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from state.manager import get_session_manager
-from routes import dialogue, game
+from routes import dialogue, game, archive
 
 # ─── 日志 ────────────────────────────────────────────
 
@@ -54,6 +54,7 @@ app.add_middleware(
 # 路由注册
 app.include_router(dialogue.router, prefix="/api")
 app.include_router(game.router, prefix="/api")
+app.include_router(archive.router, prefix="/api")
 
 
 # ─── 健康检查 ─────────────────────────────────────────
