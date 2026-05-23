@@ -19,6 +19,7 @@ export const COLORS = {
 /** 场景 key 常量 */
 export const SCENES = {
   BOOT: 'BootScene',
+  MENU: 'MenuScene',
   GAME: 'GameScene',
   UI: 'UIScene',
 };

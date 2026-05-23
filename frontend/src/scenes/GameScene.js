@@ -153,11 +153,16 @@ export class GameScene extends Phaser.Scene {
   }
 
   create() {
+    // 检查是否从菜单传来的存档 sessionId
+    const savedSessionId = this.scene.settings.data?.savedSessionId;
+
     this.mapData = generateMapData();
     this.cursors = null;
     this.player = null;
     this.npcs = [];
     this.npcBubbles = [];
+    this.inputLocked = false;
+    this.currentStage = 1;
 
     this.drawTileMap();
     this.createCollisionLayer();
@@ -189,7 +194,139 @@ export class GameScene extends Phaser.Scene {
       borderRadius: 4,
     }).setOrigin(0.5).setDepth(100).setVisible(false);
 
+    // 事件监听
+    this.events.on('input:lock', (locked) => {
+      this.inputLocked = locked;
+    });
+
+    this.events.on('game:restart', () => {
+      this.scene.stop('UIScene');
+      this.scene.restart();
+    });
+
+    this.events.on('state:refresh', (state) => {
+      this.refreshNPCsFromState(state);
+    });
+
+    this.events.on('stage:change', (newStage) => {
+      this.applyStageTone(newStage);
+    });
+
     this.scene.launch('UIScene');
+
+    // 延迟一帧通知 UI 游戏已就绪（此时 UIScene 已完全创建）
+    this.time.delayedCall(100, () => {
+      if (savedSessionId) {
+        this.restoreGame(savedSessionId);
+      } else {
+        this.initGame();
+      }
+    });
+  }
+
+  /**
+   * 初始化游戏状态
+   */
+  async initGame() {
+    try {
+      const { startGame, saveGameState } = await import('../api/client.js');
+      const gameState = await startGame('玩家');
+
+      this.events.emit('game:init', {
+        sessionId: gameState.session_id,
+        stage: gameState.current_stage,
+      });
+
+      // 保存当前活跃 session
+      localStorage.setItem('__active_session__', gameState.session_id);
+      saveGameState(gameState.session_id, gameState);
+
+      console.log('[GameScene] 游戏已初始化, session:', gameState.session_id);
+    } catch (e) {
+      console.warn('[GameScene] 初始化游戏失败（将使用默认状态）:', e);
+    }
+  }
+
+  /**
+   * 恢复存档游戏
+   */
+  async restoreGame(sessionId) {
+    try {
+      const { getGameState } = await import('../api/client.js');
+      const saved = localStorage.getItem(`game_state_${sessionId}`);
+      if (!saved) throw new Error('存档不存在');
+
+      const gameState = JSON.parse(saved);
+      console.log('[GameScene] 恢复存档, session:', sessionId, 'stage:', gameState.current_stage);
+
+      this.currentStage = gameState.current_stage || 1;
+
+      this.events.emit('game:init', {
+        sessionId: sessionId,
+        stage: gameState.current_stage || 1,
+      });
+
+      // 刷新 NPC 状态
+      if (gameState.npcs) {
+        this.time.delayedCall(300, () => this.refreshNPCsFromState(gameState));
+      }
+
+      // 如果已结局，直接进入结局画面
+      if (gameState.game_ended) {
+        console.log('[GameScene] 存档已是结局状态');
+      }
+    } catch (e) {
+      console.warn('[GameScene] 恢复存档失败，开始新游戏:', e);
+      this.initGame();
+    }
+  }
+
+  /**
+   * 根据状态刷新 NPC 问候语
+   */
+  refreshNPCsFromState(state) {
+    if (!state || !state.npcs) return;
+    state.npcs.forEach(stateNpc => {
+      const sprite = this.npcs.find(
+        s => s.getData('npcId') === stateNpc.id
+      );
+      if (sprite) {
+        sprite.setData('greeting', stateNpc.current_greeting);
+        // 更新气泡文字
+        const idx = this.npcs.indexOf(sprite);
+        if (idx >= 0 && this.npcBubbles[idx]) {
+          this.npcBubbles[idx].setText(stateNpc.current_greeting);
+        }
+      }
+    });
+  }
+
+  /**
+   * 应用阶段色调到摄像机
+   */
+  applyStageTone(newStage) {
+    if (!this.cameras) return;
+    this.currentStage = newStage.id;
+
+    // 移除旧 filter
+    this.cameras.main.resetPostPipeline();
+
+    // 根据阶段添加色调叠加（用相机淡入实现简易滤镜效果）
+    const tintMap = {
+      cold:   { r: 0.75, g: 0.78, b: 0.95, duration: 2000 },  // 冷灰蓝
+      warm:   { r: 1.05, g: 1.02, b: 0.85, duration: 2000 },  // 暖黄
+      dramatic: { r: 1.08, g: 0.95, b: 0.78, duration: 1800 }, // 浓暖
+    };
+
+    const tint = tintMap[newStage.color_tone] || tintMap.cold;
+    this.cameras.main.setBackgroundColor(Phaser.Display.Color.GetColor(
+      Math.floor(30 * tint.r),
+      Math.floor(28 * tint.g),
+      Math.floor(35 * tint.b)
+    ));
+
+    // 简易闪光过渡
+    this.cameras.main.flash(tint.duration, Math.floor(255 * tint.r), Math.floor(255 * tint.g), Math.floor(255 * tint.b), false, 0.3);
   }
 
   // ==================== 地图绘制（江南水乡像素风格）====================
@@ -577,25 +714,30 @@ export class GameScene extends Phaser.Scene {
   update() {
     if (!this.player || !this.cursors) return;
 
-    const speed = GAME.PLAYER_SPEED;
-    this.player.setVelocity(0);
+    // 输入锁定（对话中禁止移动）
+    if (!this.inputLocked) {
+      const speed = GAME.PLAYER_SPEED;
+      this.player.setVelocity(0);
 
-    if (this.wasd.A.isDown || this.cursors.left.isDown) {
-      this.player.setVelocityX(-speed);
-    } else if (this.wasd.D.isDown || this.cursors.right.isDown) {
-      this.player.setVelocityX(speed);
-    }
+      if (this.wasd.A.isDown || this.cursors.left.isDown) {
+        this.player.setVelocityX(-speed);
+      } else if (this.wasd.D.isDown || this.cursors.right.isDown) {
+        this.player.setVelocityX(speed);
+      }
 
-    if (this.wasd.W.isDown || this.cursors.up.isDown) {
-      this.player.setVelocityY(-speed);
-    } else if (this.wasd.S.isDown || this.cursors.down.isDown) {
-      this.player.setVelocityY(speed);
-    }
+      if (this.wasd.W.isDown || this.cursors.up.isDown) {
+        this.player.setVelocityY(-speed);
+      } else if (this.wasd.S.isDown || this.cursors.down.isDown) {
+        this.player.setVelocityY(speed);
+      }
 
-    // 斜向归一化
-    if (this.player.body.velocity.x !== 0 && this.player.body.velocity.y !== 0) {
-      this.player.body.velocity.x *= 0.707;
-      this.player.body.velocity.y *= 0.707;
+      // 斜向归一化
+      if (this.player.body.velocity.x !== 0 && this.player.body.velocity.y !== 0) {
+        this.player.body.velocity.x *= 0.707;
+        this.player.body.velocity.y *= 0.707;
+      }
+    } else {
+      this.player.setVelocity(0);
     }
 
     // NPC 气泡跟随 + 接近检测
@@ -621,8 +763,8 @@ export class GameScene extends Phaser.Scene {
       this.interactHint.setVisible(false);
     }
 
-    // F 键交互
-    if (Phaser.Input.Keyboard.JustDown(this.wasd.F)) {
+    // F 键交互（仅非锁定状态）
+    if (!this.inputLocked && Phaser.Input.Keyboard.JustDown(this.wasd.F)) {
       if (this.currentNearbyNPC) {
         this.triggerDialogue(this.currentNearbyNPC);
       }
