@@ -10,6 +10,11 @@ API Key 优先级：
 import os
 from typing import Optional
 
+from dotenv import load_dotenv
+
+# 加载 .env 文件（优先读取系统环境变量，.env 中的值作为兜底）
+load_dotenv()
+
 
 # ─── LLM 配置 ───────────────────────────────────────────
 
@@ -17,10 +22,10 @@ from typing import Optional
 #   TokenHub: https://tokenhub.tencentmaas.com/v1
 #   旧版知识引擎: https://api.lkeap.cloud.tencent.com/v1
 LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "https://tokenhub.tencentmaas.com/v1")
-LLM_MODEL: str = os.getenv("LLM_MODEL", "deepseek-v3.1-terminus")
+LLM_MODEL: str = os.getenv("LLM_MODEL", "deepseek-v4-flash")
 LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "1024"))
 LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.8"))
-# 全局 fallback API Key（如果用户没有提供 session 级 key）
+# 全局 fallback API Key（从 .env 或系统环境变量读取，不再硬编码）
 LLM_API_KEY_FALLBACK: Optional[str] = os.getenv("TENCENT_LLM_API_KEY")
 
 # LLM 调用超时（秒）
