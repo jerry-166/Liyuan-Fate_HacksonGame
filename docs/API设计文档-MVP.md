@@ -1,17 +1,18 @@
-# 《梨园生死》MVP API 设计文档
+# 《梨园生死》API 设计文档
 
-> **版本**: v1.0-MVP  
-> **最后更新**: 2026-05-22  
+> **版本**: v1.1  
+> **最后更新**: 2026-05-23  
 > **设计原则**: 职责单一、接口清晰、按业务模块拆分、覆盖 MVP 完整流程
 
 ---
 
 ## 一、概述
 
-### 1.1 MVP 游戏流程
+### 1.1 游戏流程
 
 ```
-开始游戏 → 探索地图(WASD) → 接近NPC → 触发对话(F键) → 多轮AI对话 → 阶段变化 → 触发结局 → AI评价总结
+开始游戏/加载存档 → 探索地图(WASD) → 接近NPC → 触发对话(F键)
+  → 多轮AI对话（选项点选 or 自由输入）→ 自然结束/退出对话 → 阶段变化 → 触发结局 → AI评价总结
 ```
 
 ### 1.2 API 设计原则
@@ -24,14 +25,18 @@
 | **状态集中** | 游戏全局状态通过单一入口获取，前端不自行推导 |
 | **MVP 最小化** | 只设计 MVP 必需的接口，预留扩展空间但不实现 |
 
-### 1.3 API 总览（4 个接口）
+### 1.3 API 总览（8 个接口）
 
 | # | 方法 | 路径 | 职责 | 响应方式 |
 |---|------|------|------|----------|
 | 1 | `POST` | `/api/game/start` | 创建新游戏会话 | JSON |
-| 2 | `GET` | `/api/game/{session_id}` | 获取完整游戏状态 | JSON |
-| 3 | `POST` | `/api/dialogue` | NPC 对话交互 | SSE 流式 |
-| 4 | `POST` | `/api/game/{session_id}/evaluate` | 生成结局评价 | JSON |
+| 2 | `GET` | `/api/game/{session_id}` | 获取完整游戏状态（含每NPC最近对话+选项） | JSON |
+| 3 | `POST` | `/api/dialogue` | NPC 对话交互（支持自由文本 and 选项） | SSE 流式 |
+| 4 | `POST` | `/api/game/{session_id}/evaluate` | 生成结局评价（幂等） | JSON |
+| 5 | `GET` | `/api/sessions` | 列出所有历史存档 | JSON |
+| 6 | `DELETE` | `/api/game/{session_id}` | 软删除存档 | JSON |
+| 7 | `GET` | `/api/game/{session_id}/dialogues` | 分页查询对话历史（含 options） | JSON |
+| 8 | `POST` | `/api/dialogue/exit` | 显式退出 NPC 对话 | JSON |
 
 ---
 
@@ -58,9 +63,9 @@ Content-Type: application/json; charset=utf-8
 
 | 错误码 | 说明 |
 |--------|------|
-| `SESSION_NOT_FOUND` | session_id 不存在 |
+| `SESSION_NOT_FOUND` | session_id 不存在或已删除 |
 | `NPC_NOT_FOUND` | npc_id 不存在 |
-| `NPC_NOT_AVAILABLE` | NPC 当前不可交互 |
+| `NPC_NOT_AVAILABLE` | NPC 当前不可交互（退出对话后被标记） |
 | `GAME_ALREADY_ENDED` | 游戏已结束，不能继续对话 |
 | `INVALID_PARAM` | 请求参数不合法 |
 | `LLM_ERROR` | LLM 调用失败 |
@@ -85,7 +90,9 @@ Content-Type: application/json; charset=utf-8
 
 ```json
 {
-  "player_name": "玩家"          // 可选，默认"玩家"
+  "player_name": "玩家",          // 可选，默认"玩家"
+  "api_key": "sk-xxxxx",          // 可选，LLM API Key（仅存内存，不持久化）
+  "model": "deepseek-v3.1-terminus"  // 可选，指定模型名（不传则使用后端配置的默认模型）
 }
 ```
 
@@ -114,7 +121,10 @@ Content-Type: application/json; charset=utf-8
       "sprite_key": "npc_chen_idle",
       "relationship": 0,
       "is_available": true,
-      "current_greeting": "……（陈师傅低头擦拭琴弦，仿佛没看见你）"
+      "current_greeting": "……（陈师傅低头擦拭琴弦，仿佛没看见你）",
+      "last_dialogue": "",
+      "last_options": [],
+      "dialogue_round_count": 0
     },
     {
       "id": "npc_xiaohua",
@@ -125,19 +135,27 @@ Content-Type: application/json; charset=utf-8
       "sprite_key": "npc_xiaohua_idle",
       "relationship": 0,
       "is_available": true,
-      "current_greeting": "你也是来看戏班笑话的吗？"
+      "current_greeting": "你也是来看戏班笑话的吗？",
+      "last_dialogue": "",
+      "last_options": [],
+      "dialogue_round_count": 0
     }
   ],
   "events_triggered": [],
-  "game_ended": false
+  "game_ended": false,
+  "ending": null
 }
 ```
 
 **说明**:
-- `current_greeting`：NPC 头顶气泡显示的问候语，由 AI 根据当前阶段 + NPC 人设生成
+- `current_greeting`：NPC 头顶气泡显示的问候语
 - `relationship`：范围 -100 ~ 100，0 为中性
+- `is_available`：NPC 是否可交互（退出对话后变为 false，可通过恢复游戏重新激活）
+- `last_dialogue` / `last_options`：该 NPC 最近一次回复的文本和选项（首轮为空）
+- `dialogue_round_count`：当前与该 NPC 的连续对话轮数（超过 `MAX_DIALOGUE_ROUNDS=10` 时提示结束）
 - `scene`：NPC 所在场景/地图，与前端 Tiled Map 对应
 - `color_tone` / `bgm_mood`：前端据此调整画面滤镜和音乐
+- `api_key` 和 `model` 仅存于内存，服务重启后需重新传入
 
 ---
 
@@ -179,7 +197,14 @@ GET /api/game/sess_a1b2c3d4
       "sprite_key": "npc_chen_idle",
       "relationship": 15,
       "is_available": true,
-      "current_greeting": "来了啊？坐吧。"
+      "current_greeting": "来了啊？坐吧。",
+      "last_dialogue": "嗯……你倒是问到了点子上。三十年前，这戏台可是夜夜满座。",
+      "last_options": [
+        "后来发生了什么？",
+        "我父亲也在这唱过戏？",
+        "那现在为什么变成这样了……"
+      ],
+      "dialogue_round_count": 3
     }
   ],
   "events_triggered": ["first_enter_tavern", "chen_first_talk"],
@@ -188,6 +213,11 @@ GET /api/game/sess_a1b2c3d4
 }
 ```
 
+**字段说明（v1.1 新增）**：
+- `npc[].last_dialogue`：该 NPC 最近一次回复的完整文本（用于恢复游戏后 UI 显示最后对话）
+- `npc[].last_options`：该 NPC 最近一次回复时的选项列表（字符串数组）
+- `npc[].dialogue_round_count`：与该 NPC 当前连续对话轮数（>=10 时 LLM 自动收尾）
+
 **游戏结束时的响应**（game_ended = true 时）：
 
 ```json
@@ -195,7 +225,7 @@ GET /api/game/sess_a1b2c3d4
   "session_id": "sess_a1b2c3d4",
   "current_stage": 3,
   "stage_params": { "id": 3, "name": "抉择", "color_tone": "dramatic", "bgm_mood": "intense" },
-  "npcs": [ /* ... */ ],
+  "npcs": [ /* 同上面格式 */ ],
   "events_triggered": [ /* ... */ ],
   "game_ended": true,
   "ending": {
@@ -247,7 +277,9 @@ GET /api/game/sess_a1b2c3d4
 {
   "session_id": "sess_a1b2c3d4",
   "npc_id": "npc_chen",
-  "player_message": "陈师傅，这个戏班以前是什么样的？"
+  "player_message": "陈师傅，这个戏班以前是什么样的？",
+  "api_key": "sk-xxxxx",           // 可选，LLM API Key（session 重建时自动注入）
+  "model": null                     // 可选，模型名
 }
 ```
 
@@ -255,14 +287,20 @@ GET /api/game/sess_a1b2c3d4
 |------|------|------|------|
 | `session_id` | string | 是 | 游戏会话ID |
 | `npc_id` | string | 是 | 目标NPC的ID |
-| `player_message` | string | 否 | 玩家输入的文字。**首轮对话时不传此字段**（或传 `null`），后端自动生成 NPC 开场白 + AI 选项 |
+| `player_message` | string | 否 | 玩家输入的文字。**首轮对话时不传此字段**（或传 `null`），后端自动生成 NPC 开场白 + AI 选项；也可传递自由文本（见下文"自由输入对话"）|
+| `api_key` | string | 否 | LLM API Key（仅会话重建后丢失 key 时传入） |
+| `model` | string | 否 | 模型名（不传则使用 session 级或后端默认模型）|
 
 **两种对话模式**:
 
 | 模式 | player_message | 后端行为 |
 |------|---------------|----------|
 | **首轮对话** | 不传 / null | 根据阶段+NPC人设+对话历史 → 生成 NPC 开场白 + 3~4个AI选项 |
-| **续接对话** | 玩家输入的文字 | 拼接上下文 → LLM 流式生成 NPC 回复 → 检测阶段/结局触发 → 生成下一轮选项 |
+| **续接对话（选项点选）** | 选项文本 | 拼接上下文 → LLM 流式生成 NPC 回复 → 检测阶段/结局触发 → 生成下一轮选项 |
+| **续接对话（自由输入）** | 玩家自由输入的文本 | 同上，但前端不显示选项按钮，引导玩家继续自由输入，或显式退出（见 3.8） |
+
+**自由输入说明**：前端控制台中是否展示输入框由前端判断。后端收到非 null 的 `player_message` 一律当作玩家输入处理，不做模式区分。
+NPC 在 LLM 判断「对话已自然结束」时 `options` 为空数组 `[]`，此时前端应展示退出按钮。
 
 **Response**: SSE 流式 (`Content-Type: text/event-stream`)
 
@@ -291,9 +329,9 @@ data: {
     "npc_chen": 5
   },
   "options": [
-    {"id": 1, "text": "后来发生了什么？"},
-    {"id": 2, "text": "我父亲也会唱戏？"},
-    {"id": 3, "text": "那现在为什么变成这样了……"}
+    "后来发生了什么？",
+    "我父亲也会唱戏？",
+    "那现在为什么变成这样了……"
   ],
   "stage_changed": false,
   "new_stage": null,
@@ -305,8 +343,8 @@ data: {
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | `full_text` | string | 完整回复文本（去掉了 SSE chunk 拼接的麻烦） |
-| `relationship_change` | object | 各 NPC 关系值变化量，如 `{"npc_chen": 5, "npc_xiaohua": -2}` |
-| `options` | array \| null | AI 生成的下一轮对话选项；`null` 表示对话结束（无选项） |
+| `relationship_change` | object | 各 NPC 关系值变化量，如 `{"npc_chen": 5}` |
+| `options` | array \| null | AI 生成的下一轮对话选项（**字符串数组**，非对象数组）；空数组 `[]` 或 `null` 表示对话已结束 |
 | `stage_changed` | boolean | 是否触发了阶段变化 |
 | `new_stage` | object \| null | 若 stage_changed=true，包含新阶段的完整 stage_params |
 | `ending_triggered` | boolean | 是否触发了游戏结局 |
@@ -332,7 +370,7 @@ event: delta
 data: {"chunk": "可惜啊，这世道变了。"}
 
 event: done
-data: {"full_text": "...", "relationship_change": {...}, "options": [...], "stage_changed": false, "ending_triggered": false}
+data: {"full_text": "你父亲……他是个真正的角儿。可惜啊，这世道变了。", "relationship_change": {"npc_chen": 5}, "options": ["后来发生了什么？", "我父亲也会唱戏？", "那现在为什么变成这样了……"], "stage_changed": false, "ending_triggered": false}
 ```
 
 #### 前端处理 SSE 的伪代码
@@ -381,7 +419,16 @@ function handleSSEEvent(type, data) {
       dialogBox.appendText(data.chunk);   // 逐字显示
       break;
     case 'done':
-      dialogBox.showOptions(data.options); // 显示下一轮选项
+      if (data.options && data.options.length > 0) {
+        dialogBox.showOptions(data.options); // 显示下一轮选项（字符串数组）
+        // 同时显示自由输入框和退出按钮
+        dialogBox.showFreeInput();
+        dialogBox.showExitButton();
+      } else {
+        // options 为空数组时，对话已结束
+        dialogBox.showExitButton();        // 显示"离开"按钮
+        dialogBox.hideOptions();           // 隐藏选项按钮
+      }
       if (data.stage_changed) {
         refreshGameState();                // 刷新色调/音乐
       }
@@ -393,6 +440,18 @@ function handleSSEEvent(type, data) {
       dialogBox.showError(data.message);
       break;
   }
+}
+
+// 退出对话示例
+async function exitDialogue(sessionId, npcId) {
+  const res = await fetch('/api/dialogue/exit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: sessionId, npc_id: npcId })
+  });
+  const data = await res.json();
+  dialogBox.showFarewell(data.dialogue_text); // 显示告别语
+  dialogBox.close();                          // 关闭对话UI
 }
 ```
 
@@ -471,49 +530,222 @@ POST /api/game/{session_id}/evaluate  ← 此时调用
 
 ---
 
+### 3.5 存档列表 — `GET /api/sessions`
+
+**职责**: 列出所有未删除的历史存档（仅摘要，不含完整 NPC 状态）。前端用于「继续游戏」功能。
+
+**Request**
+
+```
+GET /api/sessions
+```
+
+**Response** `200 OK`
+
+```json
+{
+  "sessions": [
+    {
+      "session_id": "sess_a1b2c3d4",
+      "player_name": "玩家",
+      "stage": 2,
+      "stage_name": "了解",
+      "game_ended": false,
+      "created_at": "2026-05-23 20:00:00",
+      "updated_at": "2026-05-23 20:30:00"
+    },
+    {
+      "session_id": "sess_e5f6g7h8",
+      "player_name": "玩家",
+      "stage": 1,
+      "stage_name": "不屑",
+      "game_ended": true,
+      "created_at": "2026-05-22 18:00:00",
+      "updated_at": "2026-05-22 20:00:00"
+    }
+  ],
+  "total": 2
+}
+```
+
+**前端使用流程**:
+```
+进入游戏 → 调用 GET /api/sessions
+  → 有存档？显示存档列表（玩家可点击"继续" → GET /api/game/{id} 恢复）
+  → 无存档？直接显示"新游戏"按钮 → POST /api/game/start
+```
+
+---
+
+### 3.6 删除存档 — `DELETE /api/game/{session_id}`
+
+**职责**: 软删除指定会话（SQLite 中标记 deleted=1，数据保留不彻底清除）。
+
+**Request**
+
+```
+DELETE /api/game/sess_a1b2c3d4
+```
+
+**Response** `200 OK`
+
+```json
+{
+  "success": true,
+  "message": "已删除会话: sess_a1b2c3d4"
+}
+```
+
+**Response** `404 Not Found`（会话不存在或已删除）
+
+```json
+{
+  "error": true,
+  "code": "SESSION_NOT_FOUND",
+  "message": "游戏会话不存在或已删除: sess_a1b2c3d4"
+}
+```
+
+---
+
+### 3.7 对话历史查询 — `GET /api/game/{session_id}/dialogues`
+
+**职责**: 分页查询指定会话的完整对话历史（含当时 NPC 生成的 options）。用于前端展示对话回放或调试。
+
+**Request**
+
+```
+GET /api/game/sess_a1b2c3d4/dialogues
+  ?npc_id=npc_chen      // 可选，按 NPC 筛选
+  &page=1                // 可选，默认 1
+  &page_size=20          // 可选，默认 20，最大 100
+```
+
+**Response** `200 OK`
+
+```json
+{
+  "items": [
+    {
+      "id": 1,
+      "session_id": "sess_a1b2c3d4",
+      "npc_id": "npc_chen",
+      "role": "npc",
+      "content": "……（陈师傅低头擦拭琴弦，仿佛没看见你）",
+      "options": ["陈师傅好", "默默站在一旁", "去找小华"],
+      "stage": 1,
+      "created_at": "2026-05-23 20:01:00"
+    },
+    {
+      "id": 2,
+      "session_id": "sess_a1b2c3d4",
+      "npc_id": "npc_chen",
+      "role": "player",
+      "content": "陈师傅好",
+      "options": null,
+      "stage": 1,
+      "created_at": "2026-05-23 20:01:05"
+    }
+  ],
+  "total": 25,
+  "page": 1,
+  "page_size": 20
+}
+```
+
+**说明**:
+- 按 `created_at ASC` 排序，从旧到新
+- `options` 字段：仅 NPC 回复（`role="npc"`）时有值，玩家消息（`role="player"`）时为 `null`
+- 时间倒序：如需最近对话在前，请自行在 `page=1&page_size=X` 的基础上通过前端反转
+
+---
+
+### 3.8 退出对话 — `POST /api/dialogue/exit`
+
+**职责**: 玩家显式结束与当前 NPC 的对话。NPC 生成一句告别语，重置对话轮数。**不改变 NPC 的 `is_available` 状态**——可用性仅由后端剧情逻辑（阶段引擎）控制。
+
+**调用时机**: 前端 ESC 键 / "离开"按钮 / "结束对话"按钮
+
+**Request**
+
+```json
+{
+  "session_id": "sess_a1b2c3d4",
+  "npc_id": "npc_chen",
+  "api_key": "sk-xxxxx",      // 可选
+  "model": null                // 可选
+}
+```
+
+**Response** `200 OK`
+
+```json
+{
+  "dialogue_text": "行吧，时候不早了，你去忙你的。",
+  "options": [],
+  "is_available": true
+}
+```
+
+**说明**:
+- 不走 SSE 流式，直接返回单个 JSON 对象，性能更优
+- 告别语由 LLM 根据 NPC 人设和当前阶段自动生成
+- `dialogue_round_count` 重置为 0，下次对话重新计数
+- `is_available` **不受影响**——退出后仍可再次按 F 键开始新对话
+- `is_available` 的控制权留给后端剧情逻辑（如阶段切换时某些 NPC 暂时离开），而非退出对话接口
+
+---
+
 ## 四、完整调用时序
 
 ```
 前端 (Phaser 3)                              后端 (FastAPI)
     │                                              │
-    │  [玩家点击"开始游戏"]                          │
-    │──── POST /api/game/start ────────────────────→│ 创建会话+初始化状态
+    │  [进入游戏]                                    │
+    │──── GET /api/sessions ───────────────────────→│ 列出存档
+    │←──── 200 { sessions[] } ─────────────────────│
+    │  (有存档 → 显示"继续游戏" UI; 无存档 → 新游戏) │
+    │                                              │
+    │  [玩家点击"开始游戏" / 选择存档]               │
+    │──── POST /api/game/start ────────────────────→│ 创建新会话
     │←──── 201 { session_id, stage, npcs[] } ──────│
+    │  (或 GET /api/game/{id} 恢复已有存档)          │
     │                                              │
     │  [玩家 WASD 走到陈师傅附近]                    │
-    │  [前端显示 NPC 头顶气泡: current_greeting]      │  (数据已在 game/start 返回)
+    │  [前端显示 NPC 头顶气泡: current_greeting]      │
     │                                              │
     │  [玩家按 F 键交互]                             │
     │──── POST /api/dialogue ──────────────────────→│ player_message=null
-    │     { session_id, npc_id }                    │ → 识别为首轮对话
-    │←──── SSE: delta chunk1 ──────────────────────│ → 生成 NPC 开场白
+    │     { session_id, npc_id }                    │ → 首轮对话
+    │←──── SSE: delta chunk1 ──────────────────────│ → NPC 开场白
     │←──── SSE: delta chunk2 ──────────────────────│
-    │←──── SSE: done { full_text, options[] } ─────│ → 附带 AI 选项
+    │←──── SSE: done { full_text, options[] } ─────│ → AI 选项
     │                                              │
-    │  [玩家选择选项2: "我父亲也会唱戏？"]            │
-    │──── POST /api/dialogue ──────────────────────→│ player_message="我父亲也会唱戏？"
-    │     { session_id, npc_id, player_message }    │ → 拼接历史+LLM生成
-    │←──── SSE: delta "你父亲啊……" ────────────────│
-    │←──── SSE: delta "他可是个真正的角儿" ─────────│
-    │←──── SSE: done { stage_changed: true } ──────│ → 阶段变化!
+    │  [玩家点选 / 自由输入 / 按 ESC 退出]           │
+    │  [续接对话]                                    │
+    │──── POST /api/dialogue ──────────────────────→│ player_message="..."
+    │←──── SSE: done { options: [], ... } ─────────│ → 对话自然结束
+    │  [options 为空 → 前端显示退出按钮]             │
+    │  [或直接按 ESC 退出]                           │
+    │──── POST /api/dialogue/exit ─────────────────→│ 告别语 + 标记不可用
+    │←──── 200 { dialogue_text, is_available } ────│ → 关闭对话 UI
     │                                              │
-    │  [前端: 画面色调由冷转暖, 过渡动画]            │
-    │──── GET /api/game/{session_id} ──────────────→│ 拉取新阶段完整数据
-    │←──── 200 { stage: 2, color_tone: "warm" } ───│ NPC 问候语已刷新
+    │  [再次按 F 键可重新开始对话]                    │
+    │──── POST /api/dialogue ──────────────────────→│ 首轮模式 is_available=true
     │                                              │
-    │  [继续多轮对话... 省略]                        │
+    │  [继续多轮对话...]                              │
     │                                              │
-    │  [关键抉择轮]                                 │
-    │──── POST /api/dialogue ──────────────────────→│ 玩家做出最终选择
+    │  [关键抉择轮 → 结局触发]                       │
+    │──── POST /api/dialogue ──────────────────────→│
     │←──── SSE: done { ending_triggered: true } ────│ → 结局触发!
     │                                              │
-    │  [前端: 过渡画面 "命运的齿轮开始转动..."]       │
+    │  [过渡画面]                                    │
     │──── POST /api/game/{session_id}/evaluate ────→│ LLM 生成结局评价
-    │←──── 200 { ending_type, life_lesson, ... } ───│
+    │←──── 200 { type, title, summary, ... } ───────│
     │                                              │
-    │  [前端: 播放结局画面 + 人生感悟字幕]            │
-    │──── GET /api/game/{session_id} ──────────────→│ 包含完整 ending 数据
-    │←──── 200 { game_ended: true, ending: {...} } ─│ 可随时重查结局
+    │  [播放结局画面]                                 │
+    │──── GET /api/game/{session_id} ──────────────→│ 可随时重查结局
+    │←──── 200 { game_ended: true, ending: {...} } ─│
 ```
 
 ---
@@ -549,8 +781,11 @@ NPC
 ├── position: {x, y}        地图坐标
 ├── sprite_key: string      前端精灵标识
 ├── relationship: int       关系值 (-100~100)
-├── is_available: bool      当前是否可交互
-└── current_greeting: string 当前阶段下的主动问候语
+├── is_available: bool      当前是否可交互（退出对话后=false）
+├── current_greeting: string 当前阶段下的主动问候语
+├── last_dialogue: string    最近一次回复文本（v1.1 新增）
+├── last_options: string[]   最近一次回复的选项列表（v1.1 新增）
+└── dialogue_round_count: int 当前连续对话轮数（v1.1 新增）
 ```
 
 ### 5.4 对话记录（存储于 SQLite）
@@ -562,6 +797,7 @@ CREATE TABLE dialogues (
     npc_id      TEXT NOT NULL,
     role        TEXT NOT NULL,   -- 'player' | 'npc'
     content     TEXT NOT NULL,
+    options     TEXT,            -- v1.1 新增: JSON 数组，NPC 回复时附带的选项
     stage       INTEGER,         -- 发言时所在阶段
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -602,16 +838,18 @@ CREATE INDEX idx_dialogue_session ON dialogues(session_id, npc_id);
 
 ## 七、MVP 与完整版的边界
 
-| 维度 | MVP（本文档范围） | 后续版本 |
-|------|-------------------|----------|
-| API 数量 | **4 个** | 扩展至 8-10 个 |
+| 维度 | v1.0-MVP / v1.1（本文档范围） | 后续版本 |
+|------|-------------------------------|----------|
+| API 数量 | **8 个**（v1.0: 4个 + v1.1: 4个） | 扩展至 12+ 个 |
 | NPC Agent | 2 个 NPC Agent（陈师傅 + 小华），独立人设 Prompt | 每个 NPC 独立 Agent 实例 + 主动行为 |
 | NPC Handoff | ✅ 事件驱动跨NPC上下文注入 | 更复杂的 NPC 间协作剧情 |
-| 对话方式 | AI 生成选项，玩家点选 | 增加自由输入文字 |
+| 对话方式 | AI 生成选项 + 自由输入文字 | 自由输入为主，AI选项为辅助 |
+| 对话退出 | ✅ 三层方案：NPC自判断/轮数限制/显式退出 | 更自然的 NPC 主动结束对话 |
 | 阶段切换 | 双模判定（规则条件 + LLM 判定） | 更复杂的多条件分支 |
 | 阶段数 | 2 次阶段变化（1→2→3） | 更细粒度的子阶段 |
 | 结局数 | 1 个（MVP 只需验证流程） | 4+ 个结局分支 |
-| 对话历史 | 原始存储 | 增加 AI 摘要 + 关键节点提取 |
+| 对话历史 | 原始存储（含 options 持久化） | 增加 AI 摘要 + 关键节点提取 |
+| 存档管理 | ✅ 列表/软删除 | 增加存档重命名、备注 |
 | API Key | Session 级用户自提供（仅存内存） | 可选的用户系统 |
 | 存储 | SQLite 本地 | 迁移至云数据库 |
 | 流式 | SSE（fetch + ReadableStream） | WebSocket 双向通信 |
@@ -625,11 +863,17 @@ CREATE INDEX idx_dialogue_session ON dialogues(session_id, npc_id);
 
 const BASE = '/api';
 
-export async function startGame(playerName?: string): Promise<GameState> {
+// v1.0 接口 ---
+
+export async function startGame(params?: {
+  player_name?: string;
+  api_key?: string;
+  model?: string;
+}): Promise<GameState> {
   const res = await fetch(`${BASE}/game/start`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ player_name: playerName || '玩家' })
+    body: JSON.stringify(params || { player_name: '玩家' })
   });
   if (!res.ok) throw new ApiError(await res.json());
   return res.json();
@@ -647,7 +891,8 @@ export async function startDialogue(
   playerMessage: string | null,
   onChunk: (text: string) => void,
   onDone: (result: DialogueResult) => void,
-  onError: (error: ApiError) => void
+  onError: (error: ApiError) => void,
+  apiKey?: string,
 ): Promise<void> {
   const res = await fetch(`${BASE}/dialogue`, {
     method: 'POST',
@@ -655,7 +900,8 @@ export async function startDialogue(
     body: JSON.stringify({
       session_id: sessionId,
       npc_id: npcId,
-      player_message: playerMessage
+      player_message: playerMessage,
+      api_key: apiKey,
     })
   });
   // SSE 解析逻辑见 3.3 节的伪代码
@@ -668,6 +914,43 @@ export async function evaluateEnding(sessionId: string): Promise<EndingData> {
   if (!res.ok) throw new ApiError(await res.json());
   return res.json();
 }
+
+// v1.1 新增接口 ---
+
+export async function listSessions(): Promise<{ sessions: SessionSummary[]; total: number }> {
+  const res = await fetch(`${BASE}/sessions`);
+  return res.json();
+}
+
+export async function deleteSession(sessionId: string): Promise<void> {
+  const res = await fetch(`${BASE}/game/${sessionId}`, { method: 'DELETE' });
+  if (!res.ok) throw new ApiError(await res.json());
+}
+
+export async function getDialogueHistory(
+  sessionId: string,
+  params?: { npc_id?: string; page?: number; page_size?: number }
+): Promise<{ items: DialogueItem[]; total: number; page: number; page_size: number }> {
+  const qs = new URLSearchParams();
+  if (params?.npc_id) qs.set('npc_id', params.npc_id);
+  if (params?.page) qs.set('page', String(params.page));
+  if (params?.page_size) qs.set('page_size', String(params.page_size));
+  const res = await fetch(`${BASE}/game/${sessionId}/dialogues?${qs}`);
+  return res.json();
+}
+
+export async function exitDialogue(sessionId: string, npcId: string): Promise<{
+  dialogue_text: string;
+  options: [];
+  is_available: boolean;
+}> {
+  const res = await fetch(`${BASE}/dialogue/exit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: sessionId, npc_id: npcId })
+  });
+  return res.json();
+}
 ```
 
 ---
@@ -678,8 +961,11 @@ B 在开始写后端逻辑前，应先用 JSON 文件给出以下 Mock 响应，
 
 | 文件 | 对应接口 | 说明 |
 |------|---------|------|
-| `mock/start_game.json` | `POST /api/game/start` | 一次完整的初始化响应 |
-| `mock/game_state.json` | `GET /api/game/{id}` | 阶段二时的状态快照 |
+| `mock/start_game.json` | `POST /api/game/start` | 一次完整的初始化响应（含新字段） |
+| `mock/game_state.json` | `GET /api/game/{id}` | 阶段二时的状态快照（含 last_dialogue/options） |
 | `mock/game_state_ended.json` | `GET /api/game/{id}` | 游戏结束时的状态（含结局） |
 | `mock/dialogue_sse.txt` | `POST /api/dialogue` | 一段完整的 SSE 流文本（含 delta + done 事件） |
 | `mock/evaluate.json` | `POST /api/game/{id}/evaluate` | 结局评价响应 |
+| `mock/sessions.json` | `GET /api/sessions` | 存档列表响应（v1.1 新增） |
+| `mock/dialogues.json` | `GET /api/game/{id}/dialogues` | 对话历史分页查询（v1.1 新增） |
+| `mock/exit_dialogue.json` | `POST /api/dialogue/exit` | 退出对话响应（v1.1 新增） |
