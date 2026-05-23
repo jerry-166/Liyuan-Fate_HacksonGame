@@ -144,8 +144,158 @@ git push origin main
 
 ---
 
+## 🌐 配置 Git 代理（国内必备）
+
+如果 `git push`/`git pull` 报 `Failed to connect to github.com port 443`，说明网络不通，需要走代理。
+
+### Clash / Clash Verge
+
+```bash
+git config --global http.proxy http://127.0.0.1:7890
+git config --global https.proxy http://127.0.0.1:7890
+```
+
+### V2Ray / v2rayN
+
+```bash
+git config --global http.proxy http://127.0.0.1:10809
+git config --global https.proxy http://127.0.0.1:10809
+```
+
+### 验证代理是否生效
+
+```bash
+git config --global --get http.proxy
+```
+
+### 取消代理
+
+```bash
+git config --global --unset http.proxy
+git config --global --unset https.proxy
+```
+
+---
+
+## 🛡️ 只提交自己的目录，不误改队友文件
+
+场景：你只负责 `frontend/`，但有时会不小心 `git add .` 把整个仓库都提交了。
+
+### 方案一：.gitignore 忽略非己目录（推荐）
+
+创建 `.gitignore`，只关注自己负责的目录：
+
+```gitignore
+# 忽略所有
+*
+
+# 但不忽略 frontend 目录
+!frontend/
+!frontend/**
+
+# 不忽略 .gitignore 本身
+!.gitignore
+```
+
+> ⚠️ `.gitignore` 只对**新文件**生效。已经在 git 里的旧文件（`backend/`、根目录 `.md` 等）如果被修改，`git status` 仍然会显示。
+
+### 方案二：skip-worktree 彻底锁定（更安全）
+
+把非自己目录的所有已跟踪文件标记为"跳过工作区"，这样无论怎么操作都不会误改：
+
+```bash
+# 对 frontend 之外的所有已跟踪文件设置保护
+git ls-files -z | ForEach-Object { 
+    $files = $_ -split "`0" 
+    foreach ($f in $files) { 
+        if ($f -and $f -notlike 'frontend/*' -and $f -ne '.gitignore') { 
+            git update-index --skip-worktree $f 2>$null 
+        }
+    }
+}
+
+# 验证：查看被保护的文件（以 S 开头）
+git ls-files -v | Select-String '^S'
+```
+
+效果：
+- `git status` — 只看得到自己的目录
+- `git add .` — 不会误加队友文件
+- `git commit -a` — 不会误改队友文件
+
+取消保护：
+```bash
+git ls-files -v | Select-String '^S' | ForEach-Object { 
+    git update-index --no-skip-worktree ($_.Line -replace '^S ', '') 
+}
+```
+
+### 提交时的正确姿势
+
+```bash
+# 只看自己目录的变更
+git status frontend/
+
+# 只暂存自己目录
+git add frontend/
+
+# 提交
+git commit -m "A: 更新了 xxx"
+
+# 推送
+git push origin main
+```
+
+---
+
+## 🕐 回退到指定版本
+
+### 本地 + 远程都回退
+
+```bash
+# 回退到指定 commit（丢弃之后所有更改）
+git reset --hard <commit-hash>
+
+# 强制推送到远程，覆盖远程仓库
+git push origin main --force
+```
+
+> ⚠️ `--force` 会覆盖远程，确保队友们也都同步回退，否则会混乱。
+
+### 查看提交历史找 hash
+
+```bash
+git log --oneline -20
+```
+
+---
+
+## ❌ push 被拒绝：remote contains work that you do not have
+
+```bash
+# 错误信息
+! [rejected]  main -> main (fetch first)
+hint: Updates were rejected because the remote contains work that you do not have locally.
+```
+
+原因是队友在你之前 push 了新代码。解决：
+
+```bash
+# 1. 先拉取远程最新代码并自动合并
+git pull origin main --no-edit
+
+# 2. 如果有冲突，解决后 add + commit
+# 3. 再次推送
+git push origin main
+```
+
+---
+
 ## 📌 总结
 
 - **每天开工先 `pull`，收工记得 `push`**
 - **各改各的目录，冲突几乎不会发生**
 - **commit message 写清楚谁做了什么**
+- **配置代理走 VPN，告别 `port 443` 超时**
+- **用 `.gitignore` + 选择性 `git add` 保护队友的目录**
+- **push 被拒先 pull，解决冲突再 push**
