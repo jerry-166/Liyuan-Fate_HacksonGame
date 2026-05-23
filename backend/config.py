@@ -17,11 +17,11 @@ from typing import Optional
 #   TokenHub: https://tokenhub.tencentmaas.com/v1
 #   旧版知识引擎: https://api.lkeap.cloud.tencent.com/v1
 LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "https://tokenhub.tencentmaas.com/v1")
-LLM_MODEL: str = os.getenv("LLM_MODEL", "deepseek-v3.1-terminus")
+LLM_MODEL: str = os.getenv("LLM_MODEL", "deepseek-v4-flash")
 LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "1024"))
 LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.8"))
 # 全局 fallback API Key（如果用户没有提供 session 级 key）
-LLM_API_KEY_FALLBACK: Optional[str] = os.getenv("TENCENT_LLM_API_KEY")
+LLM_API_KEY_FALLBACK: Optional[str] = os.getenv("TENCENT_LLM_API_KEY") or "sk-oysZyKot9p2x8BKwnlESOLGD2G1pnARURBPgn2WQGExD2CfP"
 
 # LLM 调用超时（秒）
 LLM_HTTP_TIMEOUT: float = float(os.getenv("LLM_HTTP_TIMEOUT", "60.0"))

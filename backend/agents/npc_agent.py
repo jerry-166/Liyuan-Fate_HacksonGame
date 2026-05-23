@@ -4,11 +4,13 @@ NPC Agent 核心逻辑。
 职责：
   - 调用 PromptBuilder 拼装消息
   - 调用 LLMClient 流式生成
+  - 流式从 JSON 中提取 dialogue_text 实时发送
   - 调用 ResponseParser 解析结构化结果
   - 更新关系值、触发事件、判定阶段
 """
 
 import logging
+import re
 from typing import Optional, AsyncIterator
 
 from state.session import GameSession
@@ -17,6 +19,43 @@ from agents.response_parser import parse_dialogue_response, DialogueResult
 from llm.client import LLMClient
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_dialogue_partial(text: str):
+    """
+    从可能不完整的 JSON 流中实时提取 dialogue_text 字段的纯文本。
+    
+    LLM 流式返回 JSON 如: {"dialogue_text":"你好...","relationship_delta":...}
+    但这个 JSON 可能还没收完——本函数从已有的字符串段中提取已出现的纯文本。
+    
+    返回: str — 当前已提取到的 dialogue_text 纯文本（处理了转义）
+    """
+    # 匹配 "dialogue_text": " 之后的字符串内容
+    pattern = r'"dialogue_text"\s*:\s*"'
+    m = re.search(pattern, text)
+    if not m:
+        return ""
+    
+    start = m.end()  # dialogue_text 值的第一个字符位置
+    result = []
+    i = start
+    
+    while i < len(text):
+        if text[i] == '\\' and i + 1 < len(text):
+            next_char = text[i + 1]
+            escape_map = {
+                'n': '\n', 't': '\t', 'r': '\r',
+                '"': '"', '\\': '\\', '/': '/',
+            }
+            result.append(escape_map.get(next_char, next_char))
+            i += 2
+        elif text[i] == '"':
+            break  # 值结束
+        else:
+            result.append(text[i])
+            i += 1
+    
+    return ''.join(result)
 
 
 class NPCAgent:
@@ -37,18 +76,14 @@ class NPCAgent:
         player_message: Optional[str] = None,
     ) -> AsyncIterator[tuple[str, DialogueResult]]:
         """
-        生成 NPC 对话（流式）。
+        生成 NPC 对话（真正流式）。
+
+        LLM 返回 JSON 结构体，本方法用流式提取器实时捞出 dialogue_text
+        的纯文本内容，边收边发。前端看到的是逐字流出的纯对话文字。
 
         Yields:
-            ("token", DialogueResult()) — 流中每个 token
-            ("done",  DialogueResult()) — 完成后，附带解析结果
-
-        用法:
-            async for event_type, data in agent.generate_dialogue(session, npc_id, msg):
-                if event_type == "token":
-                    yield to_sse("delta", data)   # data is str
-                elif event_type == "done":
-                    yield to_sse("done", data)    # data is DialogueResult
+            ("token", str) — dialogue_text 新增字符
+            ("done",  DialogueResult) — 完成，附带解析结果
         """
         npc = session.npcs.get(npc_id)
         if not npc:
@@ -64,12 +99,20 @@ class NPCAgent:
             session, npc_id, player_message, is_ending=is_ending
         )
 
-        # 2. 流式调用 LLM
+        # 2. 流式调用 LLM + 实时提取 dialogue_text
         full_text = ""
+        prev_dialogue_len = 0
         api_key = session.api_key
+        
         async for token in self.llm.chat_stream(messages, api_key=api_key):
             full_text += token
-            yield ("token", token)
+            # 实时从累积的 JSON 中提取 dialogue_text 的纯文本
+            current_dialogue = _extract_dialogue_partial(full_text)
+            if len(current_dialogue) > prev_dialogue_len:
+                new_chars = current_dialogue[prev_dialogue_len:]
+                prev_dialogue_len = len(current_dialogue)
+                for ch in new_chars:
+                    yield ("token", ch)
 
         # 3. 解析结构化结果
         result = parse_dialogue_response(full_text)
