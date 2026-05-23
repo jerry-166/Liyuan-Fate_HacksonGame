@@ -605,11 +605,14 @@ CREATE INDEX idx_dialogue_session ON dialogues(session_id, npc_id);
 | 维度 | MVP（本文档范围） | 后续版本 |
 |------|-------------------|----------|
 | API 数量 | **4 个** | 扩展至 8-10 个 |
-| NPC Agent | 1 个（两个 NPC 共用同一套 Agent 逻辑，只是人设 Prompt 不同） | 每个 NPC 独立 Agent 实例 |
+| NPC Agent | 2 个 NPC Agent（陈师傅 + 小华），独立人设 Prompt | 每个 NPC 独立 Agent 实例 + 主动行为 |
+| NPC Handoff | ✅ 事件驱动跨NPC上下文注入 | 更复杂的 NPC 间协作剧情 |
 | 对话方式 | AI 生成选项，玩家点选 | 增加自由输入文字 |
+| 阶段切换 | 双模判定（规则条件 + LLM 判定） | 更复杂的多条件分支 |
 | 阶段数 | 2 次阶段变化（1→2→3） | 更细粒度的子阶段 |
 | 结局数 | 1 个（MVP 只需验证流程） | 4+ 个结局分支 |
 | 对话历史 | 原始存储 | 增加 AI 摘要 + 关键节点提取 |
+| API Key | Session 级用户自提供（仅存内存） | 可选的用户系统 |
 | 存储 | SQLite 本地 | 迁移至云数据库 |
 | 流式 | SSE（fetch + ReadableStream） | WebSocket 双向通信 |
 
