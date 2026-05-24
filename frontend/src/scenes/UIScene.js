@@ -5,6 +5,8 @@ import {
   parseSSEStream,
   evaluateEnding,
   getGameState,
+  exitDialogue,
+  getDialogues,
 } from '../api/client.js';
 
 /**
@@ -33,18 +35,24 @@ export class UIScene extends Phaser.Scene {
     // 历史对话
     this.dialogueHistory = [];
 
+    // 自由文本输入 DOM 引用
+    this.freeInputWrapper = document.getElementById('free-input-wrapper');
+    this.freeInput = document.getElementById('free-input');
+    this.freeInputSend = document.getElementById('free-input-send');
+
     // 预创建按键
-    this.keyF = this.input.keyboard.addKey('F');
     this.key1 = this.input.keyboard.addKey('ONE');
     this.key2 = this.input.keyboard.addKey('TWO');
     this.key3 = this.input.keyboard.addKey('THREE');
     this.keyH = this.input.keyboard.addKey('H');
+    this.keyEsc = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
 
     this.createDialogPanel();
     this.createHUD();
     this.createHistoryPanel();
     this.createStageTransitionOverlay();
     this.createEndingScreen();
+    this.setupFreeInput();
 
     // 监听 GameScene 事件
     const gameScene = this.scene.get('GameScene');
@@ -91,52 +99,66 @@ export class UIScene extends Phaser.Scene {
     this.historyPanelVisible = false;
     this.historyScrollY = 0;
 
+    // 面板内边距（与对话面板一致）
+    const padX = 20, padTop = 60, padBottom = 40;
+    const contentW = width - padX * 2;   // 内容可用宽度
+    const contentH = height - padTop - padBottom;  // 内容可用高度
+
     this.historyPanel = this.add.container(0, 0).setDepth(400).setVisible(false);
 
+    // 半透明背景——全屏
     const bg = this.add.graphics();
     bg.fillStyle(0x0a0a12, 0.93);
     bg.fillRect(0, 0, width, height);
     this.historyPanel.add(bg);
 
+    // 标题
     const titleText = this.add.text(width / 2, 20, '—— 记忆回响 ——', {
       fontFamily: '"KaiTi","SimSun",serif',
       fontSize: '20px', color: '#d4b896',
     }).setOrigin(0.5, 0);
     this.historyPanel.add(titleText);
 
-    this.historyContent = this.add.container(0, 60);
+    // 文本内容容器（从 padTop 开始）
+    this.historyContent = this.add.container(padX, padTop);
     this.historyPanel.add(this.historyContent);
 
-    // 历史内容遮罩：限制在标题下方、提示上方区域内
-    const histMaskGfx = this.add.graphics();
-    histMaskGfx.fillRect(0, 56, width, height - 96);
-    histMaskGfx.setVisible(false);
+    // 记录内容区域尺寸，供渲染使用
+    this._historyArea = { x: padX, y: padTop, w: contentW, h: contentH };
+
+    // 遮罩：严格限制在内容区域内（不超出游戏界面）
+    const histMaskGfx = this.make.graphics();
+    histMaskGfx.fillStyle(0xffffff);
+    histMaskGfx.fillRect(padX, padTop, contentW, contentH);
     const histMask = histMaskGfx.createGeometryMask();
     this.historyContent.setMask(histMask);
     this.historyMask = histMask;
 
-    const tipText = this.add.text(width / 2, height - 30, '[H] 或 [F] 关闭  |  滚轮滚动', {
+    // 底部提示
+    const tipText = this.add.text(width / 2, height - 20, '[H] 打开/关闭  |  滚轮滚动', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
       fontSize: '12px', color: '#666655',
     }).setOrigin(0.5, 0);
     this.historyPanel.add(tipText);
 
+    // 滚轮事件（向下滚动 → 显示更新的内容）
     this.input.on('wheel', (pointer, gameObjects, deltaX, deltaY) => {
       if (!this.historyPanelVisible) return;
-      if (this.historyContentHeight <= height - 160) return;
-      this.historyScrollY = Math.max(
-        Math.min(0, this.historyScrollY + deltaY * 0.5),
-        -(this.historyContentHeight - height + 160)
-      );
-      this.historyContent.setY(60 + this.historyScrollY);
+      const area = this._historyArea;
+      if (this.historyContentHeight <= area.h) return;
+      // deltaY > 0 = 向下滚轮 → scrollY 减小 → 容器上移 → 显示后续（更新）内容
+      const maxScroll = this.historyContentHeight - area.h;
+      this.historyScrollY = Math.max(-maxScroll, Math.min(0, this.historyScrollY - deltaY * 0.5));
+      this.historyContent.setY(area.y + this.historyScrollY);
     });
   }
 
-  toggleHistoryPanel() {
+  async toggleHistoryPanel() {
     this.historyPanelVisible = !this.historyPanelVisible;
     if (this.historyPanelVisible) {
-      this.refreshHistoryContent();
+      await this.refreshHistoryContent();
       this.historyPanel.setVisible(true);
+      this.hideFreeInput();
       // 历史面板打开时禁用对话框点击，避免误触发翻页
       this.dialogClickZone.disableInteractive();
     } else {
@@ -158,59 +180,118 @@ export class UIScene extends Phaser.Scene {
     });
   }
 
-  refreshHistoryContent() {
+  async refreshHistoryContent() {
     this.historyContent.removeAll(true);
-    const { width } = this.cameras.main;
-    const maxW = width - 120;
+    const area = this._historyArea;
+    const maxW = area.w;   // wordWrap 宽度 = 内容区可用宽度
     let y = 0;
 
-    if (this.dialogueHistory.length === 0) {
-      const empty = this.add.text(width / 2, 80, '还没有任何对话记录', {
+    // npc_id → 显示名称 映射（与后端数据对齐）
+    const NPC_NAME_MAP = { npc_chen: '陈师傅', npc_xiaohua: '小华' };
+    // 尝试从 GameScene 获取最新 NPC 名称映射（覆盖默认值）
+    try {
+      const gameScene = this.scene.get('GameScene');
+      if (gameScene && gameScene.npcs) {
+        gameScene.npcs.forEach(npc => {
+          if (npc && npc.id && npc.name) NPC_NAME_MAP[npc.id] = npc.name;
+        });
+      }
+    } catch (e) { /* ignore */ }
+
+    // 从后端获取完整对话历史（含所有存档轮次）
+    let historyEntries = [];
+    if (this.sessionId) {
+      try {
+        const res = await getDialogues(this.sessionId, null, 1, 100);
+        if (res && res.items && res.items.length > 0) {
+          historyEntries = res.items.map(item => ({
+            npcName: item.role === 'npc' ? (NPC_NAME_MAP[item.npc_id] || item.npc_id || 'NPC') : null,
+            npcText: item.role === 'npc' ? (item.content || '') : null,
+            playerText: item.role === 'player' ? (item.content || '') : null,
+            stage: item.stage || 1,
+          }));
+        }
+      } catch (err) {
+        console.warn('[UIScene] 获取对话历史失败，回退到内存数据:', err.message);
+      }
+    }
+
+    // 回退：如果后端无数据或调用失败，使用内存中的本次游玩记录
+    if (historyEntries.length === 0 && this.dialogueHistory.length > 0) {
+      historyEntries = [...this.dialogueHistory];
+    }
+
+    if (historyEntries.length === 0) {
+      const empty = this.add.text(area.w / 2, 20, '还没有任何对话记录', {
         fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
         fontSize: '14px', color: '#666655',
       }).setOrigin(0.5, 0);
       this.historyContent.add(empty);
-      this.historyContentHeight = 120;
+      this.historyContentHeight = 80;
       return;
     }
 
-    this.dialogueHistory.forEach((entry, idx) => {
-      if (idx === 0 || entry.stage !== this.dialogueHistory[idx - 1].stage) {
-        const sep = this.add.text(width / 2, y, `—— 第${entry.stage}章 ——`, {
+    let lastSpeaker = null;  // 用于合并连续同名说话人
+
+    historyEntries.forEach((entry, idx) => {
+      // 阶段分隔线
+      if (idx === 0 || entry.stage !== historyEntries[idx - 1].stage) {
+        const sep = this.add.text(area.w / 2, y, `—— 第${entry.stage}章 ——`, {
           fontFamily: '"KaiTi","SimSun",serif',
           fontSize: '14px', color: '#998866',
         }).setOrigin(0.5, 0);
         this.historyContent.add(sep);
-        y += 30;
+        y += 28;
       }
 
-      const npcLabel = this.add.text(60, y, `【${entry.npcName}】`, {
-        fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-        fontSize: '14px', color: '#d4b896', fontStyle: 'bold',
-      });
-      this.historyContent.add(npcLabel);
-      y += 22;
+      // 判断当前说话人
+      const currentSpeaker = entry.playerText ? '__player__' : `npc:${entry.npcName}`;
 
-      const npcT = this.add.text(60, y, entry.npcText, {
-        fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-        fontSize: '13px', color: '#c0b898', wordWrap: { width: maxW }, lineSpacing: 4,
-      });
-      this.historyContent.add(npcT);
-      y += npcT.height + 10;
-
-      if (entry.playerText) {
-        const pl = this.add.text(60, y, `【你】${entry.playerText}`, {
+      // NPC 文本（只在说话人变化时显示名字标签）
+      if (entry.npcText) {
+        if (currentSpeaker !== lastSpeaker) {
+          const npcLabel = this.add.text(0, y, `【${entry.npcName}】`, {
+            fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+            fontSize: '14px', color: '#d4b896', fontStyle: 'bold',
+          });
+          this.historyContent.add(npcLabel);
+          y += 22;
+        }
+        const npcT = this.add.text(0, y, entry.npcText, {
           fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-          fontSize: '12px', color: '#88aacc', wordWrap: { width: maxW },
+          fontSize: '13px', color: '#c0b898',
+          wordWrap: { width: maxW - 10, useAdvancedWrap: true }, lineSpacing: 4,
+        });
+        this.historyContent.add(npcT);
+        y += npcT.height + 8;
+        lastSpeaker = currentSpeaker;
+      }
+
+      // 玩家回复
+      if (entry.playerText) {
+        if (currentSpeaker !== lastSpeaker) {
+          // 玩家标签
+          const plLabel = this.add.text(0, y, `【你】`, {
+            fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+            fontSize: '13px', color: '#88aacc', fontStyle: 'bold',
+          });
+          this.historyContent.add(plLabel);
+          y += 20;
+        }
+        const pl = this.add.text(0, y, entry.playerText, {
+          fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+          fontSize: '12px', color: '#88bbdd',
+          wordWrap: { width: maxW - 10, useAdvancedWrap: true },
         });
         this.historyContent.add(pl);
-        y += pl.height + 18;
+        y += pl.height + 16;
+        lastSpeaker = currentSpeaker;
       }
     });
 
     this.historyContentHeight = y;
     this.historyScrollY = 0;
-    this.historyContent.setY(60);
+    this.historyContent.setY(area.y);
   }
 
   // =========================== 对话框面板 ===========================
@@ -243,21 +324,46 @@ export class UIScene extends Phaser.Scene {
     });
     this.dialogContainer.add(this.dialogName);
 
-    // 对话文本（流式逐字显示区域）
-    this.dialogText = this.add.text(panelX + 20, panelY + 46, '', {
+    // 文本区域参数——严格对齐面板内边距（左右各 20px）
+    const padLeft = 20, padRight = 20;
+    this.textAreaX = panelX + padLeft;
+    this.textAreaY = panelY + 46;
+    this.textAreaW = panelW - padLeft - padRight;   // 可用宽度 = 面板宽 - 左右边距
+    this.textAreaH = panelH - 46 - 60;              // 高度 = 面板高 - 顶部名字区(46) - 底部选项/提示区(60)
+
+    // 对话文本滚动容器
+    this.dialogTextScrollY = 0;
+    this.dialogTextContainer = this.add.container(this.textAreaX, this.textAreaY).setDepth(300);
+    this.dialogContainer.add(this.dialogTextContainer);
+
+    // 对话文本（wordWrap 宽度严格 = 文本区域可用宽度，不多不少）
+    this.dialogText = this.add.text(0, 0, '', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '15px', color: '#e8dcc8', wordWrap: { width: panelW - 40 },
+      fontSize: '15px', color: '#e8dcc8',
+      wordWrap: { width: this.textAreaW, useAdvancedWrap: true },
       lineSpacing: 6,
     });
-    this.dialogContainer.add(this.dialogText);
+    this.dialogTextContainer.add(this.dialogText);
 
-    // 遮罩：防止流式输出时文字溢出到选项区
-    const textMaskGfx = this.add.graphics();
-    textMaskGfx.fillRect(panelX + 16, panelY + 44, panelW - 32, panelH - 44 - 58);
-    textMaskGfx.setVisible(false);
-    const textMask = textMaskGfx.createGeometryMask();
-    this.dialogText.setMask(textMask);
-    this.dialogTextMask = textMask;
+    // 遮罩：与文本区域完全一致，超出部分裁剪
+    const maskGfx = this.make.graphics();
+    maskGfx.fillStyle(0xffffff);
+    maskGfx.fillRect(this.textAreaX, this.textAreaY, this.textAreaW, this.textAreaH);
+    const textMask = maskGfx.createGeometryMask();
+    this.dialogTextContainer.setMask(textMask);
+
+    // 滚动条（紧贴在文本区域内右侧边缘，不超出面板）
+    const sbX = this.textAreaX + this.textAreaW - 4;   // 在文本区域内右侧
+    const sbW = 3;
+    this.scrollBarBg = this.add.graphics().setDepth(301);
+    this.scrollBarBg.fillStyle(0x444444, 0.2);
+    this.scrollBarBg.fillRect(sbX, this.textAreaY, sbW, this.textAreaH);
+    this.dialogContainer.add(this.scrollBarBg);
+
+    // 滚动条滑块
+    this.scrollBarThumb = this.add.graphics().setDepth(302);
+    this._scrollBarConfig = { x: sbX, w: sbW };  // 记录位置供 updateScrollBar 使用
+    this.dialogContainer.add(this.scrollBarThumb);
 
     // 光标闪烁
     this.cursorBlink = this.add.text(0, 0, '▎', {
@@ -279,7 +385,7 @@ export class UIScene extends Phaser.Scene {
     this.dialogContainer.add(this.pageHint);
 
     // 提示文字（"按F关闭"等）
-    this.dialogHint = this.add.text(panelX + panelW - 150, panelY + panelH - 24, '[F] 关闭  [1-3] 选择', {
+    this.dialogHint = this.add.text(panelX + panelW - 150, panelY + panelH - 24, '[ESC] 关闭  [1-3] 选择', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
       fontSize: '11px', color: '#888878',
     });
@@ -295,6 +401,15 @@ export class UIScene extends Phaser.Scene {
     this.dialogClickZone.on('pointerdown', () => this.onDialogClick());
     this.dialogContainer.add(this.dialogClickZone);
     this.dialogClickZone.setVisible(false);  // 默认不启用
+
+    // 滚轮事件（对话文本滚动）
+    this.input.on('wheel', (pointer, gameObjects, deltaX, deltaY) => {
+      if (!this.dialogActive || this.isStreaming) return;
+      if (pointer.x >= this.textAreaX && pointer.x <= this.textAreaX + this.textAreaW + 20 &&
+          pointer.y >= this.textAreaY && pointer.y <= this.textAreaY + this.textAreaH) {
+        this.scrollDialogText(deltaY);
+      }
+    });
   }
 
   /**
@@ -304,7 +419,7 @@ export class UIScene extends Phaser.Scene {
     this.clearOptions();
 
     if (!options || options.length === 0) {
-      this.dialogHint.setText('[F] 关闭对话');
+      this.dialogHint.setText('[ESC] 关闭对话');
       return;
     }
 
@@ -320,18 +435,32 @@ export class UIScene extends Phaser.Scene {
     const panelX = (width - panelW) / 2;
     const panelY = height - panelH - 24;
 
-    const btnW = Math.min(240, (panelW - 60) / options.length);
-    const totalW = options.length * btnW + (options.length - 1) * 12;
-    const startX = panelX + (panelW - totalW) / 2;
+    // 选项区域可用宽度 = 面板宽 - 左右边距（与文本区域一致）
+    const availW = panelW - 40;   // 左右各 20px
+    const gap = 8;
     const btnY = panelY + panelH - 50;
 
+    // 动态计算每个按钮宽度，确保总宽度不超出面板
+    let btnW = (availW - (options.length - 1) * gap) / options.length;
+    if (btnW > 220) btnW = 220;     // 单个最大宽度
+    // 二次校验：如果最大宽度限制后仍溢出，进一步缩小
+    const totalW = options.length * btnW + (options.length - 1) * gap;
+    if (totalW > availW) {
+      btnW = (availW - (options.length - 1) * gap) / options.length;
+    }
+
+    const startX = panelX + 20 + (availW - totalW) / 2;  // 在可用区域内居中
+
     normalized.forEach((opt, i) => {
-      const x = startX + i * (btnW + 12);
+      const x = startX + i * (btnW + gap);
       const btn = this.createOptionButton(x, btnY, btnW, 34, opt, i);
       this.optionButtons.push(btn);
     });
 
-    this.dialogHint.setText('[F] 关闭  [1-3] 选择');
+    this.dialogHint.setText(`[ESC] 关闭  [1-${Math.min(options.length, 9)}] 选择`);
+
+    // 显示自由文本输入框
+    this.showFreeInput();
   }
 
   createOptionButton(x, y, w, h, optionData, index) {
@@ -351,10 +480,11 @@ export class UIScene extends Phaser.Scene {
     }).setOrigin(0, 0.5);
     container.add(num);
 
-    // 选项文字
+    // 选项文字（严格限制在按钮背景内）
     const text = this.add.text(30, h / 2, optionData.text, {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '13px', color: '#d0c8b4', wordWrap: { width: w - 44, useAdvancedWrap: true },
+      fontSize: '13px', color: '#d0c8b4',
+      wordWrap: { width: Math.max(60, w - 36), useAdvancedWrap: true },
     }).setOrigin(0, 0.5);
     container.add(text);
 
@@ -569,6 +699,7 @@ export class UIScene extends Phaser.Scene {
     this.dialogText.setText('');
     this.dialogHint.setText('对话生成中……');
     this.clearOptions();
+    this.hideFreeInput();
 
     // 开始游标闪烁
     this.startCursorBlink();
@@ -578,9 +709,11 @@ export class UIScene extends Phaser.Scene {
       const stream = await startDialogueStream(this.sessionId, npcId, null);
       await this.processDialogueStream(stream);
     } catch (err) {
+      this.isStreaming = false;
+      this.stopCursorBlink();
+      this.dialogText.setText(this.buildErrorMessage(err));
+      this.dialogHint.setText('[ESC] 关闭');
       console.error('[UIScene] 对话请求失败:', err);
-      this.dialogText.setText('【网络开小差了，请重试】');
-      this.dialogHint.setText('[F] 关闭');
     }
   }
 
@@ -597,6 +730,7 @@ export class UIScene extends Phaser.Scene {
     }
 
     this.clearOptions();
+    this.hideFreeInput();
     this.dialogText.setText('');
     this.dialogHint.setText('对话生成中……');
     this.pageHint.setText('');
@@ -611,9 +745,11 @@ export class UIScene extends Phaser.Scene {
       );
       await this.processDialogueStream(stream);
     } catch (err) {
+      this.isStreaming = false;
+      this.stopCursorBlink();
+      this.dialogText.setText(this.buildErrorMessage(err));
+      this.dialogHint.setText('[ESC] 关闭');
       console.error('[UIScene] 续接对话失败:', err);
-      this.dialogText.setText('【网络开小差了，请重试】');
-      this.dialogHint.setText('[F] 关闭');
     }
   }
 
@@ -628,6 +764,14 @@ export class UIScene extends Phaser.Scene {
         accumulatedText += chunk;
         this.dialogText.setText(accumulatedText);
         this.updateCursorPosition();
+        // 自动滚动到底部，确保新内容始终可见
+        const textHeight = this.dialogText.height;
+        const maxScroll = Math.max(0, textHeight - this.textAreaH);
+        if (maxScroll > 0) {
+          this.dialogTextScrollY = maxScroll;
+          this.dialogTextContainer.setY(this.textAreaY - this.dialogTextScrollY);
+          this.updateScrollBar(textHeight, maxScroll);
+        }
       },
       onDone: async (result) => {
         this.isStreaming = false;
@@ -649,7 +793,7 @@ export class UIScene extends Phaser.Scene {
 
         // 结局直接触发（不需要分页交互）
         if (this.pendingEnding) {
-          this.dialogHint.setText('[F] 关闭对话');
+          this.dialogHint.setText('[ESC] 关闭对话');
           this.time.delayedCall(1200, () => this.triggerEndingSequence());
         }
       },
@@ -657,7 +801,7 @@ export class UIScene extends Phaser.Scene {
         this.isStreaming = false;
         this.stopCursorBlink();
         this.dialogText.setText(`【出错了】${err.message || 'AI回复失败'}`);
-        this.dialogHint.setText('[F] 关闭');
+        this.dialogHint.setText('[ESC] 关闭');
         this.clearOptions();
       }
     });
@@ -672,6 +816,7 @@ export class UIScene extends Phaser.Scene {
     const text = this.dialogPages[cur] || '';
 
     this.dialogText.setText(text);
+    this.resetDialogScroll();
     this.pageHint.setText('');
     this.dialogClickZone.disableInteractive();
 
@@ -848,7 +993,84 @@ export class UIScene extends Phaser.Scene {
     });
   }
 
+  // =========================== 自由文本输入 ===========================
+
+  /**
+   * 初始化自由文本输入框事件
+   * 使用 DOM input 元素，因为 Phaser 没有原生文本输入支持
+   */
+  setupFreeInput() {
+    if (!this.freeInput) return;
+
+    // Enter 键发送
+    this.freeInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        e.stopPropagation();
+        this.sendFreeInput();
+      }
+      // ESC 关闭对话框（阻止浏览器默认行为）
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        this.hideFreeInput();
+        this.closeDialog();
+      }
+    });
+
+    // 发送按钮点击
+    this.freeInputSend.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.sendFreeInput();
+    });
+  }
+
+  /**
+   * 显示自由文本输入框
+   */
+  showFreeInput() {
+    if (!this.freeInputWrapper) return;
+    this.freeInputWrapper.classList.add('visible');
+    this.freeInput.value = '';
+    // 延迟聚焦，避免抢夺 Phaser 的键盘事件
+    this.time.delayedCall(100, () => {
+      this.freeInput.focus();
+    });
+  }
+
+  /**
+   * 隐藏自由文本输入框
+   */
+  hideFreeInput() {
+    if (!this.freeInputWrapper) return;
+    this.freeInputWrapper.classList.remove('visible');
+    this.freeInput.blur();
+  }
+
+  /**
+   * 发送自由文本输入内容
+   */
+  sendFreeInput() {
+    const text = this.freeInput.value.trim();
+    if (!text || this.isStreaming) return;
+    this.hideFreeInput();
+    // 构造一个与选项相同格式的对象，复用 onOptionSelected 逻辑
+    this.onOptionSelected({ id: 0, text });
+  }
+
   // =========================== 工具方法 ===========================
+
+  /**
+   * 根据错误类型构建用户友好提示
+   */
+  buildErrorMessage(err) {
+    const msg = err?.message || String(err);
+    if (msg.includes('SESSION_NOT_FOUND')) return '【存档已失效，请开始新游戏】';
+    if (msg.includes('NPC_NOT_FOUND') || msg.includes('NPC_NOT_AVAILABLE')) return '【此人暂时不想理你……】';
+    if (msg.includes('GAME_ALREADY_ENDED')) return '【故事已经结束了】';
+    if (msg.includes('Failed to fetch') || msg.includes('NetworkError')) return '【网络连接失败，请检查后端服务】';
+    return '【AI 出神了，请重试】';
+  }
 
   startCursorBlink() {
     this.stopCursorBlink();
@@ -874,6 +1096,37 @@ export class UIScene extends Phaser.Scene {
       textBounds.right + 2,
       textBounds.bottom - 4
     );
+  }
+
+  scrollDialogText(deltaY) {
+    const textHeight = this.dialogText.height;
+    const maxScroll = Math.max(0, textHeight - this.textAreaH);
+    this.dialogTextScrollY = Math.max(0, Math.min(maxScroll, this.dialogTextScrollY + deltaY * 0.3));
+    this.dialogTextContainer.setY(this.textAreaY - this.dialogTextScrollY);
+    this.updateScrollBar(textHeight, maxScroll);
+  }
+
+  updateScrollBar(textHeight, maxScroll) {
+    this.scrollBarThumb.clear();
+    if (maxScroll <= 0) {
+      this.scrollBarBg.setVisible(false);
+      return;
+    }
+    this.scrollBarBg.setVisible(true);
+    const sb = this._scrollBarConfig || {};
+    const thumbRatio = this.textAreaH / textHeight;
+    const thumbHeight = Math.max(16, this.textAreaH * thumbRatio);
+    const scrollRatio = maxScroll > 0 ? this.dialogTextScrollY / maxScroll : 0;
+    const thumbY = this.textAreaY + scrollRatio * (this.textAreaH - thumbHeight);
+    this.scrollBarThumb.fillStyle(0x887766, 0.6);
+    this.scrollBarThumb.fillRect(sb.x || this.textAreaX + this.textAreaW - 4, thumbY, sb.w || 3, thumbHeight);
+  }
+
+  resetDialogScroll() {
+    this.dialogTextScrollY = 0;
+    this.dialogTextContainer.setY(this.textAreaY);
+    this.scrollBarThumb.clear();
+    this.scrollBarBg.setVisible(false);
   }
 
   updateStageBadge() {
@@ -922,21 +1175,19 @@ export class UIScene extends Phaser.Scene {
   // =========================== 输入处理 ===========================
 
   update() {
+    // 如果自由输入框正在聚焦，跳过 Phaser 键盘处理
+    if (this.freeInput && document.activeElement === this.freeInput) return;
+
     // 历史面板开关（对话外可用）
     if (!this.dialogActive && Phaser.Input.Keyboard.JustDown(this.keyH)) {
-      this.toggleHistoryPanel();
-    }
-    if (this.historyPanelVisible && Phaser.Input.Keyboard.JustDown(this.keyF)) {
-      // ESC 也可以用 F 关闭历史
       this.toggleHistoryPanel();
     }
 
     if (!this.dialogActive || this.isStreaming) return;
 
-    // F 键关闭对话框（翻页中不可以关闭）
-    if (Phaser.Input.Keyboard.JustDown(this.keyF)) {
+    // ESC 键关闭对话框 / 跳过翻页
+    if (Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
       if (this.dialogClickZone.input && this.dialogClickZone.input.enabled) {
-        // 正在翻页，F → 跳过翻页直接到最后一页
         this.dialogCurrentPage = this.dialogPages.length - 1;
         this.showCurrentPage();
         return;
@@ -971,9 +1222,24 @@ export class UIScene extends Phaser.Scene {
     this.dialogClickZone.disableInteractive();
     this.stopCursorBlink();
     this.clearOptions();
+    this.hideFreeInput();
+    this.resetDialogScroll();
     this.dialogContainer.setVisible(false);
 
     const gameScene = this.scene.get('GameScene');
     gameScene.events.emit('input:lock', false);
+
+    // 调用后端退出对话 API（告别语），非阻塞
+    if (this.sessionId && this.currentNPC) {
+      const npcId = this.currentNPC.id;
+      exitDialogue(this.sessionId, npcId)
+        .then(result => {
+          // 可选：短暂显示告别语气泡（通过 GameScene 刷新 NPC 状态）
+          console.log('[UIScene] NPC 告别语:', result.dialogue_text);
+        })
+        .catch(err => {
+          console.warn('[UIScene] 退出对话 API 调用失败（不影响游戏流程）:', err.message);
+        });
+    }
   }
 }

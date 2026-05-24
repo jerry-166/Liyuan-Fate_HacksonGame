@@ -292,3 +292,173 @@ export function saveGameState(sessionId, state) {
     console.warn('[API] 保存游戏状态失败:', e);
   }
 }
+
+// ========== 以下为 v1.2 新增接口（前端接入全部 10 个 API）==========
+
+// Mock — GET /api/sessions
+const MOCK_SESSIONS = {
+  sessions: [
+    {
+      session_id: 'sess_mock_001',
+      player_name: '玩家',
+      stage: 2,
+      stage_name: '了解',
+      game_ended: false,
+      created_at: '2026-05-23 20:00:00',
+      updated_at: '2026-05-23 20:30:00',
+    },
+    {
+      session_id: 'sess_mock_002',
+      player_name: '戏迷阿三',
+      stage: 3,
+      stage_name: '抉择',
+      game_ended: true,
+      created_at: '2026-05-22 14:00:00',
+      updated_at: '2026-05-22 15:20:00',
+    },
+  ],
+  total: 2,
+};
+
+// Mock — GET /api/game/{id}/dialogues
+const MOCK_DIALOGUES = {
+  items: [
+    { id: 1, session_id: 'sess_mock_001', npc_id: 'npc_chen', role: 'npc',
+      content: '……（陈师傅低头擦拭琴弦，仿佛没看见你）',
+      options: ['陈师傅好', '默默站在一旁', '去找小华'], stage: 1, created_at: '2026-05-23 20:01:00' },
+    { id: 2, session_id: 'sess_mock_001', npc_id: 'npc_chen', role: 'player',
+      content: '您认识我父亲？', options: null, stage: 1, created_at: '2026-05-23 20:02:00' },
+    { id: 3, session_id: 'sess_mock_001', npc_id: 'npc_chen', role: 'npc',
+      content: '你父亲他……是个真正的角儿。一出《空城计》，能唱哭半条街的人。',
+      options: ['那后来发生了什么？', '我能帮上什么忙吗？', '小华是怎么留下来的？'], stage: 1, created_at: '2026-05-23 20:03:00' },
+  ],
+  total: 3, page: 1, page_size: 20,
+};
+
+// Mock — POST /api/dialogue/exit
+const MOCK_EXIT = {
+  dialogue_text: '行吧，时候不早了，你去忙你的。',
+  options: [],
+  is_available: true,
+};
+
+// Mock — GET /api/game/{id}/relationships
+const MOCK_RELATIONSHIPS = {
+  session_id: 'sess_mock_001',
+  npc_id: 'npc_chen',
+  logs: [
+    { id: 1, session_id: 'sess_mock_001', npc_id: 'npc_chen', delta: 2,
+      reason: '对话', relationship_after: 2, created_at: '2026-05-23 20:01:00' },
+    { id: 2, session_id: 'sess_mock_001', npc_id: 'npc_chen', delta: 8,
+      reason: '对话', relationship_after: 10, created_at: '2026-05-23 20:03:00' },
+    { id: 3, session_id: 'sess_mock_001', npc_id: 'npc_chen', delta: 5,
+      reason: '对话', relationship_after: 15, created_at: '2026-05-24 12:00:00' },
+  ],
+  current_relationships: { npc_chen: 15, npc_xiaohua: 10 },
+  total: 3,
+};
+
+// Mock — GET /api/game/{id}/events
+const MOCK_EVENTS = {
+  session_id: 'sess_mock_001',
+  events: [
+    { id: 1, event_id: 'first_enter_tavern', triggered_by: 'system',
+      stage: 1, stage_name: '不屑', created_at: '2026-05-23 20:00:00' },
+    { id: 2, event_id: 'chen_first_talk', triggered_by: 'npc_chen',
+      stage: 1, stage_name: '不屑', created_at: '2026-05-23 20:01:00' },
+    { id: 3, event_id: 'chen_told_full_story', triggered_by: 'npc_chen',
+      stage: 2, stage_name: '了解', created_at: '2026-05-23 20:30:00' },
+  ],
+  total: 3,
+};
+
+// ========== 新增 API 方法 ==========
+
+/**
+ * 获取所有存档列表 — GET /api/sessions
+ */
+export async function getSessions() {
+  if (USE_MOCK) {
+    return { ...MOCK_SESSIONS };
+  }
+  const res = await fetch(`${BASE}/sessions`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+/**
+ * 删除存档 — DELETE /api/game/{session_id}
+ */
+export async function deleteSession(sessionId) {
+  if (USE_MOCK) {
+    // Mock: 清理 localStorage
+    localStorage.removeItem(`game_state_${sessionId}`);
+    if (localStorage.getItem('__active_session__') === sessionId) {
+      localStorage.removeItem('__active_session__');
+    }
+    return { success: true, message: `已删除会话: ${sessionId}` };
+  }
+  const res = await fetch(`${BASE}/game/${sessionId}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+/**
+ * 分页查询对话历史 — GET /api/game/{session_id}/dialogues
+ */
+export async function getDialogues(sessionId, npcId = null, page = 1, pageSize = 20) {
+  if (USE_MOCK) {
+    let items = MOCK_DIALOGUES.items;
+    if (npcId) items = items.filter(d => d.npc_id === npcId);
+    return { items, total: items.length, page, page_size: pageSize };
+  }
+  const params = new URLSearchParams();
+  if (npcId) params.set('npc_id', npcId);
+  params.set('page', String(page));
+  params.set('page_size', String(pageSize));
+  const res = await fetch(`${BASE}/game/${sessionId}/dialogues?${params}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+/**
+ * 退出 NPC 对话 — POST /api/dialogue/exit
+ */
+export async function exitDialogue(sessionId, npcId) {
+  if (USE_MOCK) {
+    return { ...MOCK_EXIT, dialogue_text: `（${npcId === 'npc_chen' ? '陈师傅' : '小华'}微微点头，示意你可以离开了）` };
+  }
+  const res = await fetch(`${BASE}/dialogue/exit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: sessionId, npc_id: npcId }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+/**
+ * 查询关系值变化历史 — GET /api/game/{session_id}/relationships
+ */
+export async function getRelationships(sessionId, npcId = null) {
+  if (USE_MOCK) {
+    if (npcId) return { ...MOCK_RELATIONSHIPS, npc_id: npcId };
+    return MOCK_RELATIONSHIPS;
+  }
+  const params = npcId ? `?npc_id=${encodeURIComponent(npcId)}` : '';
+  const res = await fetch(`${BASE}/game/${sessionId}/relationships${params}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+/**
+ * 查询已触发事件时间线 — GET /api/game/{session_id}/events
+ */
+export async function getEvents(sessionId) {
+  if (USE_MOCK) {
+    return { ...MOCK_EVENTS };
+  }
+  const res = await fetch(`${BASE}/game/${sessionId}/events`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}

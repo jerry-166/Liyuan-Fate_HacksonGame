@@ -17,10 +17,57 @@
     #game-container {
       /* Phaser 会自动管理 canvas 尺寸 */
     }
+    /* 自由文本输入框（对话时显示在游戏画面下方） */
+    #free-input-wrapper {
+      display: none;           /* 默认隐藏 */
+      position: fixed;
+      bottom: 8px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1000;
+      width: 600px;
+      max-width: calc(100vw - 40px);
+    }
+    #free-input-wrapper.visible { display: flex; }
+    #free-input {
+      flex: 1;
+      background: #1a1820ee;
+      border: 1px solid #88776688;
+      border-radius: 6px;
+      padding: 8px 14px;
+      color: #e8dcc8;
+      font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+      font-size: 14px;
+      outline: none;
+      caret-color: #d4b896;
+    }
+    #free-input:focus {
+      border-color: #d4b896;
+      box-shadow: 0 0 6px #88776644;
+    }
+    #free-input::placeholder { color: #665544; }
+    #free-input-send {
+      margin-left: 6px;
+      background: #2a2820;
+      border: 1px solid #88776688;
+      border-radius: 6px;
+      padding: 8px 16px;
+      color: #d4b896;
+      font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+      font-size: 13px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #free-input-send:hover { background: #3a3830; border-color: #d4b896; }
   </style>
 </head>
 <body>
   <div id="game-container"></div>
+  <!-- 自由文本输入区域（由 UIScene 控制 show/hide） -->
+  <div id="free-input-wrapper">
+    <input id="free-input" type="text" placeholder="输入你想说的话……（Enter 发送）" maxlength="200" autocomplete="off" />
+    <button id="free-input-send">发送</button>
+  </div>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

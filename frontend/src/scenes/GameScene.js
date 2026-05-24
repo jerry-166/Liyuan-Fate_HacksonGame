@@ -212,6 +212,21 @@ export class GameScene extends Phaser.Scene {
       this.applyStageTone(newStage);
     });
 
+    // 阶段色调遮罩（半透明，避免 flash 遮挡地图）
+    this.tintOverlay = this.add.rectangle(
+      this.cameras.main.centerX,
+      this.cameras.main.centerY,
+      this.cameras.main.width,
+      this.cameras.main.height,
+      0xffffff,
+      0
+    );
+    this.tintOverlay.setScrollFactor(0);
+    this.tintOverlay.setDepth(999);
+    this.tintOverlay.setOrigin(0.5);
+    // 遮罩仅用于视觉色调叠加，永远不参与输入交互
+    this.tintOverlay.setInteractive = () => this.tintOverlay;
+
     this.scene.launch('UIScene');
 
     // 延迟一帧通知 UI 游戏已就绪（此时 UIScene 已完全创建）
@@ -225,25 +240,44 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * 初始化游戏状态
+   * 初始化游戏状态 — POST /api/game/start
    */
   async initGame() {
     try {
-      const { startGame, saveGameState } = await import('../api/client.js');
-      const gameState = await startGame('玩家');
+      const { startGame, saveGameState, getGameState } = await import('../api/client.js');
 
+      // 显示加载提示
+      this.showLoadingHint('正在创建新的故事……');
+
+      const gameState = await startGame('玩家');
+      this.hideLoadingHint();
+
+      this.currentStage = gameState.current_stage || 1;
       this.events.emit('game:init', {
         sessionId: gameState.session_id,
-        stage: gameState.current_stage,
+        stage: this.currentStage,
       });
 
-      // 保存当前活跃 session
+      // 持久化
       localStorage.setItem('__active_session__', gameState.session_id);
       saveGameState(gameState.session_id, gameState);
 
+      // 刷新 NPC 状态
+      if (gameState.npcs) {
+        this.time.delayedCall(300, () => this.refreshNPCsFromState(gameState));
+      }
+
+      // 应用初始阶段色调
+      if (gameState.stage_params) {
+        this.time.delayedCall(500, () => this.applyStageTone(gameState.stage_params));
+      }
+
       console.log('[GameScene] 游戏已初始化, session:', gameState.session_id);
     } catch (e) {
-      console.warn('[GameScene] 初始化游戏失败（将使用默认状态）:', e);
+      this.hideLoadingHint();
+      console.error('[GameScene] 初始化游戏失败:', e);
+      // 显示错误提示后自动重试
+      this.showToast('连接服务器失败，请确认后端已启动', 3000);
     }
   }
 
@@ -252,18 +286,35 @@ export class GameScene extends Phaser.Scene {
    */
   async restoreGame(sessionId) {
     try {
-      const { getGameState } = await import('../api/client.js');
-      const saved = localStorage.getItem(`game_state_${sessionId}`);
-      if (!saved) throw new Error('存档不存在');
+      const { getGameState, saveGameState } = await import('../api/client.js');
 
-      const gameState = JSON.parse(saved);
+      this.showLoadingHint('正在加载存档……');
+
+      // 先尝试从 API 获取最新状态
+      let gameState = null;
+      try {
+        gameState = await getGameState(sessionId);
+      } catch (apiErr) {
+        // API 不可用时回退到 localStorage
+        console.warn('[GameScene] API 获取状态失败，回退到本地缓存:', apiErr.message);
+      }
+
+      // 回退到 localStorage
+      if (!gameState || !gameState.session_id) {
+        const saved = localStorage.getItem(`game_state_${sessionId}`);
+        if (!saved) throw new Error('存档不存在');
+        gameState = JSON.parse(saved);
+      }
+
+      this.hideLoadingHint();
+
       console.log('[GameScene] 恢复存档, session:', sessionId, 'stage:', gameState.current_stage);
 
       this.currentStage = gameState.current_stage || 1;
 
       this.events.emit('game:init', {
         sessionId: sessionId,
-        stage: gameState.current_stage || 1,
+        stage: this.currentStage,
       });
 
       // 刷新 NPC 状态
@@ -271,11 +322,23 @@ export class GameScene extends Phaser.Scene {
         this.time.delayedCall(300, () => this.refreshNPCsFromState(gameState));
       }
 
-      // 如果已结局，直接进入结局画面
-      if (gameState.game_ended) {
+      // 同步到本地缓存
+      saveGameState(sessionId, gameState);
+
+      // 如果已结局，通知 UI
+      if (gameState.game_ended && gameState.ending) {
         console.log('[GameScene] 存档已是结局状态');
+        this.time.delayedCall(500, () => {
+          this.events.emit('ending:restore', gameState.ending);
+        });
+      }
+
+      // 应用阶段色调
+      if (gameState.stage_params) {
+        this.time.delayedCall(500, () => this.applyStageTone(gameState.stage_params));
       }
     } catch (e) {
+      this.hideLoadingHint();
       console.warn('[GameScene] 恢复存档失败，开始新游戏:', e);
       this.initGame();
     }
@@ -308,25 +371,29 @@ export class GameScene extends Phaser.Scene {
     if (!this.cameras) return;
     this.currentStage = newStage.id;
 
-    // 移除旧 filter
-    this.cameras.main.resetPostPipeline();
-
-    // 根据阶段添加色调叠加（用相机淡入实现简易滤镜效果）
+    // 根据阶段生成色调叠加
     const tintMap = {
-      cold:   { r: 0.75, g: 0.78, b: 0.95, duration: 2000 },  // 冷灰蓝
-      warm:   { r: 1.05, g: 1.02, b: 0.85, duration: 2000 },  // 暖黄
-      dramatic: { r: 1.08, g: 0.95, b: 0.78, duration: 1800 }, // 浓暖
+      cold:     { r: 160, g: 172, b: 210, alpha: 0.08 },  // 冷灰蓝
+      warm:     { r: 255, g: 245, b: 210, alpha: 0.12 },  // 暖黄
+      dramatic: { r: 255, g: 230, b: 195, alpha: 0.15 },  // 浓暖
     };
 
     const tint = tintMap[newStage.color_tone] || tintMap.cold;
+
+    // 重置相机背景色
     this.cameras.main.setBackgroundColor(Phaser.Display.Color.GetColor(
-      Math.floor(30 * tint.r),
-      Math.floor(28 * tint.g),
-      Math.floor(35 * tint.b)
+      Math.floor(tint.r * 0.15),
+      Math.floor(tint.g * 0.12),
+      Math.floor(tint.b * 0.16)
     ));
 
-    // 简易闪光过渡
-    this.cameras.main.flash(tint.duration, Math.floor(255 * tint.r), Math.floor(255 * tint.g), Math.floor(255 * tint.b), false, 0.3);
+    // 通过半透明遮罩施加持续色调，避免 flash 全屏遮挡
+    if (this.tintOverlay) {
+      this.tintOverlay.setFillStyle(
+        Phaser.Display.Color.GetColor(tint.r, tint.g, tint.b),
+        tint.alpha
+      );
+    }
   }
 
   // ==================== 地图绘制（江南水乡像素风格）====================
@@ -777,6 +844,61 @@ export class GameScene extends Phaser.Scene {
       npcId: npc.getData('npcId'),
       name: npc.getData('name'),
       position: { x: npc.x, y: npc.y },
+    });
+  }
+
+  // ==================== 工具方法 ====================
+
+  /**
+   * 显示加载提示
+   */
+  showLoadingHint(text) {
+    if (!this.loadingHint) {
+      const { width, height } = this.cameras.main;
+      this.loadingHint = this.add.text(width / 2, height / 2, '', {
+        fontFamily: '"KaiTi","SimSun",serif',
+        fontSize: '20px', color: '#d4b896',
+        backgroundColor: '#0a0a12cc',
+        padding: { x: 24, y: 16 },
+        borderRadius: 8,
+      }).setOrigin(0.5).setDepth(500);
+    }
+    this.loadingHint.setText(text);
+    this.loadingHint.setVisible(true);
+  }
+
+  /**
+   * 隐藏加载提示
+   */
+  hideLoadingHint() {
+    if (this.loadingHint) {
+      this.loadingHint.setVisible(false);
+    }
+  }
+
+  /**
+   * 显示短暂提示 Toast
+   */
+  showToast(message, duration = 2000) {
+    const { width } = this.cameras.main;
+    const toast = this.add.text(width / 2, 30, message, {
+      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+      fontSize: '13px', color: '#ffaa66',
+      backgroundColor: '#1a1010ee',
+      padding: { x: 14, y: 8 },
+      borderRadius: 5,
+    }).setOrigin(0.5, 0).setDepth(600).setAlpha(0);
+
+    this.tweens.add({
+      targets: toast, alpha: 1, duration: 300,
+      onComplete: () => {
+        this.time.delayedCall(duration, () => {
+          this.tweens.add({
+            targets: toast, alpha: 0, duration: 400,
+            onComplete: () => toast.destroy(),
+          });
+        });
+      },
     });
   }
 }
