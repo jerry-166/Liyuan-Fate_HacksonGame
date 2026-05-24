@@ -1,6 +1,6 @@
 # 《梨园生死》API 设计文档
 
-> **版本**: v1.1 | **最后更新**: 2026-05-23 | **设计原则**: 职责单一、接口清晰、按业务模块拆分
+> **版本**: v1.2 | **最后更新**: 2026-05-24 | **设计原则**: 职责单一、接口清晰、按业务模块拆分
 
 ---
 
@@ -384,6 +384,70 @@ GET /api/game/sess_a1b2c3d4/dialogues?npc_id=npc_chen&page=1&page_size=20
 
 ---
 
+### 3.9 关系值历史 — `GET /api/game/{session_id}/relationships`
+
+**职责**: 查询关系值变化历史，支持按 NPC 筛选。
+
+**Request**
+```
+GET /api/game/sess_a1b2c3d4/relationships?npc_id=npc_chen
+```
+
+**Response** `200 OK`
+
+```json
+{
+  "session_id": "sess_a1b2c3d4",
+  "npc_id": "npc_chen",
+  "logs": [
+    {
+      "id": 1,
+      "session_id": "sess_a1b2c3d4",
+      "npc_id": "npc_chen",
+      "delta": 5,
+      "reason": "对话",
+      "relationship_after": 5,
+      "created_at": "2026-05-24 12:00:00"
+    }
+  ],
+  "current_relationships": {
+    "npc_chen": 15,
+    "npc_xiaohua": 10
+  },
+  "total": 1
+}
+```
+
+### 3.10 事件时间线 — `GET /api/game/{session_id}/events`
+
+**职责**: 查询已触发事件的时间线。
+
+**Request**
+```
+GET /api/game/sess_a1b2c3d4/events
+```
+
+**Response** `200 OK`
+
+```json
+{
+  "session_id": "sess_a1b2c3d4",
+  "events": [
+    {
+      "id": 1,
+      "event_id": "first_enter_tavern",
+      "triggered_by": "system",
+      "stage": 1,
+      "stage_name": "不屑",
+      "created_at": "2026-05-24 12:00:00"
+    }
+  ],
+  "total": 1
+}
+```
+
+---
+
 ## 四、完整调用时序
 
 ```
@@ -460,7 +524,7 @@ CREATE INDEX idx_dialogue_session ON dialogues(session_id, npc_id);
 
 | 维度 | v1.0-MVP / v1.1（本文档范围） | 后续版本 |
 |------|-------------------------------|----------|
-| API 数量 | **8 个**（v1.0: 4个 + v1.1: 4个） | 扩展至 12+ 个 |
+| API 数量 | **10 个**（v1.0: 4个 + v1.1: 4个 + v1.2: 2个） | 扩展至 12+ 个 |
 | NPC Agent | 2 个 NPC Agent | 每个 NPC 独立 Agent 实例 + 主动行为 |
 | NPC Handoff | ✅ 事件驱动跨NPC上下文注入 | 复杂 NPC 间协作剧情 |
 | 对话方式 | AI 生成选项 + 自由输入文字 | 自由输入为主 |
@@ -485,3 +549,5 @@ CREATE INDEX idx_dialogue_session ON dialogues(session_id, npc_id);
 | `mock/sessions.json` | `GET /api/sessions` |
 | `mock/dialogues.json` | `GET /api/game/{id}/dialogues` |
 | `mock/exit_dialogue.json` | `POST /api/dialogue/exit` |
+| `mock/relationships.json` | `GET /api/game/{id}/relationships` |
+| `mock/events.json` | `GET /api/game/{id}/events` |
