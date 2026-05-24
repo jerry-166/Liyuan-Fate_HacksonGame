@@ -141,7 +141,13 @@ class StageEngine:
 
         # 持久化
         from state.manager import get_session_manager
-        get_session_manager().persist_session(session)
+        manager = get_session_manager()
+        manager.persist_session(session)
+        # 记录阶段切换历史
+        manager.persist_stage_history(
+            session, old_stage, result.new_stage,
+            reason=f"{result.triggered_by}: {result.reason}",
+        )
 
     def _stage_greeting(self, npc_id: str, stage: int) -> str:
         """根据阶段返回 NPC 问候语。"""

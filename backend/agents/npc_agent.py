@@ -145,7 +145,13 @@ class NPCAgent:
                 npc_id=npc_id,
                 stage=session.current_stage,
             ))
-            manager.persist_dialogue(session, npc_id, "player", player_message)
+            dialogue_id = manager.persist_dialogue(session, npc_id, "player", player_message)
+            # 记录玩家选择（叙事游戏的关键选择追踪）
+            manager.persist_player_choice(
+                session, npc_id, player_message,
+                available_options=npc.last_options if npc.last_options else None,
+                dialogue_id=dialogue_id,
+            )
 
         # 记录 NPC 回复
         reply_text = result.dialogue_text or full_text
@@ -155,7 +161,7 @@ class NPCAgent:
             npc_id=npc_id,
             stage=session.current_stage,
         ))
-        manager.persist_dialogue(session, npc_id, "npc", reply_text, options=result.options)
+        npc_reply_dialogue_id = manager.persist_dialogue(session, npc_id, "npc", reply_text, options=result.options)
 
         # 缓存最近选项
         npc.last_options = result.options
@@ -169,7 +175,14 @@ class NPCAgent:
             # 兜底：每轮 +3
             from config import RELATIONSHIP_DEFAULT_DELTA
             delta = RELATIONSHIP_DEFAULT_DELTA
+        old_rel = npc.relationship
         npc.apply_delta(delta)
+        # 记录关系值变化日志
+        manager.persist_relationship_log(
+            session, npc_id, delta, old_rel, npc.relationship,
+            reason="对话加成" if result.relationship_delta != 0 else "兜底加成",
+            dialogue_id=npc_reply_dialogue_id,
+        )
 
         # 更新 NPC 问候语（用回复的摘要作新问候语）
         short_reply = reply_text[:50].replace("\n", " ")
@@ -187,7 +200,14 @@ class NPCAgent:
                 )
                 # 事件奖励关系值
                 from config import RELATIONSHIP_EVENT_BONUS
+                event_old_rel = npc.relationship
                 npc.apply_delta(RELATIONSHIP_EVENT_BONUS)
+                manager.persist_relationship_log(
+                    session, npc_id, RELATIONSHIP_EVENT_BONUS,
+                    event_old_rel, npc.relationship,
+                    reason=f"事件奖励: {event_id}",
+                    dialogue_id=npc_reply_dialogue_id,
+                )
                 logger.info(f"[Agent] Event triggered: {event_id} by {npc_id}")
 
         # 阶段判定（LLM 建议）

@@ -53,6 +53,8 @@ class SessionManager:
 
         self._sessions[session_id] = session
         self._db.create_session(session_id, player_name, stage=1)
+        # 持久化初始 NPC 状态
+        self._db.save_npc_states_batch(session_id, session.npcs)
         logger.info(f"[SessionManager] Created session: {session_id} (player={player_name})")
         return session
 
@@ -95,11 +97,20 @@ class SessionManager:
             except json.JSONDecodeError:
                 pass
 
-        # 重建 NPC 状态
+        # 重建 NPC 状态：先从 npc_states 表恢复持久化数据
+        saved_npcs = {r["npc_id"]: r for r in self._db.load_npc_states(session_id)}
         for npc_def in NPC_DEFS:
+            npc_id = npc_def["id"]
             npc = NPCState(**npc_def)
-            npc.current_greeting = self._default_greeting(npc.id)
-            session.npcs[npc.id] = npc
+            if npc_id in saved_npcs:
+                saved = saved_npcs[npc_id]
+                npc.relationship = saved.get("relationship", 0)
+                npc.is_available = bool(saved.get("is_available", 1))
+                npc.current_greeting = saved.get("current_greeting", "") or self._default_greeting(npc_id)
+                npc.dialogue_round_count = saved.get("dialogue_round_count", 0)
+            else:
+                npc.current_greeting = self._default_greeting(npc_id)
+            session.npcs[npc_id] = npc
 
         # 从 DB 恢复事件列表
         events = self._db.get_events(session_id)
@@ -122,9 +133,9 @@ class SessionManager:
         return session
 
     def persist_dialogue(self, session: GameSession, npc_id: str, role: str, content: str,
-                         options: list[str] = None) -> None:
-        """持久化一条对话记录（含选项）。"""
-        self._db.save_dialogue(session.session_id, npc_id, role, content, session.current_stage, options=options)
+                         options: list[str] = None) -> int:
+        """持久化一条对话记录（含选项），返回 dialogue_id。"""
+        return self._db.save_dialogue(session.session_id, npc_id, role, content, session.current_stage, options=options)
 
     def persist_event(self, session: GameSession, event_id: str, description: str = "",
                       triggered_by_npc: str = "") -> None:
@@ -135,13 +146,72 @@ class SessionManager:
         )
 
     def persist_session(self, session: GameSession) -> None:
-        """将内存状态同步到 SQLite。"""
+        """将内存状态同步到 SQLite（含 session + NPC 状态）。"""
         self._db.update_session(
             session.session_id,
             stage=session.current_stage,
             game_ended=session.game_ended,
             ending_type=session.ending_type,
             ending_data=session.ending_data,
+        )
+        # 同步所有 NPC 状态
+        self._db.save_npc_states_batch(session.session_id, session.npcs)
+
+    def persist_npc_state(self, session: GameSession, npc_id: str) -> None:
+        """持久化单个 NPC 状态。"""
+        npc = session.npcs.get(npc_id)
+        if not npc:
+            return
+        self._db.save_npc_state(
+            session.session_id, npc_id,
+            relationship=npc.relationship,
+            is_available=npc.is_available,
+            current_greeting=npc.current_greeting,
+            dialogue_round_count=npc.dialogue_round_count,
+        )
+
+    def persist_relationship_log(
+        self,
+        session: GameSession,
+        npc_id: str,
+        delta: int,
+        old_value: int,
+        new_value: int,
+        reason: str = "",
+        dialogue_id: int = None,
+    ) -> None:
+        """持久化关系值变化日志。"""
+        self._db.save_relationship_log(
+            session.session_id, npc_id, delta, old_value, new_value,
+            reason=reason, dialogue_id=dialogue_id,
+        )
+
+    def persist_player_choice(
+        self,
+        session: GameSession,
+        npc_id: str,
+        choice_text: str,
+        available_options: list[str] = None,
+        dialogue_id: int = None,
+    ) -> None:
+        """持久化玩家选择记录。"""
+        self._db.save_player_choice(
+            session.session_id, npc_id, choice_text,
+            available_options=available_options,
+            dialogue_id=dialogue_id,
+            stage=session.current_stage,
+        )
+
+    def persist_stage_history(
+        self,
+        session: GameSession,
+        from_stage: int,
+        to_stage: int,
+        reason: str = "",
+    ) -> None:
+        """持久化阶段切换历史。"""
+        self._db.save_stage_history(
+            session.session_id, from_stage, to_stage, reason,
         )
 
     def list_sessions(self) -> list[dict]:

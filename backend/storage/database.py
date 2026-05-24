@@ -133,22 +133,6 @@ class Database:
                 params,
             )
 
-    def delete_expired_sessions(self, ttl_seconds: float) -> list[str]:
-        """删除超过 TTL 的会话，返回被删除的 session_id 列表。"""
-        with self._conn() as conn:
-            rows = conn.execute(
-                "SELECT session_id FROM sessions "
-                "WHERE updated_at < datetime('now', ?)",
-                (f"-{int(ttl_seconds)} seconds",),
-            ).fetchall()
-            ids = [r["session_id"] for r in rows]
-            if ids:
-                placeholders = ",".join("?" * len(ids))
-                conn.execute(f"DELETE FROM dialogues WHERE session_id IN ({placeholders})", ids)
-                conn.execute(f"DELETE FROM events WHERE session_id IN ({placeholders})", ids)
-                conn.execute(f"DELETE FROM sessions WHERE session_id IN ({placeholders})", ids)
-        return ids
-
     # ─── Dialogue CRUD ──────────────────────────────────
 
     def save_dialogue(
@@ -285,6 +269,183 @@ class Database:
                 (session_id,),
             ).fetchall()
         return [dict(r) for r in rows]
+
+
+    # ─── NPC States CRUD ───────────────────────────────
+
+    def save_npc_state(
+        self,
+        session_id: str,
+        npc_id: str,
+        relationship: int = 0,
+        is_available: bool = True,
+        current_greeting: str = "",
+        dialogue_round_count: int = 0,
+    ) -> None:
+        """写入或更新单个 NPC 的运行时状态（UPSERT）。"""
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO npc_states (session_id, npc_id, relationship, is_available, "
+                "current_greeting, dialogue_round_count, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "ON CONFLICT(session_id, npc_id) DO UPDATE SET "
+                "relationship = excluded.relationship, "
+                "is_available = excluded.is_available, "
+                "current_greeting = excluded.current_greeting, "
+                "dialogue_round_count = excluded.dialogue_round_count, "
+                "updated_at = CURRENT_TIMESTAMP",
+                (session_id, npc_id, relationship, 1 if is_available else 0,
+                 current_greeting, dialogue_round_count),
+            )
+
+    def save_npc_states_batch(self, session_id: str, npcs: dict) -> None:
+        """批量持久化所有 NPC 状态。npcs: {npc_id: NPCState}。"""
+        with self._conn() as conn:
+            for npc_id, npc in npcs.items():
+                conn.execute(
+                    "INSERT INTO npc_states (session_id, npc_id, relationship, is_available, "
+                    "current_greeting, dialogue_round_count, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                    "ON CONFLICT(session_id, npc_id) DO UPDATE SET "
+                    "relationship = excluded.relationship, "
+                    "is_available = excluded.is_available, "
+                    "current_greeting = excluded.current_greeting, "
+                    "dialogue_round_count = excluded.dialogue_round_count, "
+                    "updated_at = CURRENT_TIMESTAMP",
+                    (session_id, npc_id, npc.relationship, 1 if npc.is_available else 0,
+                     npc.current_greeting, npc.dialogue_round_count),
+                )
+
+    def load_npc_states(self, session_id: str) -> list[dict]:
+        """加载某个会话下所有 NPC 的持久化状态。"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT npc_id, relationship, is_available, current_greeting, "
+                "dialogue_round_count FROM npc_states WHERE session_id = ?",
+                (session_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ─── Relationship Log CRUD ──────────────────────────
+
+    def save_relationship_log(
+        self,
+        session_id: str,
+        npc_id: str,
+        delta: int,
+        old_value: int,
+        new_value: int,
+        reason: str = "",
+        dialogue_id: Optional[int] = None,
+    ) -> None:
+        """记录一次关系值变化。"""
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO relationship_log (session_id, npc_id, delta, old_value, "
+                "new_value, reason, dialogue_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (session_id, npc_id, delta, old_value, new_value, reason, dialogue_id),
+            )
+
+    def get_relationship_log(self, session_id: str, npc_id: Optional[str] = None) -> list[dict]:
+        """查询关系值变化历史。"""
+        with self._conn() as conn:
+            if npc_id:
+                rows = conn.execute(
+                    "SELECT * FROM relationship_log WHERE session_id = ? AND npc_id = ? "
+                    "ORDER BY created_at ASC",
+                    (session_id, npc_id),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM relationship_log WHERE session_id = ? "
+                    "ORDER BY created_at ASC",
+                    (session_id,),
+                ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ─── Player Choices CRUD ────────────────────────────
+
+    def save_player_choice(
+        self,
+        session_id: str,
+        npc_id: str,
+        choice_text: str,
+        available_options: list[str] = None,
+        dialogue_id: Optional[int] = None,
+        stage: int = 1,
+    ) -> None:
+        """记录一次玩家选择。"""
+        options_json = json.dumps(available_options, ensure_ascii=False) if available_options else None
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO player_choices (session_id, npc_id, choice_text, "
+                "available_options, dialogue_id, stage) VALUES (?, ?, ?, ?, ?, ?)",
+                (session_id, npc_id, choice_text, options_json, dialogue_id, stage),
+            )
+
+    def get_player_choices(self, session_id: str) -> list[dict]:
+        """查询玩家选择历史。"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM player_choices WHERE session_id = ? ORDER BY created_at ASC",
+                (session_id,),
+            ).fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            if d.get("available_options"):
+                try:
+                    d["available_options"] = json.loads(d["available_options"])
+                except json.JSONDecodeError:
+                    d["available_options"] = []
+            result.append(d)
+        return result
+
+    # ─── Stage History CRUD ─────────────────────────────
+
+    def save_stage_history(
+        self,
+        session_id: str,
+        from_stage: int,
+        to_stage: int,
+        reason: str = "",
+    ) -> None:
+        """记录一次阶段切换。"""
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO stage_history (session_id, from_stage, to_stage, reason) "
+                "VALUES (?, ?, ?, ?)",
+                (session_id, from_stage, to_stage, reason),
+            )
+
+    def get_stage_history(self, session_id: str) -> list[dict]:
+        """查询阶段切换历史。"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM stage_history WHERE session_id = ? ORDER BY created_at ASC",
+                (session_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def delete_expired_sessions(self, ttl_seconds: float) -> list[str]:
+        """删除超过 TTL 的会话，返回被删除的 session_id 列表。"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT session_id FROM sessions "
+                "WHERE updated_at < datetime('now', ?)",
+                (f"-{int(ttl_seconds)} seconds",),
+            ).fetchall()
+            ids = [r["session_id"] for r in rows]
+            if ids:
+                placeholders = ",".join("?" * len(ids))
+                conn.execute(f"DELETE FROM dialogues WHERE session_id IN ({placeholders})", ids)
+                conn.execute(f"DELETE FROM events WHERE session_id IN ({placeholders})", ids)
+                conn.execute(f"DELETE FROM npc_states WHERE session_id IN ({placeholders})", ids)
+                conn.execute(f"DELETE FROM relationship_log WHERE session_id IN ({placeholders})", ids)
+                conn.execute(f"DELETE FROM player_choices WHERE session_id IN ({placeholders})", ids)
+                conn.execute(f"DELETE FROM stage_history WHERE session_id IN ({placeholders})", ids)
+                conn.execute(f"DELETE FROM sessions WHERE session_id IN ({placeholders})", ids)
+        return ids
 
 
 # 全局单例
