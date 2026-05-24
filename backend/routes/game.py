@@ -12,6 +12,7 @@ from state.manager import get_session_manager
 from storage.database import get_db
 from llm.client import LLMClient
 from agents.prompt_builder import PromptBuilder
+from config import STAGES
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -135,3 +136,61 @@ async def evaluate_ending(session_id: str):
         session.ending_data = fallback
         manager.persist_session(session)
         return fallback
+
+
+# ─── 关系变化日志（P0） ─────────────────────────────────
+
+@router.get("/game/{session_id}/relationships")
+async def get_relationships(session_id: str, npc_id: Optional[str] = None):
+    """查询关系值变化历史，支持按 NPC 筛选。"""
+    manager = get_session_manager()
+    session = manager.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail={
+            "error": True, "code": "SESSION_NOT_FOUND",
+            "message": f"游戏会话不存在: {session_id}"
+        })
+
+    db = get_db()
+    logs = db.get_relationship_log(session_id, npc_id=npc_id)
+
+    # 补充当前关系终值
+    current_rel = {
+        nid: npc.relationship for nid, npc in session.npcs.items()
+    }
+
+    return {
+        "session_id": session_id,
+        "npc_id": npc_id,
+        "logs": logs,
+        "current_relationships": current_rel,
+        "total": len(logs),
+    }
+
+
+# ─── 事件时间线（P1） ───────────────────────────────────
+
+@router.get("/game/{session_id}/events")
+async def get_events(session_id: str):
+    """查询已触发的事件时间线。"""
+    manager = get_session_manager()
+    session = manager.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail={
+            "error": True, "code": "SESSION_NOT_FOUND",
+            "message": f"游戏会话不存在: {session_id}"
+        })
+
+    db = get_db()
+    events = db.get_events(session_id)
+
+    # 补充阶段名称
+    for e in events:
+        stage_num = e.get("stage", 1)
+        e["stage_name"] = STAGES.get(stage_num, {}).get("name", "未知")
+
+    return {
+        "session_id": session_id,
+        "events": events,
+        "total": len(events),
+    }
