@@ -24,7 +24,7 @@ npcs:
     role: "老琴师"
     persona_file: "chen_shifu.yaml"
     scene: "teahouse"
-    position: {x: 688, y: 256}
+    position: {col: 43, row: 16}
     sprite_key: "npc_chen_idle"
     relationship_default: 20
   - id: "npc_xiaohua"
@@ -32,7 +32,7 @@ npcs:
     role: "年轻学徒"
     persona_file: "xiaohua.yaml"
     scene: "stage"
-    position: {x: 176, y: 160}
+    position: {col: 11, row: 10}
     sprite_key: "npc_xiaohua_idle"
     relationship_default: 0
   - id: "npc_laozhou"
@@ -40,7 +40,7 @@ npcs:
     role: "老艺人"
     persona_file: "lao_zhou.yaml"
     scene: "stage"
-    position: {x: 144, y: 112}
+    position: {col: 9, row: 7}
     sprite_key: "npc_laozhou_idle"
     relationship_default: 10
   - id: "npc_meiyi"
@@ -48,7 +48,7 @@ npcs:
     role: "茶馆老板娘"
     persona_file: "mei_yi.yaml"
     scene: "teahouse"
-    position: {x: 688, y: 288}
+    position: {col: 43, row: 18}
     sprite_key: "npc_meiyi_idle"
     relationship_default: 15
   - id: "npc_laoli"
@@ -56,7 +56,7 @@ npcs:
     role: "船夫"
     persona_file: "lao_li.yaml"
     scene: "dock"
-    position: {x: 1040, y: 304}
+    position: {col: 65, row: 19}
     sprite_key: "npc_laoli_idle"
     relationship_default: 10
 

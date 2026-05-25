@@ -39,7 +39,7 @@ items:
       这是父亲珍藏了十几年的戏服——你幼年登台时穿的那件。
     is_key: true
     related_npcs: [npc_chen, npc_laozhou]
-    location: {scene: "father_house", position: {x: 11, y: 12}}
+    location: {scene: "father_house", position: {col: 11, row: 12}}
     acquire_method: "在父亲旧居墙角的老木箱中找到（F键打开木箱）"
     desc_source: fixed
     stage_relevance: [2, 3]
@@ -55,7 +55,7 @@ items:
       旧居旧木桌上放着，旁边还有父亲当年抄戏用的毛笔。
     is_key: true
     related_npcs: [npc_chen, npc_laozhou]
-    location: {scene: "father_house", position: {x: 5, y: 7}}
+    location: {scene: "father_house", position: {col: 5, row: 7}}
     acquire_method: "在父亲旧居主屋旧木桌上找到（F键查看）"
     desc_source: fixed
     stage_relevance: [2]
@@ -70,7 +70,7 @@ items:
       父亲旧居的照片墙上挂着，与另一张父亲单人旧照并排。
     is_key: true
     related_npcs: [npc_chen, npc_meiyi, npc_laozhou]
-    location: {scene: "father_house", position: {x: 5, y: 5}}
+    location: {scene: "father_house", position: {col: 5, row: 5}}
     acquire_method: "在父亲旧居照片墙上找到（F键查看）"
     desc_source: fixed
     stage_relevance: [2]
@@ -88,7 +88,7 @@ items:
       照片背面写着：'三秋·二十六岁·空城计'。
     is_key: false
     related_npcs: [npc_laozhou, npc_meiyi]
-    location: {scene: "father_house", position: {x: 5, y: 4}}
+    location: {scene: "father_house", position: {col: 5, row: 4}}
     acquire_method: "父亲旧居照片墙上（F键查看）"
     desc_source: fixed
     stage_relevance: [2]
@@ -103,7 +103,7 @@ items:
       旁边写着一个日期：三十年前的某一天。
     is_key: false
     related_npcs: [npc_chen, npc_meiyi]
-    location: {scene: "temple", position: {x: 5, y: 15}}
+    location: {scene: "temple", position: {col: 5, row: 15}}
     acquire_method: "祠堂后堂老书架上（F键查看）"
     desc_source: fixed
     stage_relevance: [2]
@@ -116,7 +116,7 @@ items:
       这不是用来放入背包的物品，而是一个场景交互点——打开它能看到更多旧物。
     is_key: false
     related_npcs: [npc_chen, npc_xiaohua, npc_laozhou]
-    location: {scene: "stage_ruin", position: {x: 6, y: 15}}
+    location: {scene: "stage_ruin", position: {col: 6, row: 15}}
     acquire_method: "场景交互点，F键打开（不可拾取）"
     desc_source: fixed
     stage_relevance: [1, 2, 3]
@@ -134,7 +134,7 @@ items:
       琴盒下面的灰很厚——至少十年没人动过了。
     is_key: false
     related_npcs: [npc_chen, npc_laozhou]
-    location: {scene: "stage_ruin", position: {x: 36, y: 1}}
+    location: {scene: "stage_ruin", position: {col: 36, row: 1}}
     acquire_method: "场景交互点，F键查看（不可拾取）"
     desc_source: fixed
     stage_relevance: [1, 2]
@@ -149,7 +149,7 @@ items:
       照片右下角写着：'民国二十二年秋·梨园班全体'。
     is_key: false
     related_npcs: [npc_chen, npc_meiyi, npc_laozhou]
-    location: {scene: "teahouse", position: {x: 20, y: 10}}
+    location: {scene: "teahouse", position: {col: 20, row: 10}}
     acquire_method: "茶馆雅间墙上（F键查看）"
     desc_source: fixed
     stage_relevance: [2]
@@ -164,7 +164,7 @@ items:
       都是戏行的人。
     is_key: false
     related_npcs: [npc_chen, npc_meiyi]
-    location: {scene: "temple", position: {x: 11, y: 7}}
+    location: {scene: "temple", position: {col: 11, row: 7}}
     acquire_method: "祠堂供桌上（F键查看）"
     desc_source: fixed
     stage_relevance: [2]

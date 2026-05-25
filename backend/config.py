@@ -21,21 +21,22 @@ LLM_SSE_TIMEOUT: float = float(os.getenv("LLM_SSE_TIMEOUT", "120.0"))
 # ─── 游戏配置 ───────────────────────────────────────────
 
 # NPC 配置（5 个 NPC）
+# position 使用瓦片坐标 {col, row}，前端通过 COORD.toPixel() 转换为像素坐标
 NPC_DEFS = [
     {"id": "npc_chen", "name": "陈师傅", "role": "老琴师",
-     "scene": "teahouse", "position": {"x": 688, "y": 256},
+     "scene": "teahouse", "position": {"col": 43, "row": 16},
      "sprite_key": "npc_chen_idle", "relationship_default": 20},
     {"id": "npc_xiaohua", "name": "小华", "role": "年轻学徒",
-     "scene": "stage", "position": {"x": 176, "y": 160},
+     "scene": "stage", "position": {"col": 11, "row": 10},
      "sprite_key": "npc_xiaohua_idle", "relationship_default": 0},
     {"id": "npc_laozhou", "name": "老周", "role": "老艺人",
-     "scene": "stage", "position": {"x": 144, "y": 112},
+     "scene": "stage", "position": {"col": 9, "row": 7},
      "sprite_key": "npc_laozhou_idle", "relationship_default": 10},
     {"id": "npc_meiyi", "name": "梅姨", "role": "茶馆老板娘",
-     "scene": "teahouse", "position": {"x": 688, "y": 288},
+     "scene": "teahouse", "position": {"col": 43, "row": 18},
      "sprite_key": "npc_meiyi_idle", "relationship_default": 15},
     {"id": "npc_laoli", "name": "老李", "role": "船夫",
-     "scene": "dock", "position": {"x": 1040, "y": 304},
+     "scene": "dock", "position": {"col": 65, "row": 19},
      "sprite_key": "npc_laoli_idle", "relationship_default": 10},
 ]
 
