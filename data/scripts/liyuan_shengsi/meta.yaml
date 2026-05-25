@@ -1,0 +1,63 @@
+# 剧本元信息 — 梨园生死
+script_id: "liyuan_shengsi"
+name: "梨园生死"
+version: "1.0"
+author: "Team A"
+
+worldview: |
+  江南水乡小镇梨溪镇，民国时期。
+  镇上曾有一个名震一方的戏班——"梨园班"。
+  三十年前，班主柳三秋是万人空巷的名角，一出《空城计》轰动百里。
+  他的儿子自幼在戏班长大，是百年难遇的戏曲神童。
+  一场登台意外让神童重伤昏迷、丧失了所有记忆。
+  柳三秋为保护儿子，毅然放下一切，带着失忆的孩子远走他乡。
+  三十年后，柳三秋病逝。你——那个曾经的戏曲神童，带着父亲的骨灰回到故乡。
+
+system_prompt_file: null  # 使用全局默认 system_base.txt
+persona_dir: "personas/"
+chapters_file: "chapters.yaml"
+items_file: "items/story_items.yaml"
+
+npcs:
+  - id: "npc_chen"
+    name: "陈师傅"
+    role: "老琴师"
+    persona_file: "chen_shifu.yaml"
+    scene: "teahouse"
+    position: {x: 688, y: 256}
+    sprite_key: "npc_chen_idle"
+    relationship_default: 20
+  - id: "npc_xiaohua"
+    name: "小华"
+    role: "年轻学徒"
+    persona_file: "xiaohua.yaml"
+    scene: "stage"
+    position: {x: 176, y: 160}
+    sprite_key: "npc_xiaohua_idle"
+    relationship_default: 0
+  - id: "npc_laozhou"
+    name: "老周"
+    role: "老艺人"
+    persona_file: "lao_zhou.yaml"
+    scene: "stage"
+    position: {x: 144, y: 112}
+    sprite_key: "npc_laozhou_idle"
+    relationship_default: 10
+  - id: "npc_meiyi"
+    name: "梅姨"
+    role: "茶馆老板娘"
+    persona_file: "mei_yi.yaml"
+    scene: "teahouse"
+    position: {x: 688, y: 288}
+    sprite_key: "npc_meiyi_idle"
+    relationship_default: 15
+  - id: "npc_laoli"
+    name: "老李"
+    role: "船夫"
+    persona_file: "lao_li.yaml"
+    scene: "dock"
+    position: {x: 1040, y: 304}
+    sprite_key: "npc_laoli_idle"
+    relationship_default: 10
+
+prompt_overrides: {}

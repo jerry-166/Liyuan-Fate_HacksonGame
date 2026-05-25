@@ -43,7 +43,7 @@ chapters:
     color_tone: "#8899bb"
     bgm_mood: "eerie_warm"
     key_event: "first_resonance"
-    required_npcs: ["npc_xiaohua", npc_laozhou]
+    required_npcs: ["npc_xiaohua", "npc_laozhou"]
     required_items: ["item_old_trunk", "item_old_jinghu"]
     success_condition: >
       玩家进入戏台，与小华和老周有过初步互动，
@@ -65,7 +65,7 @@ chapters:
       - mode: relation
         title: "初步了解戏班现状"
         target_npc_id: "npc_xiaohua"
-        threshold: 10
+        relation_threshold: 10
         description: "通过对话了解戏班的基本情况，让小华不再完全排斥你"
 
   # ─── 第二章：探寻·疑云 ──────────────────────
