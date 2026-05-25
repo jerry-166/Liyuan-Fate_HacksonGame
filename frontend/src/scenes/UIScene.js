@@ -154,6 +154,17 @@ export class UIScene extends Phaser.Scene {
     this.historyPanelVisible = false;
     this.historyScrollY = 0;
 
+    // 统一内容区域参数（所有文本坐标和遮罩基于此计算）
+    const padX = 24;
+    const padTop = 60;          // 标题下方
+    const padBottom = 50;       // 底部提示上方
+    this._historyArea = {
+      x: padX,
+      y: padTop,
+      w: width - padX * 2,
+      h: height - padTop - padBottom,
+    };
+
     this.historyPanel = this.add.container(0, 0).setDepth(400).setVisible(false);
 
     const bg = this.add.graphics();
@@ -167,12 +178,13 @@ export class UIScene extends Phaser.Scene {
     }).setOrigin(0.5, 0);
     this.historyPanel.add(titleText);
 
-    this.historyContent = this.add.container(0, 60);
+    this.historyContent = this.add.container(0, padTop);
     this.historyPanel.add(this.historyContent);
 
-    // 历史内容遮罩：限制在标题下方、提示上方区域内
+    // 遮罩精确对齐 _historyArea 区域
     const histMaskGfx = this.add.graphics();
-    histMaskGfx.fillRect(0, 56, width, height - 96);
+    const ha = this._historyArea;
+    histMaskGfx.fillRect(ha.x - 4, ha.y - 4, ha.w + 8, ha.h + 8);
     histMaskGfx.setVisible(false);
     const histMask = histMaskGfx.createGeometryMask();
     this.historyContent.setMask(histMask);
@@ -186,12 +198,12 @@ export class UIScene extends Phaser.Scene {
 
     this.input.on('wheel', (pointer, gameObjects, deltaX, deltaY) => {
       if (!this.historyPanelVisible) return;
-      if (this.historyContentHeight <= height - 160) return;
+      if (this.historyContentHeight <= ha.h) return;
       this.historyScrollY = Math.max(
         Math.min(0, this.historyScrollY - deltaY * 0.5),
-        -(this.historyContentHeight - height + 160)
+        -(this.historyContentHeight - ha.h)
       );
-      this.historyContent.setY(60 + this.historyScrollY);
+      this.historyContent.setY(ha.y + this.historyScrollY);
     });
   }
 
@@ -232,11 +244,13 @@ export class UIScene extends Phaser.Scene {
   refreshHistoryContent() {
     this.historyContent.removeAll(true);
     const { width } = this.cameras.main;
-    const maxW = width - 120;
+    const ha = this._historyArea;
+    // wordWrap 宽度留 10px 安全边距，确保不超出区域
+    const maxW = ha.w - 10;
     let y = 0;
 
     if (this.dialogueHistory.length === 0) {
-      const empty = this.add.text(width / 2, 80, '还没有任何对话记录', {
+      const empty = this.add.text(width / 2, 20, '还没有任何对话记录', {
         fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
         fontSize: '14px', color: '#666655',
       }).setOrigin(0.5, 0);
@@ -247,7 +261,7 @@ export class UIScene extends Phaser.Scene {
 
     this.dialogueHistory.forEach((entry, idx) => {
       if (idx === 0 || entry.stage !== this.dialogueHistory[idx - 1].stage) {
-        const sep = this.add.text(width / 2, y, `—— 第${entry.stage}章 ——`, {
+        const sep = this.add.text(ha.w / 2, y, `—— 第${entry.stage}章 ——`, {
           fontFamily: '"KaiTi","SimSun",serif',
           fontSize: '14px', color: '#998866',
         }).setOrigin(0.5, 0);
@@ -255,24 +269,27 @@ export class UIScene extends Phaser.Scene {
         y += 30;
       }
 
-      const npcLabel = this.add.text(60, y, `【${entry.npcName}】`, {
+      const npcLabel = this.add.text(ha.x, y, `【${entry.npcName}】`, {
         fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
         fontSize: '14px', color: '#d4b896', fontStyle: 'bold',
       });
       this.historyContent.add(npcLabel);
       y += 22;
 
-      const npcT = this.add.text(60, y, entry.npcText, {
+      const npcT = this.add.text(ha.x, y, entry.npcText, {
         fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-        fontSize: '13px', color: '#c0b898', wordWrap: { width: maxW }, lineSpacing: 4,
+        fontSize: '13px', color: '#c0b898',
+        wordWrap: { width: maxW, useAdvancedWrap: true },
+        lineSpacing: 4,
       });
       this.historyContent.add(npcT);
       y += npcT.height + 10;
 
       if (entry.playerText) {
-        const pl = this.add.text(60, y, `【你】${entry.playerText}`, {
+        const pl = this.add.text(ha.x, y, `【你】${entry.playerText}`, {
           fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-          fontSize: '12px', color: '#88aacc', wordWrap: { width: maxW },
+          fontSize: '12px', color: '#88aacc',
+          wordWrap: { width: maxW, useAdvancedWrap: true },
         });
         this.historyContent.add(pl);
         y += pl.height + 18;
@@ -281,7 +298,7 @@ export class UIScene extends Phaser.Scene {
 
     this.historyContentHeight = y;
     this.historyScrollY = 0;
-    this.historyContent.setY(60);
+    this.historyContent.setY(this._historyArea.y);
   }
 
   // =========================== 对话框面板 ===========================
@@ -292,6 +309,16 @@ export class UIScene extends Phaser.Scene {
     const panelH = 250;
     const panelX = (width - panelW) / 2;
     const panelY = height - panelH - 24;
+
+    // 统一对话框区域参数（所有内部元素基于此定位）
+    this._dialogArea = { x: panelX, y: panelY, w: panelW, h: panelH };
+    // 文本安全区：名称栏下方 → 选项/输入框上方
+    this._textArea = {
+      x: panelX + 20,
+      y: panelY + 46,
+      w: panelW - 40,
+      h: panelH - 40 - 74,   // 减去名称区(36px) + 底部选项+输入区(~74px)
+    };
 
     this.dialogContainer = this.add.container(0, 0).setDepth(300).setVisible(false);
 
@@ -315,23 +342,23 @@ export class UIScene extends Phaser.Scene {
     this.dialogContainer.add(this.dialogName);
 
     // 对话文本（流式逐字显示区域）
-    this.dialogText = this.add.text(panelX + 20, panelY + 46, '', {
+    const ta = this._textArea;
+    this.dialogText = this.add.text(ta.x, ta.y, '', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '15px', color: '#e8dcc8', wordWrap: { width: panelW - 40 },
+      fontSize: '15px', color: '#e8dcc8',
+      wordWrap: { width: ta.w, useAdvancedWrap: true },
       lineSpacing: 6,
     });
     this.dialogContainer.add(this.dialogText);
 
-    // 遮罩：防止流式输出时文字溢出到选项区
+    // 遮罩：防止流式输出时文字溢出到选项区，精确对齐 _textArea
     const textMaskGfx = this.add.graphics();
-    // 遮罩高度统一使用 panelH - 40 - 74（留出名称栏和选项栏安全边距）
-    const maskH = panelH - 40 - 74;
-    textMaskGfx.fillRect(panelX + 16, panelY + 40, panelW - 32, maskH);
+    textMaskGfx.fillRect(ta.x - 4, ta.y - 4, ta.w + 8, ta.h + 8);
     textMaskGfx.setVisible(false);
     const textMask = textMaskGfx.createGeometryMask();
     this.dialogText.setMask(textMask);
     this.dialogTextMask = textMask;
-    this._maskHeight = maskH;
+    this._maskHeight = ta.h;
 
     // 光标闪烁
     this.cursorBlink = this.add.text(0, 0, '▎', {
@@ -394,10 +421,11 @@ export class UIScene extends Phaser.Scene {
     });
 
     const { width, height } = this.cameras.main;
-    const panelW = width - 80;
-    const panelH = 250;
-    const panelX = (width - panelW) / 2;
-    const panelY = height - panelH - 24;
+    const da = this._dialogArea || {
+      x: (width - (width - 80)) / 2, y: height - 250 - 24,
+      w: width - 80, h: 250,
+    };
+    const { x: panelX, y: panelY, w: panelW, h: panelH } = da;
     const inputY = panelY + panelH - 38;
 
     // 布局策略：<=3 横排，>=4 双列网格（避免4个横排时每个按钮过窄）
@@ -467,10 +495,11 @@ export class UIScene extends Phaser.Scene {
   showFreeInput() {
     if (!this.freeInput || !this.dialogContainer.visible) return;
     const { width, height } = this.cameras.main;
-    const panelW = width - 80;
-    const panelH = 250;
-    const panelX = (width - panelW) / 2;
-    const panelY = height - panelH - 24;
+    const da = this._dialogArea || {
+      x: (width - (width - 80)) / 2, y: height - 250 - 24,
+      w: width - 80, h: 250,
+    };
+    const { x: panelX, y: panelY, w: panelW, h: panelH } = da;
     const inputY = panelY + panelH - 38;
 
     // 获取 canvas 在页面中的实际位置和缩放
@@ -599,10 +628,9 @@ export class UIScene extends Phaser.Scene {
   splitTextToPages(fullText) {
     if (!fullText) return [''];
 
-    const { width } = this.cameras.main;
-    const panelW = width - 80;
-    // 使用与遮罩一致的可用高度，留 4px 安全边距
-    const maxTextH = (this._maskHeight || 136) - 4;
+    // 使用 _textArea 高度，留 4px 安全边距
+    const ta = this._textArea || { w: (this.cameras.main.width - 80) - 40, h: 250 - 40 - 74 };
+    const maxTextH = ta.h - 4;
 
     // 用 dialogText 做测量，临时保存原值
     const savedText = this.dialogText.text;
@@ -611,6 +639,9 @@ export class UIScene extends Phaser.Scene {
     // 临时移除遮罩，保证 height 测量不受裁剪影响
     const savedMask = this.dialogText.mask;
     this.dialogText.setMask(null);
+
+    // 确保测量时使用与显示一致的 wordWrap 配置
+    this.dialogText.setWordWrapWidth(ta.w, true);
 
     const pages = [];
     let remaining = fullText;
@@ -1685,9 +1716,9 @@ export class UIScene extends Phaser.Scene {
 
   updateCursorPosition() {
     const textBounds = this.dialogText.getBounds();
-    const { height } = this.cameras.main;
-    const panelH = 250;
-    const panelY = height - panelH - 24;
+    const da = this._dialogArea || {};
+    const panelH = da.h || 250;
+    const panelY = da.y || (this.cameras.main.height - panelH - 24);
     const maxCursorY = panelY + panelH - 78; // 光标不能超出文本安全区
     const cursorX = textBounds.right + 2;
     const cursorY = Math.min(textBounds.bottom - 4, maxCursorY);
