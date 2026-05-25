@@ -1,19 +1,13 @@
 """
-NPC Agent 核心逻辑。
-
-职责：
-  - 调用 PromptBuilder 拼装消息
-  - 调用 LLMClient 流式生成
-  - 流式从 JSON 中提取 dialogue_text 实时发送
-  - 调用 ResponseParser 解析结构化结果
-  - 更新关系值、触发事件、判定阶段
+NPC Agent 核心逻辑 — v2 集成任务投票 + 章节推进。
 """
 
+import json
 import logging
 import re
 from typing import Optional, AsyncIterator
 
-from state.session import GameSession
+from state.session import GameSession, DialogueTurn
 from agents.prompt_builder import PromptBuilder
 from agents.response_parser import parse_dialogue_response, DialogueResult
 from llm.client import LLMClient
@@ -22,48 +16,28 @@ logger = logging.getLogger(__name__)
 
 
 def _extract_dialogue_partial(text: str):
-    """
-    从可能不完整的 JSON 流中实时提取 dialogue_text 字段的纯文本。
-    
-    LLM 流式返回 JSON 如: {"dialogue_text":"你好...","relationship_delta":...}
-    但这个 JSON 可能还没收完——本函数从已有的字符串段中提取已出现的纯文本。
-    
-    返回: str — 当前已提取到的 dialogue_text 纯文本（处理了转义）
-    """
-    # 匹配 "dialogue_text": " 之后的字符串内容
     pattern = r'"dialogue_text"\s*:\s*"'
     m = re.search(pattern, text)
     if not m:
         return ""
-    
-    start = m.end()  # dialogue_text 值的第一个字符位置
+    start = m.end()
     result = []
     i = start
-    
     while i < len(text):
         if text[i] == '\\' and i + 1 < len(text):
             next_char = text[i + 1]
-            escape_map = {
-                'n': '\n', 't': '\t', 'r': '\r',
-                '"': '"', '\\': '\\', '/': '/',
-            }
+            escape_map = {'n': '\n', 't': '\t', 'r': '\r', '"': '"', '\\': '\\', '/': '/'}
             result.append(escape_map.get(next_char, next_char))
             i += 2
         elif text[i] == '"':
-            break  # 值结束
+            break
         else:
             result.append(text[i])
             i += 1
-    
     return ''.join(result)
 
 
 class NPCAgent:
-    """
-    单个 NPC 的对话 Agent。
-
-    MVP 设计：一个 NPCAgent 实例绑定一个 NPC，但可以处理其全部对话。
-    """
 
     def __init__(self, llm_client: LLMClient, prompt_builder: PromptBuilder):
         self.llm = llm_client
@@ -74,39 +48,27 @@ class NPCAgent:
         session: GameSession,
         npc_id: str,
         player_message: Optional[str] = None,
+        show_item_id: Optional[str] = None,
     ) -> AsyncIterator[tuple[str, DialogueResult]]:
-        """
-        生成 NPC 对话（真正流式）。
-
-        LLM 返回 JSON 结构体，本方法用流式提取器实时捞出 dialogue_text
-        的纯文本内容，边收边发。前端看到的是逐字流出的纯对话文字。
-
-        Yields:
-            ("token", str) — dialogue_text 新增字符
-            ("done",  DialogueResult) — 完成，附带解析结果
-        """
         npc = session.npcs.get(npc_id)
         if not npc:
             raise ValueError(f"NPC not found: {npc_id}")
         if not npc.is_available:
             raise ValueError(f"NPC not available: {npc_id}")
 
-        # 检测玩家是否要结束对话（代码级检测 + 传给 prompt）
         is_ending = PromptBuilder.is_conversation_ending(player_message)
 
-        # 1. 构建 messages
         messages = self.prompt_builder.build_dialogue_messages(
-            session, npc_id, player_message, is_ending=is_ending
+            session, npc_id, player_message, is_ending=is_ending,
+            show_item_id=show_item_id,
         )
 
-        # 2. 流式调用 LLM + 实时提取 dialogue_text
         full_text = ""
         prev_dialogue_len = 0
         api_key = session.api_key
-        
+
         async for token in self.llm.chat_stream(messages, api_key=api_key):
             full_text += token
-            # 实时从累积的 JSON 中提取 dialogue_text 的纯文本
             current_dialogue = _extract_dialogue_partial(full_text)
             if len(current_dialogue) > prev_dialogue_len:
                 new_chars = current_dialogue[prev_dialogue_len:]
@@ -114,116 +76,120 @@ class NPCAgent:
                 for ch in new_chars:
                     yield ("token", ch)
 
-        # 3. 解析结构化结果
         result = parse_dialogue_response(full_text)
-
-        # 4. 应用结果到会话状态
         self._apply_result(session, npc_id, result, player_message, full_text)
+
+        # v2: 处理任务投票
+        if result.task_progress and session.current_task:
+            self._handle_task_vote(session, npc_id, result.task_progress)
 
         yield ("done", result)
 
-    def _apply_result(
-        self,
-        session: GameSession,
-        npc_id: str,
-        result: DialogueResult,
-        player_message: Optional[str],
-        full_text: str,
-    ) -> None:
-        """将 LLM 响应结果应用到游戏会话状态。"""
+    def _apply_result(self, session, npc_id, result, player_message, full_text):
         from state.manager import get_session_manager
-        from state.session import DialogueTurn
         manager = get_session_manager()
-
         npc = session.npcs[npc_id]
 
-        # 记录玩家消息到对话历史
+        # 记录玩家消息
         if player_message:
             npc.dialogue_history.append(DialogueTurn(
-                role="player",
-                content=player_message,
-                npc_id=npc_id,
-                stage=session.current_stage,
+                role="player", content=player_message,
+                npc_id=npc_id, stage=session.current_stage,
+                chapter_id=session.current_chapter_id or "",
             ))
             dialogue_id = manager.persist_dialogue(session, npc_id, "player", player_message)
-            # 记录玩家选择（叙事游戏的关键选择追踪）
             manager.persist_player_choice(
                 session, npc_id, player_message,
-                available_options=npc.last_options if npc.last_options else None,
+                available_options=npc.last_options or None,
                 dialogue_id=dialogue_id,
             )
 
         # 记录 NPC 回复
         reply_text = result.dialogue_text or full_text
         npc.dialogue_history.append(DialogueTurn(
-            role="npc",
-            content=reply_text,
-            npc_id=npc_id,
-            stage=session.current_stage,
+            role="npc", content=reply_text,
+            npc_id=npc_id, stage=session.current_stage,
+            chapter_id=session.current_chapter_id or "",
         ))
-        npc_reply_dialogue_id = manager.persist_dialogue(session, npc_id, "npc", reply_text, options=result.options)
-
-        # 缓存最近选项
+        npc_reply_id = manager.persist_dialogue(session, npc_id, "npc", reply_text, options=result.options)
         npc.last_options = result.options
-
-        # 对话轮数计数
         npc.dialogue_round_count += 1
 
-        # 更新关系值
+        # 关系值
         delta = result.relationship_delta
         if delta == 0:
-            # 兜底：每轮 +3
             from config import RELATIONSHIP_DEFAULT_DELTA
             delta = RELATIONSHIP_DEFAULT_DELTA
         old_rel = npc.relationship
         npc.apply_delta(delta)
-        # 记录关系值变化日志
         manager.persist_relationship_log(
             session, npc_id, delta, old_rel, npc.relationship,
             reason="对话加成" if result.relationship_delta != 0 else "兜底加成",
-            dialogue_id=npc_reply_dialogue_id,
+            dialogue_id=npc_reply_id,
         )
 
-        # 更新 NPC 问候语（用回复的摘要作新问候语）
+        # NPC 问候语
         short_reply = reply_text[:50].replace("\n", " ")
         npc.current_greeting = short_reply + ("……" if len(reply_text) > 50 else "")
 
-        # 处理事件触发
+        # 事件
         if result.should_trigger_event and result.new_event:
             event_id = result.new_event.strip()
             if event_id and event_id not in session.events_triggered:
                 session.events_triggered.add(event_id)
-                manager.persist_event(
-                    session, event_id,
-                    f"{npc.name}在对话中触发了事件",
-                    triggered_by_npc=npc_id,
-                )
-                # 事件奖励关系值
+                manager.persist_event(session, event_id,
+                                     f"{npc.name}触发了事件", triggered_by_npc=npc_id)
                 from config import RELATIONSHIP_EVENT_BONUS
-                event_old_rel = npc.relationship
                 npc.apply_delta(RELATIONSHIP_EVENT_BONUS)
-                manager.persist_relationship_log(
-                    session, npc_id, RELATIONSHIP_EVENT_BONUS,
-                    event_old_rel, npc.relationship,
-                    reason=f"事件奖励: {event_id}",
-                    dialogue_id=npc_reply_dialogue_id,
-                )
-                logger.info(f"[Agent] Event triggered: {event_id} by {npc_id}")
 
-        # 阶段判定（LLM 建议）
+        # 阶段判定（兼容）
         if result.stage_should_advance:
             session.stage_llm_consecutive += 1
         else:
             session.stage_llm_consecutive = 0
 
-        # 持久化
         manager.persist_session(session)
+
+    def _handle_task_vote(self, session: GameSession, npc_id: str,
+                          task_progress) -> None:
+        """处理 NPC 的任务进度投票。"""
+        if not session.current_task:
+            return
+
+        task = session.current_task
+        if npc_id not in task.related_npc_ids:
+            return
+
+        # 更新投票
+        task.npc_completion_votes[npc_id] = task_progress.should_vote_complete
+
+        # 更新子任务状态
+        for st_id in task_progress.completed_sub_task_ids:
+            for st in task.sub_tasks:
+                if st.id == st_id and st.status != "completed":
+                    st.status = "completed"
+                    # 解锁下一个
+                    idx = task.sub_tasks.index(st)
+                    if idx + 1 < len(task.sub_tasks):
+                        next_st = task.sub_tasks[idx + 1]
+                        if next_st.status == "locked":
+                            next_st.status = "active"
+
+        # 检查是否全部完成
+        if task.completion_rate >= 1.0 and not task.is_completed:
+            task.is_completed = True
+            logger.info(f"[NPCAgent] Task {task.task_id} completed by NPC consensus!")
+
+        # 持久化
+        try:
+            from state.manager import get_session_manager
+            manager = get_session_manager()
+            manager._db.save_task_instance(session.session_id, task.to_dict())
+        except Exception as e:
+            logger.error(f"[NPCAgent] 持久化任务投票失败: {e}")
 
 
 class AgentOrchestrator:
-    """
-    Agent 编排器 — 协调多 NPC 对话 + 阶段切换 + 结局判定。
-    """
 
     def __init__(self, llm_client: LLMClient, prompt_builder: PromptBuilder):
         self.agent = NPCAgent(llm_client, prompt_builder)
@@ -235,54 +201,38 @@ class AgentOrchestrator:
         session: GameSession,
         npc_id: str,
         player_message: Optional[str] = None,
+        show_item_id: Optional[str] = None,
     ):
-        """
-        对话流式生成（整合阶段切换判定）。
-
-        在 done 事件之前，自动运行规则+LLM 阶段判定，
-        将 stage_changed 和 new_stage 注入 done 数据。
-        """
-        from state.stage_engine import StageEngine
-        stage_engine = StageEngine(self.llm, self.prompt_builder)
-
         async for event_type, data in self.agent.generate_dialogue(
-            session, npc_id, player_message
+            session, npc_id, player_message, show_item_id=show_item_id,
         ):
             if event_type == "token":
                 yield ("token", data)
             elif event_type == "done":
-                # 对话完成后 → 运行阶段判定
-                stage_result = await stage_engine.check_stage_advance(session)
+                # 检查章节完成
+                chapter_completed = False
+                if session.current_task and session.current_task.is_completed:
+                    chapter_completed = True
+
                 yield ("done", {
                     "result": data,
-                    "stage": stage_result,
+                    "chapter_completed": chapter_completed,
                 })
 
     async def exit_dialogue(self, session: GameSession, npc_id: str):
-        """
-        生成 NPC 告别语（非流式，用于显式退出对话）。
-
-        强制 is_ending=true + 轮数上限，让 LLM 生成一句自然告别语。
-        """
-        from state.session import DialogueTurn
         from agents.response_parser import parse_dialogue_response
-
         npc = session.npcs.get(npc_id)
         if not npc:
             raise ValueError(f"NPC not found: {npc_id}")
 
-        # 构建强制结束的 prompt
         messages = self.prompt_builder.build_dialogue_messages(
             session, npc_id, player_message="（玩家准备离开了）", is_ending=True
         )
 
         full_text = ""
-        api_key = session.api_key
-        async for token in self.llm.chat_stream(messages, api_key=api_key):
+        async for token in self.llm.chat_stream(messages, api_key=session.api_key):
             full_text += token
 
         result = parse_dialogue_response(full_text)
-        # 强制清空 options
         result.options = []
-
         return result
