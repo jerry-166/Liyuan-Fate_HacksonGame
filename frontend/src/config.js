@@ -24,9 +24,22 @@ export const SCENES = {
   UI: 'UIScene',
 };
 
-/** 三阶段色调 */
+/** 六章节色调（按《梨园生死》剧情） */
 export const STAGE_TONES = {
-  1: { name: '不屑', tint: 0x8899bb, mood: 'cold' },
-  2: { name: '了解', tint: 0xddcc99, mood: 'warm' },
-  3: { name: '抉择', tint: 0xcc8866, mood: 'dramatic' },
+  1: { name: '归乡', tint: 0x8899aa, mood: 'melancholy', hex: '#8899aa' },
+  2: { name: '闻声·异样', tint: 0x8899bb, mood: 'cold', hex: '#8899bb' },
+  3: { name: '探寻·疑云', tint: 0xbbaa88, mood: 'warm', hex: '#bbaa88' },
+  4: { name: '忆归·真相', tint: 0xcc9977, mood: 'dramatic', hex: '#cc9977' },
+  5: { name: '目睹·凋零', tint: 0x998877, mood: 'somber', hex: '#998877' },
+  6: { name: '承戏·重振', tint: 0xcc8866, mood: 'dramatic', hex: '#cc8866' },
+};
+
+/** chapter_id → stage 编号映射 */
+export const CHAPTER_MAP = {
+  'ch_prologue': 1,
+  'ch_01': 2,
+  'ch_02': 3,
+  'ch_03': 4,
+  'ch_04': 5,
+  'ch_05': 6,
 };

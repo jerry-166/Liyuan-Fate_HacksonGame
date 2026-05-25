@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME, COLORS } from '../config.js';
+import { GAME, COLORS, STAGE_TONES } from '../config.js';
 import { getSessions, deleteSession } from '../api/client.js';
 
 /**
@@ -180,13 +180,17 @@ export class MenuScene extends Phaser.Scene {
     this.archivePanel = this.add.container(0, 0).setDepth(100).setVisible(false);
     this.archiveScrollY = 0;
 
-    // 半透明遮罩
+    // 半透明遮罩（仅面板外部响应点击关闭）
     const mask = this.add.graphics();
     mask.fillStyle(0x000000, 0.75);
     mask.fillRect(0, 0, width, height);
-    // 点击遮罩关闭
     mask.setInteractive(new Phaser.Geom.Rectangle(0, 0, width, height), Phaser.Geom.Rectangle.Contains);
-    mask.on('pointerdown', () => this.hideArchivePanel());
+    mask.on('pointerdown', (pointer) => {
+      const px = pointer.x, py = pointer.y;
+      // 如果点击在面板内部，不关闭（避免和按钮冲突）
+      if (px >= panelX && px <= panelX + panelW && py >= panelY && py <= panelY + panelH) return;
+      this.hideArchivePanel();
+    });
     this.archivePanel.add(mask);
 
     // 面板背景
@@ -331,8 +335,11 @@ export class MenuScene extends Phaser.Scene {
     const panelW = 580;
     const panelX = (width - panelW) / 2;
 
-    // 阶段名映射
-    const stageNames = { 1: '不屑', 2: '了解', 3: '抉择' };
+    // 阶段名映射（从 STAGE_TONES 动态生成）
+    const stageNames = {};
+    for (const [k, v] of Object.entries(STAGE_TONES)) {
+      stageNames[k] = v.name;
+    }
 
     // 按更新时间降序
     const sorted = [...sessions].sort((a, b) =>

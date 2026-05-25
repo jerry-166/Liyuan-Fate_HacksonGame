@@ -12,6 +12,7 @@ const config = {
   backgroundColor: '#1a1a2e',
   pixelArt: true,
   roundPixels: true,
+  dom: { createContainer: true },
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
@@ -27,3 +28,25 @@ const config = {
 };
 
 const game = new Phaser.Game(config);
+
+// ========== 全局自由文本输入框（HTML DOM，覆盖在 Canvas 上）==========
+export function createGlobalInput() {
+  const el = document.createElement('input');
+  el.type = 'text';
+  el.id = 'game-free-input';
+  el.placeholder = '输入你想说的话……';
+  el.style.cssText = `
+    position: absolute; display: none; z-index: 1000;
+    font-family: "Microsoft YaHei","PingFang SC",sans-serif;
+    font-size: 14px; color: #e8dcc8;
+    background: #1a1820; border: 1px solid #443322;
+    border-top: 1px solid #c4a882;
+    border-radius: 0 0 6px 6px; padding: 6px 12px;
+    outline: none; width: 520px; box-sizing: border-box;
+  `;
+  document.getElementById('game-container').appendChild(el);
+  return el;
+}
+
+// 保存输入值集（用于清理）
+export const globalInputValues = { current: '' };

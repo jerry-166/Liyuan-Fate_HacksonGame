@@ -152,9 +152,14 @@ export class GameScene extends Phaser.Scene {
     super({ key: 'GameScene' });
   }
 
+  init(data) {
+    // 可靠接收 MenuScene 传来的存档 ID
+    this._savedSessionId = data?.savedSessionId || null;
+  }
+
   create() {
     // 检查是否从菜单传来的存档 sessionId
-    const savedSessionId = this.scene.settings.data?.savedSessionId;
+    const savedSessionId = this._savedSessionId;
 
     this.mapData = generateMapData();
     this.cursors = null;
@@ -240,43 +245,82 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * 初始化游戏状态 — POST /api/game/start
+   * 初始化游戏状态 — POST /api/game/start → POST /chapter/start
    */
   async initGame() {
     try {
-      const { startGame, saveGameState, getGameState } = await import('../api/client.js');
+      const { startGame, saveGameState, startChapter } = await import('../api/client.js');
 
       // 显示加载提示
       this.showLoadingHint('正在创建新的故事……');
 
       const gameState = await startGame('玩家');
-      this.hideLoadingHint();
+      if (!gameState || !gameState.session_id) throw new Error('创建游戏失败');
 
-      this.currentStage = gameState.current_stage || 1;
-      this.events.emit('game:init', {
-        sessionId: gameState.session_id,
-        stage: this.currentStage,
-      });
+      // 确定当前章节映射 stage
+      let stage = gameState.current_stage || 1;
+      let chapterId = null;
+      let chapterName = null;
+      if (gameState.current_chapter) {
+        chapterId = gameState.current_chapter.chapter_id;
+        chapterName = gameState.current_chapter.chapter_name;
+      }
+
+      this.hideLoadingHint();
+      this.currentStage = stage;
 
       // 持久化
       localStorage.setItem('__active_session__', gameState.session_id);
       saveGameState(gameState.session_id, gameState);
 
-      // 刷新 NPC 状态
+      // 刷新 NPC 状态（从 API 获取完整 NPC 列表）
       if (gameState.npcs) {
         this.time.delayedCall(300, () => this.refreshNPCsFromState(gameState));
       }
+
+      // 通知 UI
+      this.events.emit('game:init', {
+        sessionId: gameState.session_id,
+        stage: stage,
+        chapterId: chapterId,
+        chapterName: chapterName,
+        inventory: gameState.inventory || [],
+      });
 
       // 应用初始阶段色调
       if (gameState.stage_params) {
         this.time.delayedCall(500, () => this.applyStageTone(gameState.stage_params));
       }
 
+      // v2: 自动开始第一章
+      if (!chapterId) {
+        this.showLoadingHint('正在载入第一章……');
+        try {
+          const chResult = await startChapter(gameState.session_id);
+          this.hideLoadingHint();
+          if (chResult && chResult.chapter_id) {
+            this.time.delayedCall(800, () => {
+              const stageId = 1; // 第一章
+              const toneInfo = chResult.color_tone || '#8899aa';
+              this.events.emit('stage:change', {
+                id: stageId,
+                name: chResult.chapter_name || '归乡',
+                description: chResult.task ? chResult.task.description : '',
+                color_tone: toneInfo,
+                bgm_mood: chResult.bgm_mood || '',
+              });
+            });
+          }
+        } catch (chErr) {
+          this.hideLoadingHint();
+          console.warn('[GameScene] 章节初始化失败（非阻塞）:', chErr);
+        }
+      }
+
       console.log('[GameScene] 游戏已初始化, session:', gameState.session_id);
     } catch (e) {
       this.hideLoadingHint();
       console.error('[GameScene] 初始化游戏失败:', e);
-      // 显示错误提示后自动重试
       this.showToast('连接服务器失败，请确认后端已启动', 3000);
     }
   }
@@ -311,10 +355,19 @@ export class GameScene extends Phaser.Scene {
       console.log('[GameScene] 恢复存档, session:', sessionId, 'stage:', gameState.current_stage);
 
       this.currentStage = gameState.current_stage || 1;
+      let chapterId = null;
+      let chapterName = null;
+      if (gameState.current_chapter) {
+        chapterId = gameState.current_chapter.chapter_id;
+        chapterName = gameState.current_chapter.chapter_name;
+      }
 
       this.events.emit('game:init', {
         sessionId: sessionId,
         stage: this.currentStage,
+        chapterId: chapterId,
+        chapterName: chapterName,
+        inventory: gameState.inventory || [],
       });
 
       // 刷新 NPC 状态
@@ -345,40 +398,134 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * 根据状态刷新 NPC 问候语
+   * 根据状态刷新 NPC（动态创建/更新）
    */
   refreshNPCsFromState(state) {
     if (!state || !state.npcs) return;
     state.npcs.forEach(stateNpc => {
-      const sprite = this.npcs.find(
-        s => s.getData('npcId') === stateNpc.id
-      );
+      let sprite = this.npcs.find(s => s.getData('npcId') === stateNpc.id);
+      if (!sprite) {
+        // 动态创建新 NPC（API 返回了本地不存在的 NPC）
+        sprite = this.createNPCSprite(stateNpc.id, stateNpc.name, stateNpc);
+        if (!sprite) return;
+        this.npcs.push(sprite);
+        const bubbleText = this.add.text(sprite.x, sprite.y - 20, stateNpc.current_greeting || '', {
+          fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
+          fontSize: '12px', color: '#e8dcc8',
+          backgroundColor: '#2a2824dd',
+          padding: { x: 8, y: 4 },
+          wordWrap: { width: 170 }, align: 'center', lineSpacing: 4,
+        }).setOrigin(0.5).setDepth(101);
+        this.npcBubbles.push(bubbleText);
+      }
+
       if (sprite) {
         sprite.setData('greeting', stateNpc.current_greeting);
-        // 更新气泡文字
+        sprite.setData('name', stateNpc.name);
+        sprite.setVisible(stateNpc.is_available !== false);
         const idx = this.npcs.indexOf(sprite);
         if (idx >= 0 && this.npcBubbles[idx]) {
-          this.npcBubbles[idx].setText(stateNpc.current_greeting);
+          this.npcBubbles[idx].setText(stateNpc.current_greeting || '');
+          this.npcBubbles[idx].setVisible(stateNpc.is_available !== false);
         }
       }
     });
   }
 
   /**
-   * 应用阶段色调到摄像机
+   * 动态创建单个 NPC 精灵
+   */
+  createNPCSprite(npcId, name, stateNpc) {
+    const npcConfigs = {
+      'npc_chen': { color: 0xb8a078, hair: 0xc8c8d0 },
+      'npc_xiaohua': { color: 0x7888a0, hair: 0x2a2420 },
+      'npc_laozhou': { color: 0x9a8a7a, hair: 0xb0b0b8 },
+      'npc_meiyi': { color: 0xaa8878, hair: 0x3a2820 },
+      'npc_laoli': { color: 0x8a7a68, hair: 0x555550 },
+    };
+    const cfg = npcConfigs[npcId] || { color: 0x888888, hair: 0x444444 };
+    const nw = 14, nh = 28;
+    const gfx = this.make.graphics({ add: false });
+
+    // 身体
+    gfx.fillStyle(cfg.color);
+    gfx.fillRect(1, 10, nw - 2, nh - 11);
+    gfx.fillStyle(Phaser.Display.Color.ValueToColor(cfg.color).darken(10).color);
+    gfx.fillRect(2, nh - 5, nw - 4, 4);
+    // 裤子
+    gfx.fillStyle(0x333338);
+    gfx.fillRect(2, nh - 6, nw - 4, 6);
+    // 脸
+    gfx.fillStyle(0xf0d8b8);
+    gfx.fillRect(2, 1, nw - 4, 9);
+    // 头发
+    gfx.fillStyle(cfg.hair);
+    gfx.fillRect(2, 1, nw - 4, 4);
+    // 眼睛
+    gfx.fillStyle(0x333340);
+    gfx.fillRect(4, 5, 2, 2);
+    gfx.fillRect(nw - 6, 5, 2, 2);
+    // 鞋子
+    gfx.fillStyle(0x5a4a38);
+    gfx.fillRect(2, nh - 2, 3, 2);
+    gfx.fillRect(nw - 5, nh - 2, 3, 2);
+    // 黑边
+    gfx.lineStyle(1, 0x111111, 0.8);
+    gfx.strokeRect(1, 1, nw - 2, nh - 2);
+
+    const key = `__npc_${npcId}__`;
+    gfx.generateTexture(key, nw, nh);
+
+    // 使用 API 返回的位置或默认位置
+    const posX = (stateNpc.position ? stateNpc.position.x : 43 * 16) || 43 * 16;
+    const posY = (stateNpc.position ? stateNpc.position.y : 16 * 16) || 16 * 16;
+
+    const sprite = this.physics.add.sprite(posX, posY, key);
+    sprite.setData('npcId', npcId);
+    sprite.setData('name', name);
+    sprite.setData('greeting', stateNpc.current_greeting || '');
+    sprite.setImmovable(true);
+    sprite.body.pushable = false;
+    sprite.setDepth(5);
+    sprite.setVisible(stateNpc.is_available !== false);
+
+    // 注册物理重叠
+    this.physics.add.overlap(this.player, sprite, () => {
+      // overlap callback 在 update 中通过 currentNearbyNPC 处理
+    });
+
+    return sprite;
+  }
+
+  /**
+   * 应用阶段色调到摄像机（兼容 v2 格式 color_tone hex 或 mood 字符串）
    */
   applyStageTone(newStage) {
     if (!this.cameras) return;
     this.currentStage = newStage.id;
 
-    // 根据阶段生成色调叠加
+    // 色调映射（支持 v2 hex 字符串 + v1 mood 字符串）
     const tintMap = {
-      cold:     { r: 160, g: 172, b: 210, alpha: 0.08 },  // 冷灰蓝
-      warm:     { r: 255, g: 245, b: 210, alpha: 0.12 },  // 暖黄
-      dramatic: { r: 255, g: 230, b: 195, alpha: 0.15 },  // 浓暖
+      cold:       { r: 160, g: 172, b: 210, alpha: 0.08 },
+      warm:       { r: 255, g: 245, b: 210, alpha: 0.12 },
+      dramatic:   { r: 255, g: 230, b: 195, alpha: 0.15 },
+      melancholy: { r: 136, g: 153, b: 170, alpha: 0.10 },
+      somber:     { r: 153, g: 136, b: 119, alpha: 0.12 },
     };
 
-    const tint = tintMap[newStage.color_tone] || tintMap.cold;
+    // 尝试从 hex 字符串解析
+    let tint = null;
+    const toneStr = newStage.color_tone || newStage.mood || '';
+    if (toneStr.startsWith('#')) {
+      const r = parseInt(toneStr.slice(1, 3), 16);
+      const g = parseInt(toneStr.slice(3, 5), 16);
+      const b = parseInt(toneStr.slice(5, 7), 16);
+      tint = { r, g: Math.floor(g * 0.9), b, alpha: 0.10 };
+    } else if (tintMap[toneStr]) {
+      tint = tintMap[toneStr];
+    } else {
+      tint = tintMap.melancholy;
+    }
 
     // 重置相机背景色
     this.cameras.main.setBackgroundColor(Phaser.Display.Color.GetColor(
@@ -387,7 +534,7 @@ export class GameScene extends Phaser.Scene {
       Math.floor(tint.b * 0.16)
     ));
 
-    // 通过半透明遮罩施加持续色调，避免 flash 全屏遮挡
+    // 通过半透明遮罩施加持续色调
     if (this.tintOverlay) {
       this.tintOverlay.setFillStyle(
         Phaser.Display.Color.GetColor(tint.r, tint.g, tint.b),
