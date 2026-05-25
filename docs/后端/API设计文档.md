@@ -1,6 +1,6 @@
 # 《梨园生死》API 设计文档
 
-> **版本**: v1.2 | **最后更新**: 2026-05-24 | **设计原则**: 职责单一、接口清晰、按业务模块拆分
+> **版本**: v2.0 | **最后更新**: 2026-05-25 | **设计原则**: 章节驱动、AI 任务规划、多 NPC 共识推进
 
 ---
 
@@ -9,23 +9,60 @@
 ### 1.1 游戏流程
 
 ```
-开始游戏/加载存档 → 探索地图(WASD) → 接近NPC → 触发对话(F键)
-  → 多轮AI对话（选项点选 or 自由输入）→ 自然结束/退出对话 → 阶段变化 → 触发结局 → AI评价总结
+选择剧本 → 创建会话 → 开始第一章 → 探索/对话/物品交互
+  → 任务子目标逐个完成 → NPC 共识投票通过 → 章节完成
+  → 自动推进下一章 → ... → 所有章节完成 → AI 结局评价
 ```
 
-### 1.2 API 设计原则
+### 1.2 章节生命周期
+
+```
+POST /api/game/start              ← 创建会话（返回完整状态 + first_chapter 提示）
+       ↓
+POST /api/game/{id}/chapter/start ← 前端调用，触发章节初始化
+       ↓                    ↺ LLM 任务规划（TaskPlanner，有模板则秒级返回）
+  章节进行中：对话/探索/物品
+       ↓
+  SSE done 事件中 chapter_completed=true（所有 NPC 投票通过后）
+       ↓
+  自动调用 advance_to_next_chapter()（标记旧章节完成、查找下一章）
+       ↓
+  前端再次调用 POST /api/game/{id}/chapter/start（初始化下一章）
+       ↓                    ← 此接口会检查 is_completed，未完成则返回 400
+  循环…直到所有章节完成 → game_ended=true
+```
+
+### 1.3 API 设计原则
 
 | 原则 | 说明 |
 |------|------|
 | **职责单一** | 每个 API 只负责一个明确的业务功能 |
 | **RESTful 风格** | 资源路径清晰，HTTP 方法语义正确 |
 | **SSE 流式** | 对话接口使用 Server-Sent Events，逐 token 推送 |
-| **状态集中** | 游戏全局状态通过单一入口获取 |
-| **MVP 最小化** | 只设计 MVP 必需的接口，预留扩展空间 |
+| **章节驱动** | 游戏进度由章节+任务系统驱动，取代旧的 stage 线性推进 |
+| **AI 任务规划** | 每章开始时 LLM 根据剧本定义生成具体子任务 |
+| **NPC 共识投票** | 章节完成需多 NPC 投票确认 |
 
-### 1.3 API 总览（8 个接口）
+### 1.4 API 总览（v2 共 15 个接口）
 
-> 📎 **详见 [_shared/API接口清单.md](../_shared/API接口清单.md)** — 接口总览表。
+| 模块 | 方法 | 路径 | 说明 |
+|------|------|------|------|
+| 游戏 | POST | `/api/game/start` | 创建新游戏会话 |
+| 游戏 | GET | `/api/scripts` | 列出可用剧本 |
+| 游戏 | GET | `/api/game/{id}` | 获取游戏完整状态 |
+| 游戏 | GET | `/api/game/{id}/dialogues` | 对话历史（分页） |
+| 游戏 | POST | `/api/game/{id}/evaluate` | 生成结局评价 |
+| 游戏 | GET | `/api/game/{id}/relationships` | 关系值历史 |
+| 游戏 | GET | `/api/game/{id}/events` | 事件时间线 |
+| 游戏 | DELETE | `/api/game/{id}` | 删除存档 |
+| 游戏 | GET | `/api/sessions` | 存档列表 |
+| 章节 | POST | `/api/game/{id}/chapter/start` | 开始/推进章节（触发 LLM 任务规划） |
+| 章节 | GET | `/api/game/{id}/chapter` | 获取当前章节状态+任务进度 |
+| 章节 | GET | `/api/game/{id}/task` | 获取当前任务详情（子任务+投票） |
+| 对话 | POST | `/api/dialogue` | NPC 对话（SSE 流式） |
+| 对话 | POST | `/api/dialogue/show-item` | 向 NPC 展示物品（SSE 流式） |
+| 对话 | POST | `/api/dialogue/exit` | 退出对话 |
+| 物品 | GET | `/api/game/{id}/items` | 获取已发现物品列表 |
 
 ---
 
@@ -55,7 +92,12 @@ Content-Type: application/json; charset=utf-8
 | `SESSION_NOT_FOUND` | session_id 不存在或已删除 |
 | `NPC_NOT_FOUND` | npc_id 不存在 |
 | `NPC_NOT_AVAILABLE` | NPC 当前不可交互 |
-| `GAME_ALREADY_ENDED` | 游戏已结束，不能继续对话 |
+| `GAME_ENDED` | 游戏已结束 |
+| `NO_CHAPTERS` | 没有可用的章节定义 |
+| `CHAPTER_NOT_FOUND` | 指定的 chapter_id 不存在 |
+| `CHAPTER_START_FAILED` | 章节初始化失败 |
+| `CHAPTER_NOT_COMPLETED` | 当前章节未完成（NPC 投票未全通过），不可推进 |
+| `ITEM_NOT_FOUND` | 物品不存在或不在背包中 |
 | `INVALID_PARAM` | 请求参数不合法 |
 | `LLM_ERROR` | LLM 调用失败 |
 | `INTERNAL_ERROR` | 服务器内部错误 |
@@ -72,17 +114,25 @@ Content-Type: application/json; charset=utf-8
 
 ### 3.1 开始游戏 — `POST /api/game/start`
 
-**职责**: 创建新游戏会话，初始化所有游戏状态。
+**职责**: 创建新游戏会话，加载指定剧本，初始化 NPC 状态。
 
 **Request**
 
 ```json
 {
-  "player_name": "玩家",          // 可选，默认"玩家"
-  "api_key": "sk-xxxxx",          // 可选，LLM API Key（仅存内存）
-  "model": "deepseek-v3.1-terminus"  // 可选，指定模型名
+  "player_name": "玩家",
+  "api_key": "sk-xxxxx",
+  "model": "deepseek-v3.1-terminus",
+  "script_id": "liyuan_shengsi"
 }
 ```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `player_name` | string | 否 | 默认"玩家" |
+| `api_key` | string | 否 | LLM API Key（仅存内存） |
+| `model` | string | 否 | 指定模型名 |
+| `script_id` | string | 否 | 剧本 ID，默认"liyuan_shengsi" |
 
 **Response** `201 Created`
 
@@ -90,40 +140,29 @@ Content-Type: application/json; charset=utf-8
 {
   "session_id": "sess_a1b2c3d4",
   "player_name": "玩家",
+  "script_id": "liyuan_shengsi",
   "current_stage": 1,
   "stage_params": {
     "id": 1,
-    "name": "不屑",
-    "description": "戏班众人对你冷眼相看，觉得你不过是又一个心血来潮的外人",
-    "color_tone": "cold",
-    "bgm_mood": "melancholy",
-    "dialogue_tone": "冷漠、疏离、话中带刺"
+    "name": "归乡",
+    "description": "父亲病逝，你带着他的骨灰回到陌生的故乡。",
+    "color_tone": "#8899aa",
+    "bgm_mood": "melancholy_distant",
+    "dialogue_tone": ""
   },
+  "current_chapter": null,
+  "completed_chapters": [],
   "npcs": [
     {
       "id": "npc_chen",
       "name": "陈师傅",
       "role": "老琴师",
-      "scene": "tavern",
-      "position": { "x": 1200, "y": 800 },
+      "scene": "teahouse",
+      "position": { "x": 688, "y": 256 },
       "sprite_key": "npc_chen_idle",
-      "relationship": 0,
+      "relationship": 20,
       "is_available": true,
       "current_greeting": "……（陈师傅低头擦拭琴弦，仿佛没看见你）",
-      "last_dialogue": "",
-      "last_options": [],
-      "dialogue_round_count": 0
-    },
-    {
-      "id": "npc_xiaohua",
-      "name": "小华",
-      "role": "年轻学徒",
-      "scene": "stage",
-      "position": { "x": 600, "y": 400 },
-      "sprite_key": "npc_xiaohua_idle",
-      "relationship": 0,
-      "is_available": true,
-      "current_greeting": "你也是来看戏班笑话的吗？",
       "last_dialogue": "",
       "last_options": [],
       "dialogue_round_count": 0
@@ -131,18 +170,39 @@ Content-Type: application/json; charset=utf-8
   ],
   "events_triggered": [],
   "game_ended": false,
-  "ending": null
+  "ending": null,
+  "inventory": []
 }
 ```
 
-### 3.2 获取游戏状态 — `GET /api/game/{session_id}`
+> **注意**: 创建会话时不会自动开始第一章。前端需根据 `current_chapter: null` 判断，然后调用 `POST /api/game/{id}/chapter/start` 初始化章节。
+
+### 3.2 剧本列表 — `GET /api/scripts`
+
+**职责**: 列出所有可用剧本。
+
+**Response** `200 OK`
+
+```json
+{
+  "scripts": [
+    {
+      "script_id": "liyuan_shengsi",
+      "name": "梨园生死",
+      "version": "1.0",
+      "author": "Team A",
+      "npc_count": 5,
+      "chapter_count": 6,
+      "description": "江南水乡小镇梨溪镇，民国时期。"
+    }
+  ],
+  "total": 1
+}
+```
+
+### 3.3 获取游戏状态 — `GET /api/game/{session_id}`
 
 **职责**: 获取当前完整游戏状态，是前端唯一的「真相来源」。
-
-**Request**
-```
-GET /api/game/sess_a1b2c3d4
-```
 
 **Response** `200 OK`
 
@@ -150,58 +210,191 @@ GET /api/game/sess_a1b2c3d4
 {
   "session_id": "sess_a1b2c3d4",
   "player_name": "玩家",
+  "script_id": "liyuan_shengsi",
   "current_stage": 2,
   "stage_params": {
     "id": 2,
-    "name": "了解",
-    "color_tone": "warm",
-    "bgm_mood": "hopeful",
-    "dialogue_tone": "温和、敞开、偶有真情流露"
+    "name": "闻声·异样",
+    "description": "你偶然走到老街深处，看见一座门庭冷清的老戏院...",
+    "color_tone": "#8899bb",
+    "bgm_mood": "eerie_warm",
+    "dialogue_tone": ""
   },
+  "current_chapter": {
+    "chapter_id": "ch_01",
+    "chapter_name": "闻声·异样",
+    "color_tone": "#8899bb",
+    "bgm_mood": "eerie_warm",
+    "completion_rate": 0.5
+  },
+  "completed_chapters": ["ch_prologue"],
   "npcs": [
     {
       "id": "npc_chen",
       "name": "陈师傅",
-      "relationship": 15,
+      "relationship": 25,
       "is_available": true,
-      "current_greeting": "来了啊？坐吧。",
-      "last_dialogue": "嗯……你倒是问到了点子上。三十年前，这戏台可是夜夜满座。",
-      "last_options": ["后来发生了什么？", "我父亲也在这唱过戏？", "那现在为什么变成这样了……"],
+      "current_greeting": "来了啊？坐吧。……",
+      "last_dialogue": "嗯……你倒是问到了点子上。",
+      "last_options": ["后来发生了什么？", "我父亲也在这唱过戏？"],
       "dialogue_round_count": 3
     }
   ],
-  "events_triggered": ["first_enter_tavern", "chen_first_talk"],
+  "events_triggered": ["first_enter_tavern"],
   "game_ended": false,
-  "ending": null
+  "ending": null,
+  "inventory": [
+    {
+      "id": "item_urn",
+      "name": "父亲的骨灰盒",
+      "description": "一个简朴的深色木盒，里面装着父亲柳三秋的骨灰。",
+      "is_key": false,
+      "is_discovered": true
+    }
+  ]
 }
 ```
 
-**游戏结束时的响应**（`game_ended=true`）：
+### 3.4 开始章节 — `POST /api/game/{session_id}/chapter/start` 🔥核心
+
+**职责**: 开始新一章。首次调用初始化第一章，后续调用推进到下一章。会触发 **LLM 任务规划**生成子任务。
+
+**Request**
 
 ```json
 {
-  "game_ended": true,
-  "ending": {
-    "type": "accept_leader",
-    "title": "梨园新火",
-    "summary": "你选择扛起戏班的大旗...",
-    "key_moments": [
-      {"stage": 1, "description": "你第一次踏入破旧的戏台"},
-      {"stage": 2, "description": "陈师傅讲起了戏班三十年前的辉煌"},
-      {"stage": 3, "description": "你在祠堂里做出了最终的决定"}
+  "chapter_id": null
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `chapter_id` | string | 否 | 指定章节 ID 跳转；不传则自动推进到下一章 |
+
+**三种调用场景**:
+
+| 场景 | chapter_id | 行为 |
+|------|------------|------|
+| 首次开始 | 不传/null | 取第一章（跳过 cinematic 类型） |
+| 推进下一章 | 不传/null | 标记旧章节完成 → 取下一章 → LLM 规划任务 |
+| 指定跳转 | "ch_02" | 验证章节存在 → LLM 规划任务 |
+
+**Response** `200 OK`
+
+```json
+{
+  "chapter_id": "ch_01",
+  "chapter_name": "闻声·异样",
+  "chapter_type": "task",
+  "task": {
+    "task_id": "task_ch_01_a1b2c3",
+    "chapter_id": "ch_01",
+    "chapter_name": "闻声·异样",
+    "description": "探索老戏院，与戏班的人初步接触",
+    "sub_tasks": [
+      {
+        "id": "st_001",
+        "title": "找到老戏院",
+        "mode": "explore",
+        "description": "在小镇上找到戏台的位置并进入",
+        "status": "active"
+      },
+      {
+        "id": "st_002",
+        "title": "与戏班的人打照面",
+        "mode": "dialogue",
+        "target_npc_id": "npc_xiaohua",
+        "description": "在戏台内遇到小华，进行第一次对话",
+        "status": "locked"
+      }
     ],
-    "life_lesson": "传承不是守住灰烬，而是让火焰在另一片土地上继续燃烧。",
-    "npc_endings": [
-      {"npc_id": "npc_chen", "final_relationship": 85, "summary": "..."},
-      {"npc_id": "npc_xiaohua", "final_relationship": 60, "summary": "..."}
+    "related_npc_ids": ["npc_xiaohua", "npc_laozhou"],
+    "npc_completion_votes": {
+      "npc_xiaohua": false,
+      "npc_laozhou": false
+    },
+    "completion_rate": 0.0,
+    "is_completed": false
+  },
+  "color_tone": "#8899bb",
+  "bgm_mood": "eerie_warm"
+}
+```
+
+**所有章节完成时**:
+
+```json
+{
+  "chapter_id": null,
+  "game_ended": true,
+  "message": "所有章节已完成"
+}
+```
+
+### 3.5 获取章节状态 — `GET /api/game/{session_id}/chapter`
+
+**职责**: 获取当前章节状态和任务进度（轻量级，不含 LLM 调用）。
+
+**Response** `200 OK`
+
+```json
+{
+  "current_chapter": {
+    "chapter_id": "ch_01",
+    "chapter_name": "闻声·异样",
+    "chapter_type": "task",
+    "color_tone": "#8899bb",
+    "bgm_mood": "eerie_warm"
+  },
+  "completed_chapters": ["ch_prologue"],
+  "task": {
+    "task_id": "task_ch_01_a1b2c3",
+    "completion_rate": 0.5,
+    "is_completed": false,
+    "sub_tasks": [
+      { "id": "st_001", "title": "找到老戏院", "mode": "explore", "status": "completed" },
+      { "id": "st_002", "title": "与戏班的人打照面", "mode": "dialogue", "status": "active" },
+      { "id": "st_003", "title": "遇到沉默的老艺人", "mode": "dialogue", "status": "locked" }
     ]
   }
 }
 ```
 
-> **注意**: `ending` 字段只在调用 evaluate 接口后填充。首次触发结局时 `game_ended=true` 但 `ending=null`，前端引导调用 evaluate 接口。
+### 3.6 获取任务详情 — `GET /api/game/{session_id}/task`
 
-### 3.3 NPC 对话 — `POST /api/dialogue` 🔥核心
+**职责**: 获取当前任务的完整详情（含子任务列表和 NPC 投票状态）。
+
+**Response** `200 OK`
+
+```json
+{
+  "task": {
+    "task_id": "task_ch_01_a1b2c3",
+    "chapter_id": "ch_01",
+    "chapter_name": "闻声·异样",
+    "description": "探索老戏院，与戏班的人初步接触",
+    "sub_tasks": [
+      {
+        "id": "st_001",
+        "title": "找到老戏院",
+        "mode": "explore",
+        "description": "在小镇上找到戏台的位置并进入",
+        "target_scene": "stage_ruin",
+        "status": "completed"
+      }
+    ],
+    "related_npc_ids": ["npc_xiaohua", "npc_laozhou"],
+    "npc_completion_votes": {
+      "npc_xiaohua": true,
+      "npc_laozhou": false
+    },
+    "completion_rate": 0.5,
+    "is_completed": false
+  }
+}
+```
+
+### 3.7 NPC 对话 — `POST /api/dialogue` 🔥核心
 
 **职责**: 处理所有 NPC 对话交互，是游戏的核心 AI 接口。
 
@@ -212,7 +405,7 @@ GET /api/game/sess_a1b2c3d4
   "session_id": "sess_a1b2c3d4",
   "npc_id": "npc_chen",
   "player_message": "陈师傅，这个戏班以前是什么样的？",
-  "api_key": "sk-xxxxx",
+  "api_key": null,
   "model": null
 }
 ```
@@ -225,84 +418,117 @@ GET /api/game/sess_a1b2c3d4
 | `api_key` | string | 否 | 会话重建后丢失 key 时传入 |
 | `model` | string | 否 | 模型名，不传则使用 session 级默认 |
 
-**两种对话模式**:
-
-| 模式 | player_message | 后端行为 |
-|------|---------------|----------|
-| **首轮对话** | 不传 / null | 生成 NPC 开场白 + 3~4 个 AI 选项 |
-| **续接对话** | 选项文本 / 自由输入 | 拼接上下文 → LLM 流式生成 → 检测阶段/结局触发 |
-
 **Response**: SSE 流式 (`Content-Type: text/event-stream`)
 
-> 📎 **SSE 事件格式详见 [_shared/SSE通信格式.md](../_shared/SSE通信格式.md)**
+**SSE 事件类型**:
 
-**前端 SSE 解析伪代码**:
+| 事件 | 说明 | data 格式 |
+|------|------|-----------|
+| `delta` | 增量 token | `{"chunk": "你"}` |
+| `done` | 对话完成 | 见下方 |
+| `error` | 错误 | `{"code": "LLM_ERROR", "message": "..."}` |
 
-```javascript
-async function sendDialogue(sessionId, npcId, playerMessage) {
-  const response = await fetch('/api/dialogue', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ session_id: sessionId, npc_id: npcId, player_message: playerMessage || null })
-  });
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop();
-    let eventType = '';
-    for (const line of lines) {
-      if (line.startsWith('event: ')) eventType = line.slice(7).trim();
-      else if (line.startsWith('data: ')) {
-        const data = JSON.parse(line.slice(6));
-        handleSSEEvent(eventType, data);
-      }
-    }
+**done 事件 data**:
+
+```json
+{
+  "full_text": "嗯……你倒是问到了点子上。三十年前，这戏台可是夜夜满座。",
+  "relationship_change": { "npc_chen": 5 },
+  "options": ["后来发生了什么？", "我父亲也在这唱过戏？", "那现在为什么变成这样了……"],
+  "events_triggered": [],
+  "chapter_completed": false,
+  "game_ended": false,
+  "current_chapter": {
+    "chapter_id": "ch_01",
+    "chapter_name": "闻声·异样"
   }
 }
 ```
 
-### 3.4 生成结局评价 — `POST /api/game/{session_id}/evaluate`
+> **关键**: `chapter_completed=true` 时，后端已自动调用 `advance_to_next_chapter()` 标记旧章节完成。前端需再调用 `POST /chapter/start` 初始化下一章。
 
-**职责**: 对话触发结局后，生成个性化结局评价。幂等——同一 session 多次调用返回相同结果。
+### 3.8 展示物品 — `POST /api/dialogue/show-item`
+
+**职责**: 向 NPC 展示背包中的物品，注入物品上下文到对话 Prompt（SSE 流式）。
 
 **Request**
+
+```json
+{
+  "session_id": "sess_a1b2c3d4",
+  "npc_id": "npc_chen",
+  "item_id": "item_child_costume",
+  "player_message": null,
+  "api_key": null,
+  "model": null
+}
 ```
-POST /api/game/sess_a1b2c3d4/evaluate
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `item_id` | string | 是 | 背包中物品 ID |
+
+**Response**: 同 `POST /api/dialogue` 的 SSE 流式，done 事件额外包含 `shown_item` 字段。
+
+### 3.9 退出对话 — `POST /api/dialogue/exit`
+
+**Request**
+
+```json
+{
+  "session_id": "sess_a1b2c3d4",
+  "npc_id": "npc_chen"
+}
 ```
 
 **Response** `200 OK`
 
 ```json
+{ "dialogue_text": "行吧，时候不早了，你去忙你的。", "options": [], "is_available": true }
+```
+
+### 3.10 生成结局评价 — `POST /api/game/{session_id}/evaluate`
+
+**职责**: 游戏结束后生成个性化结局评价。幂等——同一 session 多次调用返回相同结果。
+
+**Response** `200 OK`
+
+```json
 {
-  "type": "accept_leader",
+  "type": "story_complete",
   "title": "梨园新火",
   "summary": "你选择扛起戏班的大旗...",
-  "key_moments": [
-    {"stage": 1, "description": "你第一次踏入破旧的戏台"},
-    {"stage": 2, "description": "陈师傅讲起了戏班三十年前的辉煌与衰落"},
-    {"stage": 3, "description": "在祠堂祖宗牌位前，你做出了继承戏班的决定"}
-  ],
+  "key_moments": [],
   "life_lesson": "传承不是守住灰烬，而是让火焰在另一片土地上继续燃烧。",
   "npc_endings": [
-    {"npc_id": "npc_chen", "final_relationship": 85, "summary": "陈师傅在晚年终于找到了传人。"},
-    {"npc_id": "npc_xiaohua", "final_relationship": 60, "summary": "小华从一开始的敌意，逐渐变成了你最好的搭档。"}
+    { "npc_id": "npc_chen", "final_relationship": 85, "summary": "..." }
   ]
 }
 ```
 
-**调用时序**: `done 事件 ending_triggered=true` → 前端过渡动画 → `POST evaluate` → 播放结局
+### 3.11 物品列表 — `GET /api/game/{session_id}/items`
 
-### 3.5 存档列表 — `GET /api/sessions`
+**职责**: 获取当前已发现/已获取的物品列表。
 
-**Request**
+**Response** `200 OK`
+
+```json
+{
+  "items": [
+    {
+      "id": "item_urn",
+      "name": "父亲的骨灰盒",
+      "description": "一个简朴的深色木盒",
+      "is_key": false,
+      "is_discovered": true,
+      "location": { "scene": "cemetery" }
+    }
+  ],
+  "total": 1
+}
 ```
-GET /api/sessions
-```
+
+### 3.12 存档列表 — `GET /api/sessions`
 
 **Response** `200 OK`
 
@@ -313,36 +539,28 @@ GET /api/sessions
       "session_id": "sess_a1b2c3d4",
       "player_name": "玩家",
       "stage": 2,
-      "stage_name": "了解",
+      "stage_name": "闻声·异样",
       "game_ended": false,
-      "created_at": "2026-05-23 20:00:00",
-      "updated_at": "2026-05-23 20:30:00"
+      "created_at": "2026-05-25 14:00:00",
+      "updated_at": "2026-05-25 14:30:00"
     }
   ],
   "total": 1
 }
 ```
 
-### 3.6 删除存档 — `DELETE /api/game/{session_id}`
-
-**Request**
-```
-DELETE /api/game/sess_a1b2c3d4
-```
+### 3.13 删除存档 — `DELETE /api/game/{session_id}`
 
 **Response** `200 OK`
+
 ```json
 { "success": true, "message": "已删除会话: sess_a1b2c3d4" }
 ```
 
-**Response** `404`
-```json
-{ "error": true, "code": "SESSION_NOT_FOUND", "message": "..." }
-```
-
-### 3.7 对话历史查询 — `GET /api/game/{session_id}/dialogues`
+### 3.14 对话历史 — `GET /api/game/{session_id}/dialogues`
 
 **Request**
+
 ```
 GET /api/game/sess_a1b2c3d4/dialogues?npc_id=npc_chen&page=1&page_size=20
 ```
@@ -355,40 +573,16 @@ GET /api/game/sess_a1b2c3d4/dialogues?npc_id=npc_chen&page=1&page_size=20
     {
       "id": 1, "session_id": "sess_a1b2c3d4", "npc_id": "npc_chen",
       "role": "npc", "content": "……（陈师傅低头擦拭琴弦）",
-      "options": ["陈师傅好", "默默站在一旁", "去找小华"],
-      "stage": 1, "created_at": "2026-05-23 20:01:00"
+      "options": ["陈师傅好", "默默站在一旁"],
+      "stage": 1, "created_at": "2026-05-25 14:01:00"
     }
   ],
   "total": 25, "page": 1, "page_size": 20
 }
 ```
 
-### 3.8 退出对话 — `POST /api/dialogue/exit`
+### 3.15 关系值历史 — `GET /api/game/{session_id}/relationships`
 
-**Request**
-```json
-{
-  "session_id": "sess_a1b2c3d4",
-  "npc_id": "npc_chen",
-  "api_key": "sk-xxxxx",
-  "model": null
-}
-```
-
-**Response** `200 OK`
-```json
-{ "dialogue_text": "行吧，时候不早了，你去忙你的。", "options": [], "is_available": true }
-```
-
-> **说明**: 不走 SSE 流式，直接返回 JSON。`is_available` 不受退出影响——可用性由后端剧情逻辑控制。
-
----
-
-### 3.9 关系值历史 — `GET /api/game/{session_id}/relationships`
-
-**职责**: 查询关系值变化历史，支持按 NPC 筛选。
-
-**Request**
 ```
 GET /api/game/sess_a1b2c3d4/relationships?npc_id=npc_chen
 ```
@@ -400,32 +594,14 @@ GET /api/game/sess_a1b2c3d4/relationships?npc_id=npc_chen
   "session_id": "sess_a1b2c3d4",
   "npc_id": "npc_chen",
   "logs": [
-    {
-      "id": 1,
-      "session_id": "sess_a1b2c3d4",
-      "npc_id": "npc_chen",
-      "delta": 5,
-      "reason": "对话",
-      "relationship_after": 5,
-      "created_at": "2026-05-24 12:00:00"
-    }
+    { "id": 1, "npc_id": "npc_chen", "delta": 5, "reason": "对话加成", "relationship_after": 25, "created_at": "2026-05-25 14:00:00" }
   ],
-  "current_relationships": {
-    "npc_chen": 15,
-    "npc_xiaohua": 10
-  },
+  "current_relationships": { "npc_chen": 25, "npc_xiaohua": 10 },
   "total": 1
 }
 ```
 
-### 3.10 事件时间线 — `GET /api/game/{session_id}/events`
-
-**职责**: 查询已触发事件的时间线。
-
-**Request**
-```
-GET /api/game/sess_a1b2c3d4/events
-```
+### 3.16 事件时间线 — `GET /api/game/{session_id}/events`
 
 **Response** `200 OK`
 
@@ -433,14 +609,7 @@ GET /api/game/sess_a1b2c3d4/events
 {
   "session_id": "sess_a1b2c3d4",
   "events": [
-    {
-      "id": 1,
-      "event_id": "first_enter_tavern",
-      "triggered_by": "system",
-      "stage": 1,
-      "stage_name": "不屑",
-      "created_at": "2026-05-24 12:00:00"
-    }
+    { "id": 1, "event_id": "first_enter_tavern", "triggered_by": "system", "stage": 1, "created_at": "2026-05-25 14:00:00" }
   ],
   "total": 1
 }
@@ -448,92 +617,91 @@ GET /api/game/sess_a1b2c3d4/events
 
 ---
 
-## 四、完整调用时序
+## 四、完整调用时序（v2 章节驱动）
 
 ```
 前端 (Phaser 3)                              后端 (FastAPI)
     │                                              │
-    │  [进入游戏]                                    │
-    │──── GET /api/sessions ───────────────────────→│
-    │←──── 200 { sessions[] } ─────────────────────│
+    │  [选择剧本 + 新游戏]                            │
+    │──── POST /api/game/start ──────────────────→│
+    │←──── 201 { session_id, npcs[],              │
+    │           current_chapter: null } ──────────│
     │                                              │
-    │  [新游戏]                                     │
-    │──── POST /api/game/start ────────────────────→│
-    │←──── 201 { session_id, stage, npcs[] } ──────│
+    │  [开始第一章]                                   │
+    │──── POST /api/game/{id}/chapter/start ───→│
+    │←──── 200 { chapter_id, task{sub_tasks[]} } │← LLM 任务规划
     │                                              │
-    │  [接近 NPC → 按 F]                            │
-    │──── POST /api/dialogue ──────────────────────→│ player_message=null
-    │←──── SSE: delta → done { options[] } ────────│
+    │  [接近 NPC → 按 F]                             │
+    │──── POST /api/dialogue ──────────────────→│ player_message=null
+    │←──── SSE: delta → done { options[] } ──────│
     │                                              │
-    │  [点选选项 / 自由输入 / ESC退出]                 │
-    │──── POST /api/dialogue ──────────────────────→│ player_message="..."
-    │←──── SSE: done → 循环                         │
+    │  [点选选项 / 自由输入]                            │
+    │──── POST /api/dialogue ──────────────────→│ player_message="..."
+    │←──── SSE: done { chapter_completed: false } │
     │                                              │
-    │  [结局触发]                                    │
-    │──── POST /api/game/{id}/evaluate ────────────→│
-    │←──── 200 { type, title, summary } ───────────│
+    │  [向NPC展示物品]                                │
+    │──── POST /api/dialogue/show-item ─────────→│
+    │←──── SSE: delta → done { shown_item } ────│
+    │                                              │
+    │  ...多轮对话/物品交互...                         │
+    │                                              │
+    │──── POST /api/dialogue ──────────────────→│
+    │←──── SSE: done { chapter_completed: true } │← 自动 advance
+    │                                              │
+    │  [开始下一章]                                   │
+    │──── POST /api/game/{id}/chapter/start ───→│
+    │←──── 200 { next_chapter, new_task } ──────│← LLM 规划下一章
+    │                                              │
+    │  ...循环...                                    │
+    │                                              │
+    │  [所有章节完成 → game_ended=true]                │
+    │──── POST /api/game/{id}/evaluate ────────→│
+    │←──── 200 { type, title, summary } ─────────│
 ```
 
 ---
 
 ## 五、核心数据模型
 
-> 📎 **详见 [_shared/数据模型.md](../_shared/数据模型.md)** — GameSession、NPCState、Stage 定义。
+### 子任务模式 (SubTaskMode)
 
-> 📎 **阶段参数表详见 [_shared/阶段系统.md](../_shared/阶段系统.md)**
+| 模式 | 说明 | 完成判定 |
+|------|------|---------|
+| `dialogue` | 与 NPC 对话 | NPC 投票确认 |
+| `explore` | 探索场景 | NPC 投票 / 事件触发 |
+| `acquire_item` | 获取物品 | 物品在背包中 |
+| `show_item` | 展示物品 | 物品在背包中 + NPC 确认 |
+| `deliver` | 递交物品 | 物品在背包中 |
+| `relation` | 关系值达标 | NPC relationship >= threshold |
 
-> 📎 **关系值系统详见 [_shared/关系值系统.md](../_shared/关系值系统.md)**
+### 子任务状态 (SubTaskStatus)
 
-### 对话记录（存储于 SQLite）
+| 状态 | 说明 |
+|------|------|
+| `locked` | 锁定（前置子任务未完成） |
+| `active` | 可执行 |
+| `in_progress` | 进行中 |
+| `completed` | 已完成 |
 
-```sql
-CREATE TABLE dialogues (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id  TEXT NOT NULL,
-    npc_id      TEXT NOT NULL,
-    role        TEXT NOT NULL,   -- 'player' | 'npc'
-    content     TEXT NOT NULL,
-    options     TEXT,            -- JSON: NPC 回复时附带的选项
-    stage       INTEGER,
-    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX idx_dialogue_session ON dialogues(session_id, npc_id);
-```
+### 章节类型
 
----
-
-## 六、后端 Prompt 架构（参考）
-
-> 📎 **详见 [架构设计.md](./架构设计.md)** — NPC Agent 架构、Handoff 机制、Response Parser、关系值 Clamp。
-
-### 6.1 NPC Agent System Prompt
-
-```
-[世界观] 你是《梨园生死》中的角色，设定在民国时期的江南小镇...
-[全局状态] 当前阶段：{stage_name}，对话基调：{dialogue_tone}
-[关键事件] 已触发事件：{events}，玩家与各NPC关系：{relationships}
-[NPC 人设卡] 你是陈师傅，62岁的老琴师...
-[对话风格] {few_shot_examples}
-[当前任务] 玩家对你说：{player_message}，请以陈师傅的身份回应。
-[输出格式] 生成自然对话+下一轮3-4个选项。检测阶段/结局触发条件。
-```
+| 类型 | 说明 |
+|------|------|
+| `cinematic` | 过场动画（自动跳过，无任务规划） |
+| `task` | 正式章节（LLM 生成子任务） |
 
 ---
 
-## 七、MVP 与完整版的边界
+## 六、MVP 与完整版的边界
 
-| 维度 | v1.0-MVP / v1.1（本文档范围） | 后续版本 |
-|------|-------------------------------|----------|
-| API 数量 | **10 个**（v1.0: 4个 + v1.1: 4个 + v1.2: 2个） | 扩展至 12+ 个 |
-| NPC Agent | 2 个 NPC Agent | 每个 NPC 独立 Agent 实例 + 主动行为 |
-| NPC Handoff | ✅ 事件驱动跨NPC上下文注入 | 复杂 NPC 间协作剧情 |
-| 对话方式 | AI 生成选项 + 自由输入文字 | 自由输入为主 |
-| 阶段切换 | 双模判定（规则条件 + LLM 判定） | 更复杂的多条件分支 |
-| 阶段数 | 2 次阶段变化（1→2→3） | 细粒度子阶段 |
-| 结局数 | 1 个 | 4+ 个结局分支 |
-| 存档管理 | ✅ 列表/软删除 | 重命名、备注 |
-| 存储 | SQLite 本地 | 云数据库 |
-| 流式 | SSE（fetch + ReadableStream） | WebSocket 双向通信 |
+| 维度 | v2.0（本文档范围） | 后续版本 |
+|------|-------------------|----------|
+| API 数量 | **16 个** | 扩展至 20+ 个 |
+| 章节系统 | 6 章线性推进 | 分支章节 + 多结局 |
+| 任务规划 | LLM 逐章规划 | 动态任务调整 + 失败回退 |
+| NPC 共识 | 投票机制 | NPC 主动行为 + 反目 |
+| 物品系统 | 发现 + 展示 | 合成 + 使用 + 装备 |
+| 结局 | 1 个主结局 | 4+ 个结局分支 |
 
 ---
 
@@ -542,12 +710,6 @@ CREATE INDEX idx_dialogue_session ON dialogues(session_id, npc_id);
 | 文件 | 对应接口 |
 |------|---------|
 | `mock/start_game.json` | `POST /api/game/start` |
-| `mock/game_state.json` | `GET /api/game/{id}`（阶段二） |
-| `mock/game_state_ended.json` | `GET /api/game/{id}`（含结局） |
-| `mock/dialogue_sse.txt` | `POST /api/dialogue`（完整 SSE 流） |
+| `mock/game_state.json` | `GET /api/game/{id}` |
+| `mock/dialogue_sse.txt` | `POST /api/dialogue` |
 | `mock/evaluate.json` | `POST /api/game/{id}/evaluate` |
-| `mock/sessions.json` | `GET /api/sessions` |
-| `mock/dialogues.json` | `GET /api/game/{id}/dialogues` |
-| `mock/exit_dialogue.json` | `POST /api/dialogue/exit` |
-| `mock/relationships.json` | `GET /api/game/{id}/relationships` |
-| `mock/events.json` | `GET /api/game/{id}/events` |
