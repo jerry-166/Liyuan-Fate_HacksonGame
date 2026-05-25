@@ -1,0 +1,170 @@
+# ============================================================
+# 剧本物品定义（引用模板 + 注入叙事属性）
+# desc_source:
+#   "fixed"  = 描述固定不变（关键叙事道具）
+#   "ai"     = AI 生成详情，生成后锁定
+# stage_relevance: 该物品在哪些章节有叙事意义
+# ============================================================
+
+items:
+
+  # ═══════════════════════════════════════════
+  # 序章物品
+  # ═══════════════════════════════════════════
+
+  - item_id: item_urn
+    template_ref: tmpl_urn
+    narrative_name: 父亲的骨灰盒
+    narrative_desc: >
+      一个简朴的深色木盒，里面装着父亲柳三秋的骨灰。
+      这是你带回来的唯一与父亲有关的东西。
+    is_key: false
+    related_npcs: []
+    location: {scene: "cemetery"}
+    acquire_method: "none"
+    desc_source: fixed
+    stage_relevance: [0]
+
+  # ═══════════════════════════════════════════
+  # 第二章核心证据物品（三件旧物 + 触发记忆觉醒）
+  # ═══════════════════════════════════════════
+
+  - item_id: item_child_costume
+    template_ref: tmpl_child_costume
+    narrative_name: 孩童戏服
+    narrative_desc: >
+      一件小号的戏曲戏服，红底金线绣传统纹样，约五六岁孩童尺寸。
+      颜色已经褪暗，但叠得很整齐——像是有人经常打开来看，又小心翼翼地折好放回去。
+      衣领内侧用墨笔写了一个小小的「柳」字。
+      这是父亲珍藏了十几年的戏服——你幼年登台时穿的那件。
+    is_key: true
+    related_npcs: [npc_chen, npc_laozhou]
+    location: {scene: "father_house", position: {x: 11, y: 12}}
+    acquire_method: "在父亲旧居墙角的老木箱中找到（F键打开木箱）"
+    desc_source: fixed
+    stage_relevance: [2, 3]
+
+  - item_id: item_father_script
+    template_ref: tmpl_script_book
+    narrative_name: 父亲的手抄剧本
+    narrative_desc: >
+      一本泛黄的手抄戏曲台本，封面写着《空城计》。
+      里面是父亲的笔迹——工整的毛笔小楷，密密麻麻。
+      在诸葛亮独坐城楼那段旁边，父亲用红笔批了一句：
+      「戏到此处，台下无声即有声。」
+      旧居旧木桌上放着，旁边还有父亲当年抄戏用的毛笔。
+    is_key: true
+    related_npcs: [npc_chen, npc_laozhou]
+    location: {scene: "father_house", position: {x: 5, y: 7}}
+    acquire_method: "在父亲旧居主屋旧木桌上找到（F键查看）"
+    desc_source: fixed
+    stage_relevance: [2]
+
+  - item_id: item_childhood_photo
+    template_ref: tmpl_old_photo
+    narrative_name: 童年合影
+    narrative_desc: >
+      一张褪色的老照片：父亲（中年长衫，温和微笑）牵着约五六岁的孩童，
+      两人站在戏台前。背后是「梨园班」的牌匾。
+      照片右下角写着：'民国二十年秋·三秋与吾儿'。
+      父亲旧居的照片墙上挂着，与另一张父亲单人旧照并排。
+    is_key: true
+    related_npcs: [npc_chen, npc_meiyi, npc_laozhou]
+    location: {scene: "father_house", position: {x: 5, y: 5}}
+    acquire_method: "在父亲旧居照片墙上找到（F键查看）"
+    desc_source: fixed
+    stage_relevance: [2]
+
+  # ═══════════════════════════════════════════
+  # 第二章辅助线索物品
+  # ═══════════════════════════════════════════
+
+  - item_id: item_father_single_photo
+    template_ref: tmpl_old_photo
+    narrative_name: 父亲旧照（单人）
+    narrative_desc: >
+      父亲年轻时的照片：站在戏台上，戏服金红，英姿勃发。
+      这是柳三秋——梨园班的台柱，万人空巷的名角。
+      照片背面写着：'三秋·二十六岁·空城计'。
+    is_key: false
+    related_npcs: [npc_laozhou, npc_meiyi]
+    location: {scene: "father_house", position: {x: 5, y: 4}}
+    acquire_method: "父亲旧居照片墙上（F键查看）"
+    desc_source: fixed
+    stage_relevance: [2]
+
+  - item_id: item_genealogy
+    template_ref: tmpl_genealogy
+    narrative_name: 柳家族谱
+    narrative_desc: >
+      祠堂后堂的老族谱。翻开可以看到柳家世代从艺的记录——
+      祖父柳长生是鼓师，父亲柳三秋是名角。
+      族谱最后一页，你的名字被墨笔重重划掉了——
+      旁边写着一个日期：三十年前的某一天。
+    is_key: false
+    related_npcs: [npc_chen, npc_meiyi]
+    location: {scene: "temple", position: {x: 5, y: 15}}
+    acquire_method: "祠堂后堂老书架上（F键查看）"
+    desc_source: fixed
+    stage_relevance: [2]
+
+  - item_id: item_old_trunk
+    template_ref: tmpl_trunk
+    narrative_name: 旧戏服木箱
+    narrative_desc: >
+      戏台后台角落的老木箱，铜锁已锈。箱盖半开，露出里面折叠的戏服一角。
+      这不是用来放入背包的物品，而是一个场景交互点——打开它能看到更多旧物。
+    is_key: false
+    related_npcs: [npc_chen, npc_xiaohua, npc_laozhou]
+    location: {scene: "stage_ruin", position: {x: 6, y: 15}}
+    acquire_method: "场景交互点，F键打开（不可拾取）"
+    desc_source: fixed
+    stage_relevance: [1, 2, 3]
+
+  # ═══════════════════════════════════════════
+  # 环境叙事物品（不可拾取，F键查看文字）
+  # ═══════════════════════════════════════════
+
+  - item_id: item_old_jinghu
+    template_ref: tmpl_jinghu
+    narrative_name: 墙上的老琴
+    narrative_desc: >
+      一把挂在戏台后台墙上的京胡，琴身落满灰尘，琴弦已经松弛。
+      旁边贴着一张发黄的纸条：'柳三秋专用'。
+      琴盒下面的灰很厚——至少十年没人动过了。
+    is_key: false
+    related_npcs: [npc_chen, npc_laozhou]
+    location: {scene: "stage_ruin", position: {x: 36, y: 1}}
+    acquire_method: "场景交互点，F键查看（不可拾取）"
+    desc_source: fixed
+    stage_relevance: [1, 2]
+
+  - item_id: item_stage_group_photo
+    template_ref: tmpl_old_photo
+    narrative_name: 茶馆墙上的戏班合影
+    narrative_desc: >
+      茶馆雅间墙上的老照片——梨园班全体成员合影。
+      中间意气风发的年轻人就是你的父亲柳三秋。
+      照片里有陈师傅（年轻时）、老周（年轻时）、梅姨（年轻时）。
+      照片右下角写着：'民国二十二年秋·梨园班全体'。
+    is_key: false
+    related_npcs: [npc_chen, npc_meiyi, npc_laozhou]
+    location: {scene: "teahouse", position: {x: 20, y: 10}}
+    acquire_method: "茶馆雅间墙上（F键查看）"
+    desc_source: fixed
+    stage_relevance: [2]
+
+  - item_id: item_temple_tablet
+    template_ref: tmpl_tablet
+    narrative_name: 柳家祖先牌位
+    narrative_desc: >
+      祠堂正堂供桌上的家族牌位。其中一块写着：
+      '先考 柳三秋 之灵位 生卒不详'。
+      牌位旁边还有两块更旧的牌位——祖父柳长生、曾祖柳振声。
+      都是戏行的人。
+    is_key: false
+    related_npcs: [npc_chen, npc_meiyi]
+    location: {scene: "temple", position: {x: 11, y: 7}}
+    acquire_method: "祠堂供桌上（F键查看）"
+    desc_source: fixed
+    stage_relevance: [2]

@@ -1,0 +1,251 @@
+# ============================================================
+# 《梨园生死》章节剧本定义
+# 叙事结构：序章 + 五章主线 + 结局
+#
+# 每章定义：
+#   - key_event: 章节核心事件（触发章节完成的关键节点）
+#   - required_npcs: 章节需要的 NPC（AI 规划任务时的可选池）
+#   - required_items: 章节需要的物品（可发现/获取的）
+#   - success_condition: 章节完成判定（自然语言描述，供 LLM 参考）
+#   - sub_task_templates: 建议的子任务模板（LLM 可修改/扩展）
+#   - color_tone / bgm_mood: 美术/音乐参数（前端直接使用）
+#
+# LLM 逐章规划：进入每章时，LLM 根据以上信息 + 当前游戏状态
+#   生成 TaskInstance（具体子任务列表 + 物品分配 + NPC 关联）
+# ============================================================
+
+chapters:
+
+  # ─── 序章：归乡 ─────────────────────────────
+  - id: ch_prologue
+    sort_order: 0
+    name: "归乡"
+    type: cinematic
+    description: "父亲病逝，你带着他的骨灰回到陌生的故乡。"
+    color_tone: "#8899aa"
+    bgm_mood: "melancholy_distant"
+    key_event: "prologue_complete"
+    required_npcs: []
+    required_items: ["item_urn"]
+    success_condition: "安葬父亲，离开墓地进入小镇。"
+    sub_task_templates: []
+    # 序章无 AI 任务规划，为固定流程（文字+图渲染）
+
+  # ─── 第一章：闻声·异样 ──────────────────────
+  - id: ch_01
+    sort_order: 1
+    name: "闻声·异样"
+    type: task
+    description: >
+      你偶然走到老街深处，看见一座门庭冷清的老戏院。
+      走进去听戏时，锣鼓响起、唱腔入耳，
+      你突然头痛心悸、指尖发麻——身体先于记忆，对这片戏台产生了回响。
+    color_tone: "#8899bb"
+    bgm_mood: "eerie_warm"
+    key_event: "first_resonance"
+    required_npcs: ["npc_xiaohua", npc_laozhou]
+    required_items: ["item_old_trunk", "item_old_jinghu"]
+    success_condition: >
+      玩家进入戏台，与小华和老周有过初步互动，
+      体验到第一次"身体共鸣"的异样感。
+      小华和老周对玩家产生初步印象（投票通过）。
+    sub_task_templates:
+      - mode: explore
+        title: "找到老戏院"
+        description: "在小镇上找到戏台的位置并进入"
+        target_scene: "stage_ruin"
+      - mode: dialogue
+        title: "与戏班的人打照面"
+        target_npc_id: "npc_xiaohua"
+        description: "在戏台内遇到小华，进行第一次对话"
+      - mode: dialogue
+        title: "遇到沉默的老艺人"
+        target_npc_id: "npc_laozhou"
+        description: "在戏台后台遇到老周，他看着你的眼神很奇怪"
+      - mode: relation
+        title: "初步了解戏班现状"
+        target_npc_id: "npc_xiaohua"
+        threshold: 10
+        description: "通过对话了解戏班的基本情况，让小华不再完全排斥你"
+
+  # ─── 第二章：探寻·疑云 ──────────────────────
+  - id: ch_02
+    sort_order: 2
+    name: "探寻·疑云"
+    type: task
+    description: >
+      身体的异样感挥之不去，你开始主动探索小镇。
+      走访茶馆、祠堂、码头，翻阅父亲留下的旧物。
+      你发现老艺人见到你时眼神复杂、旧箱中藏着孩童戏服和童年照片——
+      真相近在眼前，却被一层看不见的隔膜牢牢封住。
+    color_tone: "#ccbb99"
+    bgm_mood: "exploring_warm"
+    key_event: "evidence_collected"
+    required_npcs: ["npc_chen", "npc_xiaohua", "npc_laozhou", "npc_meiyi", "npc_laoli"]
+    required_items:
+      - "item_child_costume"    # 孩童戏服（关键证据1）
+      - "item_father_script"    # 手抄剧本（关键证据2）
+      - "item_childhood_photo"  # 童年合影（关键证据3）
+      - "item_father_single_photo"
+      - "item_genealogy"
+      - "item_stage_group_photo"
+      - "item_temple_tablet"
+    success_condition: >
+      玩家在父亲旧居、茶馆、祠堂、码头探索，
+      收集到至少3件关键旧物（孩童戏服/手抄剧本/童年照片），
+      并通过NPC对话拼凑出"戏班神童"的线索。
+      陈师傅、梅姨、老周、老李至少3人确认玩家已了解到关键信息。
+    sub_task_templates:
+      - mode: dialogue
+        title: "在茶馆遇到热情的老板娘"
+        target_npc_id: "npc_meiyi"
+        description: "梅姨告诉你'戏班神童'的传闻"
+      - mode: dialogue
+        title: "与陈师傅深入交谈"
+        target_npc_id: "npc_chen"
+        description: "陈师傅开始回忆往事，但仍回避关键真相"
+      - mode: explore
+        title: "进入父亲旧居"
+        target_scene: "father_house"
+        description: "找到父亲留下的老屋，里面藏着他珍藏的旧物"
+      - mode: acquire_item
+        title: "收集父亲的旧物"
+        required_item_id: "item_child_costume"
+        description: "在旧居中发现孩童戏服、手抄剧本、童年照片等关键旧物"
+      - mode: dialogue
+        title: "去码头找老船夫"
+        target_npc_id: "npc_laoli"
+        description: "老李透露三十年前有人抱着昏迷的孩子坐船离开"
+      - mode: dialogue
+        title: "逼问老周真相"
+        target_npc_id: "npc_laozhou"
+        description: "老周暗示你是当年的'小神童'，但仍不敢直说"
+      - mode: show_item
+        title: "向NPC展示旧物"
+        target_npc_id: "npc_chen"
+        required_item_id: "item_child_costume"
+        description: "把找到的孩童戏服拿给陈师傅看，观察他的反应"
+      - mode: explore
+        title: "去祠堂查阅族谱"
+        target_scene: "temple"
+        description: "在祠堂找到柳家族谱，发现你的名字被划掉了"
+
+  # ─── 第三章：忆归·真相 ──────────────────────
+  - id: ch_03
+    sort_order: 3
+    name: "忆归·真相"
+    type: task
+    description: >
+      在某个契机下——触摸旧戏服、站上老戏台，或听到某段关键唱腔——
+      你尘封的记忆彻底觉醒。
+      你本是戏班自幼培养的天才小传人，一次登台意外让你重伤失忆，
+      父亲为保护你，忍痛放下一切，带你远走他乡。
+    color_tone: "#ddaa77"
+    bgm_mood: "revelation_emotional"
+    key_event: "memory_awakened"
+    required_npcs: ["npc_chen", "npc_laozhou", "npc_meiyi"]
+    required_items: ["item_child_costume"]
+    success_condition: >
+      玩家的记忆觉醒（通过触摸孩童戏服/站上戏台触发），
+      并与陈师傅、老周进行真相确认对话。
+      至少陈师傅和老周两人确认玩家已恢复记忆并接受了真相。
+    sub_task_templates:
+      - mode: show_item
+        title: "触摸孩童戏服"
+        target_npc_id: "npc_chen"
+        required_item_id: "item_child_costume"
+        description: "带着孩童戏服找到陈师傅，触发记忆觉醒的关键时刻"
+      - mode: dialogue
+        title: "陈师傅说出全部真相"
+        target_npc_id: "npc_chen"
+        description: "陈师傅终于告诉你：你是戏班的小传人，父亲为你放弃了一切"
+      - mode: dialogue
+        title: "老周确认你的身份"
+        target_npc_id: "npc_laozhou"
+        description: "老周激动地确认：你就是当年的'小神童'"
+      - mode: explore
+        title: "站上老戏台"
+        target_scene: "stage_ruin"
+        description: "走到戏台中央，身体的记忆与舞台共鸣（记忆闪回）"
+      - mode: deliver
+        title: "告知梅姨真相"
+        target_npc_id: "npc_meiyi"
+        description: "把你记起一切的事告诉梅姨，她终于可以畅所欲言了"
+
+  # ─── 第四章：目睹·凋零 ──────────────────────
+  - id: ch_04
+    sort_order: 4
+    name: "目睹·凋零"
+    type: task
+    description: >
+      记忆归位后，你更清晰地看见戏班如今的处境：
+      演员青黄不接、场地破旧失修、观众流失严重。
+      父亲用半生牵挂守护的戏班，在时代浪潮中不断凋零。
+    color_tone: "#998877"
+    bgm_mood: "decay_sorrow"
+    key_event: "decline_accepted"
+    required_npcs: ["npc_chen", "npc_xiaohua", "npc_laozhou", "npc_meiyi"]
+    required_items: []
+    success_condition: >
+      玩家以恢复记忆的视角重新审视戏班的每一个角落和每一个人，
+      与所有NPC深入对话，了解戏班凋零的全貌。
+      所有NPC对玩家表达对戏班未来的担忧和无奈。
+    sub_task_templates:
+      - mode: dialogue
+        title: "以'传人'身份与陈师傅谈戏班的现状"
+        target_npc_id: "npc_chen"
+        description: "陈师傅讲述三十年来戏班一步步衰落的过程"
+      - mode: dialogue
+        title: "了解小华的困境"
+        target_npc_id: "npc_xiaohua"
+        description: "小华吐露他想离开但又舍不得的矛盾心理"
+      - mode: dialogue
+        title: "听老周讲述凋零的细节"
+        target_npc_id: "npc_laozhou"
+        description: "老周一件件列举：哪些人走了、哪些东西坏了、哪些戏失传了"
+      - mode: dialogue
+        title: "梅姨眼中的小镇变化"
+        target_npc_id: "npc_meiyi"
+        description: "梅姨感慨：以前茶馆天天满座来看戏的人，现在连茶都卖不动了"
+
+  # ─── 第五章：承戏·重振 ──────────────────────
+  - id: ch_05
+    sort_order: 5
+    name: "承戏·重振"
+    type: task
+    description: >
+      你终于明白：父亲守护你，也守护戏班。
+      你选择留下，接过传承的重担，重整戏班。
+      以父亲的名义、以梨园传人的身份，让这座没落的梨园重燃荣光。
+    color_tone: "#ddaa66"
+    bgm_mood: "rebirth_hopeful"
+    key_event: "inheritance_accepted"
+    required_npcs: ["npc_chen", "npc_xiaohua", "npc_laozhou", "npc_meiyi", "npc_laoli"]
+    required_items: ["item_child_costume", "item_father_script"]
+    success_condition: >
+      玩家明确表达传承意愿，
+      所有NPC确认并支持玩家的决定，
+      陈师傅正式交付父亲的京胡（或戏班传承信物）。
+      触发结局。
+    sub_task_templates:
+      - mode: dialogue
+        title: "告诉陈师傅你的决定"
+        target_npc_id: "npc_chen"
+        description: "你决定留下来继承戏班。陈师傅泪流满面，交出父亲的京胡"
+      - mode: dialogue
+        title: "邀请小华一起重振戏班"
+        target_npc_id: "npc_xiaohua"
+        description: "小华激动地说：'我第一个跟你干！'"
+      - mode: dialogue
+        title: "告知所有人你的决定"
+        target_npc_id: "npc_meiyi"
+        description: "梅姨激动地说要给全镇人发消息：梨园班要重新开张了"
+      - mode: dialogue
+        title: "告诉老周好消息"
+        target_npc_id: "npc_laozhou"
+        description: "老周老泪纵横：'等了三十年……值了。'"
+      - mode: deliver
+        title: "最终抉择"
+        target_npc_id: "npc_chen"
+        required_item_id: "item_child_costume"
+        description: "穿上孩童戏服，站上焕然一新的戏台——薪火相传"
