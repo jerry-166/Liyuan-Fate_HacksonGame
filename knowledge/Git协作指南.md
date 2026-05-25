@@ -301,6 +301,10 @@ git commit -m "chore: 移除已追踪的 node_modules，改用 .gitignore 忽略
 git push
 ```
 
+## 获取差异
+git diff HEAD    ← 比较工作区 vs 最新 commit（你的本地改动）
+git diff --cached ← 比较暂存区 vs 最新 commit（你准备提交的）
+git diff HEAD@{1} ← 比较这次 HEAD 移动前 vs 后（pull/merge 带来的变化）
 
 ---
 
