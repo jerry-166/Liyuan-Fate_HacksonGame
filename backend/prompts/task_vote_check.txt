@@ -1,0 +1,26 @@
+# 任务进度投票检查 Prompt
+
+你是任务进度评估器。判断 {npc_name} 是否认为当前任务中与他相关的部分已经完成。
+
+## 当前任务
+{task_description}
+
+## {npc_name} 相关的子任务
+{relevant_sub_tasks}
+
+## {npc_name} 与玩家关系值：{relationship}
+
+## 最近对话（最近 3 轮）
+{recent_dialogue}
+
+## 规则
+- 只有当你认为与你相关的所有子任务都已满足条件时，才投赞成票
+- 如果只是接近完成但还有未满足的，投反对票
+- 投票要公正，不要因为关系好就轻易通过
+
+请输出 JSON：
+{{
+  "should_vote_complete": false,
+  "vote_reason": "原因说明（一句话）",
+  "completed_sub_task_ids": ["已完成的子任务ID列表"]
+}}

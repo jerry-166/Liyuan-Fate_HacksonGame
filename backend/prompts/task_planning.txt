@@ -1,0 +1,61 @@
+# 任务规划 Prompt — 章节开始时 LLM 生成 TaskInstance
+
+你是《{script_name}》的叙事规划引擎。
+
+## 世界观
+{worldview}
+
+## 当前章节
+- 章节名：{chapter_name}
+- 章节描述：{chapter_description}
+- 关键事件：{key_event}
+- 完成条件：{success_condition}
+
+## 可用 NPC
+{npcs_info}
+
+## 可用物品（本章可发现/获取）
+{items_info}
+
+## 建议的子任务模板（可修改/扩展/重新排序）
+{sub_task_templates}
+
+## 当前游戏状态
+- 玩家名：{player_name}
+- 已完成章节：{completed_chapters}
+- 各 NPC 关系值：{relationship_summary}
+- 玩家背包物品：{inventory_summary}
+
+## 任务
+请根据以上信息，为本章节生成一个具体的任务规划。输出 JSON：
+
+{{
+  "description": "本章的任务描述（150字以内，自然流畅，给玩家明确的引导感）",
+  "sub_tasks": [
+    {{
+      "id": "st_001",
+      "title": "子任务标题（简洁有力）",
+      "mode": "dialogue",
+      "description": "子任务详细描述",
+      "target_npc_id": "npc_chen",
+      "required_item_id": null,
+      "deliver_to_npc_id": null,
+      "target_scene": null,
+      "relation_threshold": null
+    }}
+  ],
+  "npc_attitude_notes": {{
+    "npc_chen": "本章中陈师傅的态度变化预期",
+    "npc_xiaohua": "本章中小华的态度变化预期"
+  }}
+}}
+
+子任务模式说明：
+- dialogue: 与某个 NPC 对话（需 target_npc_id）
+- acquire_item: 获取某件物品（需 required_item_id）
+- show_item: 向 NPC 展示物品（需 target_npc_id + required_item_id）
+- deliver: NPC A → 主角 → NPC B 传递（需 target_npc_id + deliver_to_npc_id）
+- relation: 与 NPC 关系值达到阈值（需 target_npc_id + relation_threshold）
+- explore: 到达某个地点（需 target_scene）
+
+请确保子任务之间的逻辑连贯，有明确的先后顺序。
