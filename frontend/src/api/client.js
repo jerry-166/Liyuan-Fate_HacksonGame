@@ -1,6 +1,6 @@
 /**
  * API 客户端 — 封装所有后端通信（v2 章节驱动版）
- * 共 16 个接口，USE_MOCK=true 时使用 Mock 数据
+ * 共 25 个接口，USE_MOCK=true 时使用 Mock 数据
  */
 const BASE = '/api';
 
@@ -42,35 +42,35 @@ const MOCK_START = {
   npcs: [
     {
       id: 'npc_chen', name: '陈师傅', role: '老琴师', scene: 'teahouse',
-      position: { col: 43, row: 16 }, sprite_key: 'npc_chen_idle',
+      position: { col: 38, row: 14 }, sprite_key: 'npc_chen_idle',
       relationship: 20, is_available: true,
       current_greeting: '……（陈师傅低头擦拭琴弦，仿佛没看见你）',
       last_dialogue: '', last_options: [], dialogue_round_count: 0
     },
     {
       id: 'npc_xiaohua', name: '小华', role: '年轻学徒', scene: 'stage',
-      position: { col: 11, row: 10 }, sprite_key: 'npc_xiaohua_idle',
+      position: { col: 15, row: 12 }, sprite_key: 'npc_xiaohua_idle',
       relationship: 10, is_available: true,
       current_greeting: '你也是来看戏班笑话的吗？',
       last_dialogue: '', last_options: [], dialogue_round_count: 0
     },
     {
       id: 'npc_laozhou', name: '老周', role: '老艺人', scene: 'stage',
-      position: { col: 9, row: 7 }, sprite_key: 'npc_laozhou_idle',
+      position: { col: 10, row: 8 }, sprite_key: 'npc_laozhou_idle',
       relationship: 15, is_available: true,
       current_greeting: '（老人靠在柱子上打盹，偶尔咳嗽两声）',
       last_dialogue: '', last_options: [], dialogue_round_count: 0
     },
     {
       id: 'npc_meiyi', name: '梅姨', role: '茶馆老板娘', scene: 'teahouse',
-      position: { col: 43, row: 18 }, sprite_key: 'npc_meiyi_idle',
+      position: { col: 40, row: 16 }, sprite_key: 'npc_meiyi_idle',
       relationship: 5, is_available: true,
       current_greeting: '哎哟，新面孔啊？进来喝杯茶吧。',
       last_dialogue: '', last_options: [], dialogue_round_count: 0
     },
     {
       id: 'npc_laoli', name: '船夫老李', role: '船夫', scene: 'dock',
-      position: { col: 65, row: 19 }, sprite_key: 'npc_laoli_idle',
+      position: { col: 60, row: 22 }, sprite_key: 'npc_laoli_idle',
       relationship: 5, is_available: true,
       current_greeting: '（蹲在船边抽旱烟，望着河水出神）',
       last_dialogue: '', last_options: [], dialogue_round_count: 0
@@ -221,12 +221,17 @@ const MOCK_CHAPTERS = [
     description: '你决定扛起戏班的大旗。陈师傅颤抖着将京胡交到你手中……' },
 ];
 
-// Mock 物品列表
-const MOCK_ITEMS = [
+// Mock 物品列表（背包 inventory）
+const MOCK_INVENTORY = [
   { id: 'item_urn', name: '父亲的骨灰盒', description: '一个简朴的深色木盒，里面装着父亲柳三秋的骨灰。',
-    is_key: false, is_discovered: true, location: { scene: 'cemetery' } },
-  { id: 'item_child_costume', name: '孩童戏服', description: '一件小小的戏服，保存完好，袖口绣着父亲的名字。',
-    is_key: true, is_discovered: false, location: { scene: 'father_house' } },
+    item_type: 'key', is_key: false, is_discovered: true, location: { scene: 'cemetery' },
+    ai_detail: null, ai_detail_locked: false, holdable: true, acquire_method: 'explore', related_npcs: [] },
+];
+
+// Mock 场景物品（可拾取）
+const MOCK_SCENE_ITEMS = [
+  { item_id: 'item_child_costume', name: '孩童戏服',
+    location: { scene: 'father_house', position: { col: 20, row: 12 } }, acquire_method: 'click' },
 ];
 
 // Mock 会话列表
@@ -512,21 +517,37 @@ export async function evaluateEnding(sessionId) {
 
 export async function getItems(sessionId) {
   if (USE_MOCK) {
-    return { items: MOCK_ITEMS, total: MOCK_ITEMS.length };
+    // ★ 对齐后端 API 格式：{ inventory: [...], scene_items: [...] }
+    return { inventory: MOCK_INVENTORY, scene_items: MOCK_SCENE_ITEMS };
   }
   const res = await fetch(`${BASE}/game/${sessionId}/items`);
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) throw new Error(await _extractApiError(res));
+  return res.json();
+}
+
+export async function getItemDetail(sessionId, itemId) {
+  if (USE_MOCK) {
+    const invItem = MOCK_INVENTORY.find(i => i.id === itemId);
+    const sceneItem = MOCK_SCENE_ITEMS.find(i => i.item_id === itemId);
+    if (invItem) return { item_id: itemId, from: 'inventory', item: invItem };
+    if (sceneItem) return { item_id: itemId, from: 'scene', is_discovered: false, item: sceneItem };
+    throw new Error('ITEM_NOT_FOUND');
+  }
+  const res = await fetch(`${BASE}/game/${sessionId}/item/${itemId}`);
+  if (!res.ok) throw new Error(await _extractApiError(res));
   return res.json();
 }
 
 export async function discoverItem(sessionId, itemId) {
   if (USE_MOCK) {
-    const mock = MOCK_ITEMS.find(i => i.id === itemId);
+    // 同时在 inventory 和 scene_items 中查找
+    const mock = MOCK_INVENTORY.find(i => i.id === itemId)
+      || MOCK_SCENE_ITEMS.find(i => i.item_id === itemId);
     return {
       item_id: itemId,
       already_discovered: false,
-      item: mock || { id: itemId, name: '未知物品', description: '', is_key: false },
-      discovery_narration: `你发现了「${mock?.name || '未知物品'}」。`,
+      item: mock || { id: itemId, item_id: itemId, name: '未知物品', description: '', is_key: false },
+      discovery_narration: `你发现了「${mock?.name || mock?.id || '未知物品'}」。`,
     };
   }
   const res = await fetch(`${BASE}/game/${sessionId}/item/discover`, {
@@ -535,6 +556,117 @@ export async function discoverItem(sessionId, itemId) {
     body: JSON.stringify({ item_id: itemId }),
   });
   if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+// ========== NPC 位置上报 ==========
+
+export async function reportNPCPosition(sessionId, npcId, position) {
+  if (USE_MOCK) {
+    return { success: true, npc_id: npcId, position };
+  }
+  const res = await fetch(`${BASE}/game/${sessionId}/npc/position`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ npc_id: npcId, position }),
+  });
+  if (!res.ok) throw new Error(await _extractApiError(res));
+  return res.json();
+}
+
+export async function batchReportNPCPositions(sessionId, positions) {
+  if (USE_MOCK) {
+    return { success: true, updated_count: positions.length, errors: null };
+  }
+  const res = await fetch(`${BASE}/game/${sessionId}/npc/positions/batch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ positions }),
+  });
+  if (!res.ok) throw new Error(await _extractApiError(res));
+  return res.json();
+}
+
+export async function spawnNPC(sessionId, npcData) {
+  if (USE_MOCK) {
+    const tempId = `npc_temp_${Date.now().toString(36)}`;
+    return { success: true, npc_id: tempId, name: npcData.name || '临时NPC', position: npcData.position, is_temporary: true };
+  }
+  const res = await fetch(`${BASE}/game/${sessionId}/npc/spawn`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(npcData),
+  });
+  if (!res.ok) throw new Error(await _extractApiError(res));
+  return res.json();
+}
+
+// ========== 普通 NPC 管理（town-npcs） ==========
+
+// Mock 普通NPC数据
+const MOCK_TOWN_NPCS = [
+  { id: 'town_001', name: '卖菜大婶', sprite: 'vendor_f', position: { col: 30, row: 40 }, scene: 'town',
+    greeting: '新鲜的青菜嘞——', role: '菜贩',
+    movement: { enabled: true, speed: 30, idle_range: [3, 8], wander_range: [4, 12] } },
+  { id: 'town_002', name: '货郎老张', sprite: 'peddler_m', position: { col: 45, row: 35 }, scene: 'town',
+    greeting: '来看看吧，好东西不等人！', role: '货郎',
+    movement: { enabled: true, speed: 35, idle_range: [2, 6], wander_range: [6, 15] } },
+];
+
+let mockTownNpcsData = [...MOCK_TOWN_NPCS];
+
+export async function getTownNPCs(scriptId) {
+  if (USE_MOCK) {
+    return { script_id: scriptId || 'liyuan_shengsi', town_npcs: mockTownNpcsData, total: mockTownNpcsData.length };
+  }
+  const res = await fetch(`${BASE}/scripts/${scriptId}/town-npcs`);
+  if (!res.ok) throw new Error(await _extractApiError(res));
+  return res.json();
+}
+
+export async function createTownNPCs(scriptId, townNpcs) {
+  if (USE_MOCK) {
+    const created = townNpcs.map((tn, idx) => ({
+      ...tn,
+      id: tn.id || `town_${String(Date.now()).slice(-6)}_${idx}`,
+    }));
+    mockTownNpcsData = [...created];
+    return { success: true, created, total: created.length };
+  }
+  const res = await fetch(`${BASE}/scripts/${scriptId}/town-npcs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ town_npcs: townNpcs }),
+  });
+  if (!res.ok) throw new Error(await _extractApiError(res));
+  return res.json();
+}
+
+export async function deleteTownNPC(scriptId, npcId) {
+  if (USE_MOCK) {
+    mockTownNpcsData = mockTownNpcsData.filter(t => t.id !== npcId);
+    return { success: true, message: `已删除普通 NPC: ${npcId}` };
+  }
+  const res = await fetch(`${BASE}/scripts/${scriptId}/town-npcs/${npcId}`, { method: 'DELETE' });
+  if (!res.ok) throw new Error(await _extractApiError(res));
+  return res.json();
+}
+
+export async function updateTownNPC(scriptId, npcId, data) {
+  if (USE_MOCK) {
+    const idx = mockTownNpcsData.findIndex(t => t.id === npcId);
+    if (idx >= 0) {
+      mockTownNpcsData[idx] = { ...mockTownNpcsData[idx], ...data };
+      return { success: true, npc: mockTownNpcsData[idx] };
+    }
+    throw new Error('NPC_NOT_FOUND');
+  }
+  const res = await fetch(`${BASE}/scripts/${scriptId}/town-npcs/${npcId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(await _extractApiError(res));
   return res.json();
 }
 

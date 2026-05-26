@@ -10,6 +10,9 @@ const MAP_COLS = 80;
 const MAP_ROWS = 50;
 const TILE = GAME.TILE_SIZE; // 16
 
+// 地图放大倍数（素材 1280×800 放大后可滚动）
+const MAP_SCALE = 1.8;
+
 // Tile 类型常量（细化建筑类型以支持不同颜色）
 const T = {
   GRASS:    'grass',       // 草地（淡青+竹绿）
@@ -147,14 +150,55 @@ function scatterTrees(map, count) {
 
 // ==========================================
 
+// ========== 主角精灵配置 ==========
+const PROTAGONIST = {
+  baseDir: '/assets/images/characters/protagonist/sprites',
+  prefix: 'protagonist',
+  scale: 0.09,
+  bodyRatio: { w: 0.5, h: 0.6, offsetX: 0.25, offsetY: 0.35 },
+};
+
+// ========== NPC 精灵配置 ==========
+const NPC_SPRITES = {
+  'npc_chen':    { prefix: 'chenshifu',     baseDir: '/assets/images/characters/npc-chenshifu/sprites',     scale: 0.09 },
+  'npc_xiaohua': { prefix: 'xiaohua',        baseDir: '/assets/images/characters/npc-xiaohua/sprites',       scale: 0.09 },
+  'npc_laozhou': { prefix: 'laozhou',        baseDir: '/assets/images/characters/npc-laozhou/sprites',       scale: 0.09 },
+  'npc_laoli':   { prefix: 'chuanfulaoli',   baseDir: '/assets/images/characters/npc-chuanfulaoli/sprites',  scale: 0.09 },
+  'npc_meiyi':   { prefix: 'meiyi',          baseDir: '/assets/images/characters/npc-meiyi/sprites',         scale: 0.09 },
+};
+
+// ★ 普通NPC/town-npcs 的回退精灵配置（使用小华的素材作为通用路人外观）
+const FALLBACK_NPC_SPRITE = {
+  prefix: 'xiaohua',
+  baseDir: '/assets/images/characters/npc-xiaohua/sprites',
+  scale: 0.08,   // 稍微小一点以区分主要NPC
+};
+const DIRS = ['down', 'left', 'right', 'up'];
+
 export class GameScene extends Phaser.Scene {
   constructor() {
     super({ key: 'GameScene' });
   }
 
   init(data) {
-    // 可靠接收 MenuScene 传来的存档 ID
     this._savedSessionId = data?.savedSessionId || null;
+  }
+
+  preload() {
+    // 加载主角切分后的单帧图片（每方向 idle + walk 各一张）
+    for (const dir of DIRS) {
+      this.load.image(`${PROTAGONIST.prefix}_idle_${dir}`, `${PROTAGONIST.baseDir}/${PROTAGONIST.prefix}_idle_${dir}.png`);
+      this.load.image(`${PROTAGONIST.prefix}_walk_${dir}`, `${PROTAGONIST.baseDir}/${PROTAGONIST.prefix}_walk_${dir}.png`);
+    }
+    // 加载 NPC 精灵图
+    for (const [npcId, cfg] of Object.entries(NPC_SPRITES)) {
+      for (const dir of DIRS) {
+        this.load.image(`${cfg.prefix}_idle_${dir}`, `${cfg.baseDir}/${cfg.prefix}_idle_${dir}.png`);
+        this.load.image(`${cfg.prefix}_walk_${dir}`, `${cfg.baseDir}/${cfg.prefix}_walk_${dir}.png`);
+      }
+    }
+    // 加载大地图素材（江南水乡小镇全景）
+    this.load.image('town_worldmap', '/assets/images/maps/town_worldmap.png');
   }
 
   create() {
@@ -167,18 +211,39 @@ export class GameScene extends Phaser.Scene {
     this.npcs = [];
     this.npcBubbles = [];
     this.sceneItems = [];      // 场景中可交互的物品精灵
+    this.townNpcs = [];        // 普通NPC（town-npcs）精灵列表
+    this.townNpcBubbles = [];  // 普通NPC气泡列表
     this.inputLocked = false;
     this.currentStage = 1;
     this.currentNearbyItem = null;
 
     this.drawTileMap();
+
+    // ★ 直接从地图图片取实际渲染尺寸作为边界（最准确）
+    const actualMapW = this.mapImage.displayWidth;
+    const actualMapH = this.mapImage.displayHeight;
+
+    // [DEBUG] 立即打印所有尺寸
+    console.log('[GameScene] 初始化尺寸:', {
+      GAME_WIDTH: GAME.WIDTH, GAME_HEIGHT: GAME.HEIGHT,
+      MAP_SCALE,
+      configW: GAME.WIDTH * MAP_SCALE, configH: GAME.HEIGHT * MAP_SCALE,
+      actualMapW, actualMapH,  // 图片真实渲染尺寸
+      canvasW: this.sys.game.config.width,
+      canvasH: this.sys.game.config.height,
+      camW: this.cameras.main.width,
+      camH: this.cameras.main.height,
+    });
+
+    // 用实际图片尺寸
+    this._mapBounds = { w: actualMapW, h: actualMapH };
+
     this.createCollisionLayer();
     this.createPlayer();
     this.createNPCs();
 
-    // 摄像机跟随
-    this.cameras.main.startFollow(this.player, true, 0.08, 0.08);
-    this.cameras.main.setBounds(0, 0, MAP_COLS * TILE, MAP_ROWS * TILE);
+    // ★ 完全手动控制摄像机 — 不用 startFollow，避免其内部边界限制
+    this.cameras.main.removeBounds();
 
     // 键盘输入
     this.cursors = this.input.keyboard.createCursorKeys();
@@ -193,17 +258,36 @@ export class GameScene extends Phaser.Scene {
     // F键交互提示文字（江南风配色）
     this.interactHint = this.add.text(0, 0, '', {
       fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
-      fontSize: '13px',
+      fontSize: '17px',
       color: '#d4c4a0',
       backgroundColor: '#2a2824ee',
       padding: { x: 10, y: 5 },
       border: 1,
       borderRadius: 4,
-    }).setOrigin(0.5).setDepth(100).setVisible(false);
+    }).setOrigin(0.5).setDepth(100).setVisible(false).setScrollFactor(0);
+
+    // ========== 碰撞编辑器相关 ==========
+    this._editMode = false;
+    this._editGridGraphics = null;       // 网格 + 碰撞显示层
+    this._editHUD = null;               // 编辑器 UI 提示
+    this._collisionMap = {};            // 碰撞数据 { "col_row": true }
+    this._draggedNPC = null;            // 正在拖拽的 NPC
+
+    // 编辑器快捷键
+    this.editKeys = {
+      E: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E),
+      S: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
+      C: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C),  // 清除所有碰撞
+      R: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R),  // 硬重置（清除缓存+重启）
+    };
+
+    // 延迟一帧初始化编辑器（等地图尺寸就绪）
+    this.time.delayedCall(200, () => this._initEditor());
 
     // NPC 交互按钮（靠近 NPC 时显示）
-    this.npcActionContainer = this.add.container(0, 0).setDepth(102).setVisible(false);
+    this.npcActionContainer = this.add.container(0, 0).setDepth(102).setVisible(false).setScrollFactor(0);
     this._createNPCActionButtons();
+    // ★ NPC 交互按钮通过可见性+定位直接驱动，无需状态追踪
 
     // 事件监听
     this.events.on('input:lock', (locked) => {
@@ -240,6 +324,9 @@ export class GameScene extends Phaser.Scene {
     this.tintOverlay.setInteractive = () => this.tintOverlay;
 
     this.scene.launch('UIScene');
+
+    // 显示控制提示（5秒后自动消失）
+    this._showControlsHint();
 
     // 延迟一帧通知 UI 游戏已就绪（此时 UIScene 已完全创建）
     this.time.delayedCall(100, () => {
@@ -284,6 +371,9 @@ export class GameScene extends Phaser.Scene {
       if (gameState.npcs) {
         this.time.delayedCall(300, () => this.refreshNPCsFromState(gameState));
       }
+
+      // ★ 加载普通 NPC（town-npcs）
+      this.time.delayedCall(500, () => this.loadTownNPCs());
 
       // 通知 UI
       this.events.emit('game:init', {
@@ -382,6 +472,9 @@ export class GameScene extends Phaser.Scene {
         this.time.delayedCall(300, () => this.refreshNPCsFromState(gameState));
       }
 
+      // ★ 加载普通 NPC
+      this.time.delayedCall(500, () => this.loadTownNPCs());
+
       // 同步到本地缓存
       saveGameState(sessionId, gameState);
 
@@ -437,15 +530,185 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  // ==================== 普通NPC系统（town-npcs）====================
+
+  /**
+   * 加载并创建普通NPC（从后端 API 或 Mock 数据）
+   * 在游戏初始化后调用，支持运行时动态增删
+   */
+  async loadTownNPCs() {
+    try {
+      const { getTownNPCs } = await import('../api/client.js');
+      const data = await getTownNPCs('liyuan_shengsi');
+
+      // 清除已有的普通NPC精灵
+      this.townNpcs.forEach(sp => sp.destroy());
+      this.townNpcBubbles.forEach(b => b.destroy());
+      this.townNpcs = [];
+      this.townNpcBubbles = [];
+
+      const townNpcList = data.town_npcs || [];
+      townNpcList.forEach(townNpc => {
+        const sprite = this.createTownNPCSprite(townNpc);
+        if (sprite) {
+          this.townNpcs.push(sprite);
+          // 气泡
+          const bubbleText = this.add.text(sprite.x, sprite.y - 18 * MAP_SCALE, townNpc.greeting || '', {
+            fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
+            fontSize: '14px', color: '#c8dcc8',
+            backgroundColor: '#1a2824dd',
+            padding: { x: 6, y: 3 },
+            wordWrap: { width: 140 }, align: 'center', lineSpacing: 3,
+          }).setOrigin(0.5).setDepth(100);
+          this.townNpcBubbles.push(bubbleText);
+
+          // ★ 初始化漫游状态
+          sprite.setData('wanderState', this._initWanderState(townNpc));
+        }
+      });
+
+      console.log(`[GameScene] 普通NPC已加载: ${this.townNpcs.length} 个`);
+    } catch (e) {
+      console.warn('[GameScene] 加载普通NPC失败（非阻塞）:', e);
+    }
+  }
+
+  /**
+   * 创建单个普通NPC精灵
+   */
+  createTownNPCSprite(townNpc) {
+    const cfg = FALLBACK_NPC_SPRITE;
+    const col = townNpc.position?.col || 30;
+    const row = townNpc.position?.row || 40;
+    const { x: posX, y: posY } = COORD.toPixel(col, row);
+
+    const startKey = `${cfg.prefix}_idle_down`;
+    const sprite = this.physics.add.sprite(posX * MAP_SCALE, posY * MAP_SCALE, startKey);
+    sprite.setScale(cfg.scale);
+    sprite.setData('npcId', townNpc.id);           // 如 "town_001"
+    sprite.setData('name', townNpc.name);           // 如 "卖菜大婶"
+    sprite.setData('greeting', townNpc.greeting || '');
+    sprite.setData('spriteCfg', cfg);
+    sprite.setData('isTownNPC', true);
+    sprite.setImmovable(true);
+    sprite.body.pushable = false;
+    sprite.setDepth(4);  // 比主要NPC略低一层
+    sprite.setVisible(true);
+
+    return sprite;
+  }
+
+  /**
+   * 初始化单个NPC的漫游状态
+   */
+  _initWanderState(townNpc) {
+    const movement = townNpc.movement || {};
+    return {
+      enabled: movement.enabled !== false,
+      speed: (movement.speed || 35) * 0.01,     // 转换为 px/frame 左右
+      idleTimer: 0,
+      idleDuration: (movement.idle_range?.[0] || 3) * 60 + Math.random() * ((movement.idle_range?.[1] || 8) - (movement.idle_range?.[0] || 3)) * 60,
+      wanderTimer: 0,
+      wanderDuration: (movement.wander_range?.[4] || 6) * 60,
+      state: 'idle',       // 'idle' | 'wandering'
+      targetX: 0,
+      targetY: 0,
+      originCol: townNpc.position?.col || 30,
+      originRow: townNpc.position?.row || 40,
+      wanderRange: movement.wander_range?.[1] || 10, // 最大漫游格子范围
+    };
+  }
+
+  /**
+   * 更新所有普通NPC的漫游行为（每帧调用）
+   * 简单的状态机：idle → 选目标 → wandering → 到达 → idle
+   */
+  _updateTownNPCs(dt) {
+    for (let i = 0; i < this.townNpcs.length; i++) {
+      const npc = this.townNpcs[i];
+      const wander = npc.getData('wanderState');
+      if (!wander || !wander.enabled || !npc.active) continue;
+
+      const bubble = this.townNpcBubbles[i];
+      switch (wander.state) {
+        case 'idle':
+          wander.idleTimer++;
+          // 偶尔切换朝向
+          if (Math.random() < 0.005) {
+            const dirs = ['down', 'left', 'right', 'up'];
+            const dir = dirs[Math.floor(Math.random() * dirs.length)];
+            const cfg = npc.getData('spriteCfg');
+            if (cfg) npc.setTexture(`${cfg.prefix}_idle_${dir}`);
+          }
+          if (wander.idleTimer >= wander.idleDuration) {
+            // 进入漫游：随机选一个目标点（在 origin 附近 wanderRange 格内）
+            const angle = Math.random() * Math.PI * 2;
+            const dist = (3 + Math.random() * (wander.wanderRange - 3)) * TILE * MAP_SCALE;
+            wander.targetX = npc.x + Math.cos(angle) * dist;
+            wander.targetY = npc.y + Math.sin(angle) * dist;
+            // 边界 clamp
+            const mapW = MAP_COLS * TILE * MAP_SCALE;
+            const mapH = MAP_ROWS * TILE * MAP_SCALE;
+            wander.targetX = Phaser.Math.Clamp(wander.targetX, TILE * MAP_SCALE, mapW - TILE * MAP_SCALE);
+            wander.targetY = Phaser.Math.Clamp(wander.targetY, TILE * MAP_SCALE, mapH - TILE * MAP_SCALE);
+            wander.state = 'wandering';
+            wander.wanderTimer = 0;
+            wander.wanderDuration = (wander.wanderRange * 40 + Math.random() * 60); // 根据距离调整时长
+          }
+          break;
+
+        case 'wandering':
+          wander.wanderTimer++;
+          const dx = wander.targetX - npc.x;
+          const dy = wander.targetY - npc.y;
+          const distToTarget = Math.sqrt(dx * dx + dy * dy);
+
+          if (distToTarget < 5) {
+            // 到达目标，切回 idle
+            wander.state = 'idle';
+            wander.idleTimer = 0;
+            wander.idleDuration = (3 + Math.random() * 5) * 60;
+            const cfg = npc.getData('spriteCfg');
+            if (cfg) npc.setTexture(`${cfg.prefix}_idle_down`);
+          } else {
+            // 向目标移动
+            const moveSpeed = wander.speed * (dt / 16.667); // 归一化到 ~60fps
+            const vx = (dx / distToTarget) * moveSpeed;
+            const vy = (dy / distToTarget) * moveSpeed;
+            npc.x += vx;
+            npc.y += vy;
+
+            // 更新朝向
+            const cfg = npc.getData('spriteCfg');
+            if (cfg) {
+              let facing = 'down';
+              if (Math.abs(vx) > Math.abs(vy)) {
+                facing = vx > 0 ? 'right' : 'left';
+              } else {
+                facing = vy > 0 ? 'down' : 'up';
+              }
+              npc.setTexture(`${cfg.prefix}_walk_${facing}`);
+            }
+          }
+          break;
+      }
+
+      // 气泡跟随
+      if (bubble) bubble.setPosition(npc.x, npc.y - 18 * MAP_SCALE);
+    }
+  }
+
   /**
    * 创建一个场景物品精灵
    */
   createSceneItemSprite(itemData, col, row) {
     const pos = COORD.toPixel(col, row);
+    const px = pos.x * MAP_SCALE;
+    const py = pos.y * MAP_SCALE;
     // 使用 emoji 文字作为物品图标
     const emoji = '📦';
-    const sprite = this.add.text(pos.x, pos.y, emoji, {
-      fontSize: '20px',
+    const sprite = this.add.text(px, py, emoji, {
+      fontSize: `${20 * MAP_SCALE}px`,
     }).setOrigin(0.5).setDepth(90);
 
     sprite.setData('itemId', itemData.item_id);
@@ -454,7 +717,7 @@ export class GameScene extends Phaser.Scene {
     // 小幅上下浮动动画
     this.tweens.add({
       targets: sprite,
-      y: pos.y - 4,
+      y: py - 4 * MAP_SCALE,
       duration: 1200,
       yoyo: true,
       repeat: -1,
@@ -476,9 +739,9 @@ export class GameScene extends Phaser.Scene {
         sprite = this.createNPCSprite(stateNpc.id, stateNpc.name, stateNpc);
         if (!sprite) return;
         this.npcs.push(sprite);
-        const bubbleText = this.add.text(sprite.x, sprite.y - 20, stateNpc.current_greeting || '', {
+        const bubbleText = this.add.text(sprite.x, sprite.y - 20 * MAP_SCALE, stateNpc.current_greeting || '', {
           fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
-          fontSize: '12px', color: '#e8dcc8',
+          fontSize: '16px', color: '#e8dcc8',
           backgroundColor: '#2a2824dd',
           padding: { x: 8, y: 4 },
           wordWrap: { width: 170 }, align: 'center', lineSpacing: 4,
@@ -500,59 +763,29 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * 动态创建单个 NPC 精灵
+   * 动态创建单个 NPC 精灵（使用真实精灵图）
+   * ★ 对于不在 NPC_SPRITES 中的普通NPC（如 town_001），自动回退到 FALLBACK_NPC_SPRITE
    */
   createNPCSprite(npcId, name, stateNpc) {
-    const npcConfigs = {
-      'npc_chen': { color: 0xb8a078, hair: 0xc8c8d0 },
-      'npc_xiaohua': { color: 0x7888a0, hair: 0x2a2420 },
-      'npc_laozhou': { color: 0x9a8a7a, hair: 0xb0b0b8 },
-      'npc_meiyi': { color: 0xaa8878, hair: 0x3a2820 },
-      'npc_laoli': { color: 0x8a7a68, hair: 0x555550 },
-    };
-    const cfg = npcConfigs[npcId] || { color: 0x888888, hair: 0x444444 };
-    const nw = 14, nh = 28;
-    const gfx = this.make.graphics({ add: false });
+    const cfg = NPC_SPRITES[npcId] || FALLBACK_NPC_SPRITE;
+    if (!cfg) {
+      console.warn(`[GameScene] NPC ${npcId} 无精灵配置，跳过创建`);
+      return null;
+    }
 
-    // 身体
-    gfx.fillStyle(cfg.color);
-    gfx.fillRect(1, 10, nw - 2, nh - 11);
-    gfx.fillStyle(Phaser.Display.Color.ValueToColor(cfg.color).darken(10).color);
-    gfx.fillRect(2, nh - 5, nw - 4, 4);
-    // 裤子
-    gfx.fillStyle(0x333338);
-    gfx.fillRect(2, nh - 6, nw - 4, 6);
-    // 脸
-    gfx.fillStyle(0xf0d8b8);
-    gfx.fillRect(2, 1, nw - 4, 9);
-    // 头发
-    gfx.fillStyle(cfg.hair);
-    gfx.fillRect(2, 1, nw - 4, 4);
-    // 眼睛
-    gfx.fillStyle(0x333340);
-    gfx.fillRect(4, 5, 2, 2);
-    gfx.fillRect(nw - 6, 5, 2, 2);
-    // 鞋子
-    gfx.fillStyle(0x5a4a38);
-    gfx.fillRect(2, nh - 2, 3, 2);
-    gfx.fillRect(nw - 5, nh - 2, 3, 2);
-    // 黑边
-    gfx.lineStyle(1, 0x111111, 0.8);
-    gfx.strokeRect(1, 1, nw - 2, nh - 2);
-
-    const key = `__npc_${npcId}__`;
-    gfx.generateTexture(key, nw, nh);
-
-    // 使用 API 返回的瓦片坐标或默认位置
-    const defaultPos = npcId === 'npc_chen' ? { col: 43, row: 16 } : { col: 11, row: 10 };
+    const defaultPos = npcId === 'npc_chen' ? { col: 38, row: 14 } : { col: 15, row: 12 };
     const col = stateNpc.position ? stateNpc.position.col : defaultPos.col;
     const row = stateNpc.position ? stateNpc.position.row : defaultPos.row;
     const { x: posX, y: posY } = COORD.toPixel(col || defaultPos.col, row || defaultPos.row);
 
-    const sprite = this.physics.add.sprite(posX, posY, key);
+    const startKey = `${cfg.prefix}_idle_down`;
+    const sprite = this.physics.add.sprite(posX * MAP_SCALE, posY * MAP_SCALE, startKey);
+    sprite.setScale(cfg.scale);
     sprite.setData('npcId', npcId);
     sprite.setData('name', name);
     sprite.setData('greeting', stateNpc.current_greeting || '');
+    sprite.setData('spriteCfg', cfg);
+    sprite.setData('isTownNPC', !NPC_SPRITES[npcId]); // 标记是否为普通NPC
     sprite.setImmovable(true);
     sprite.body.pushable = false;
     sprite.setDepth(5);
@@ -615,295 +848,361 @@ export class GameScene extends Phaser.Scene {
   // ==================== 地图绘制（江南水乡像素风格）====================
 
   drawTileMap() {
-    const gfx = this.add.graphics();
-    gfx.setDepth(0);
-
-    for (let r = 0; r < MAP_ROWS; r++) {
-      for (let c = 0; c < MAP_COLS; c++) {
-        const type = this.mapData[r][c];
-        const colors = PALETTE[type];
-        if (!colors) continue;
-
-        const x = c * TILE;
-        const y = r * TILE;
-        const isDark = (r + c) % 2 === 1;
-        const color = isDark ? colors.dark : colors.base;
-
-        // ---- 基础填充 ----
-        gfx.fillStyle(color);
-        gfx.fillRect(x, y, TILE, TILE);
-
-        // ---- 1px 黑边（design.md 要求） ----
-        gfx.lineStyle(1, BLACK_EDGE, 0.45);
-        gfx.strokeRect(x, y, TILE, TILE);
-
-        // ---- 各类型纹理细节 ----
-
-        // 草地：淡青+竹绿，随机小花点缀
-        if (type === T.GRASS) {
-          // 高光格子加亮
-          if (!isDark) {
-            gfx.fillStyle(colors.highlight, 0.3);
-            // 小草点
-            if ((r * 7 + c * 13) % 5 === 0) {
-              gfx.fillRect(x + 3, y + 5, 2, 2);
-              gfx.fillRect(x + 9, y + 10, 2, 1);
-            }
-          }
-          // 零星小花（粉色/白色小点）
-          if ((r * 17 + c * 23) % 19 === 0) {
-            gfx.fillStyle(0xeeddee, 0.6);
-            gfx.fillCircle(x + 5, y + 5, 1);
-          }
-        }
-
-        // 青石板路：浅灰+深灰缝+青苔点
-        if (type === T.ROAD) {
-          // 石板缝隙
-          gfx.lineStyle(1, 0x888878, 0.3);
-          if (isDark) {
-            gfx.moveTo(x, y); gfx.lineTo(x + TILE, y + TILE);
-            gfx.strokePath();
-          } else {
-            gfx.moveTo(x + TILE, y); gfx.lineTo(x, y + TILE);
-            gfx.strokePath();
-          }
-          // 随机青苔点
-          if ((r * 3 + c * 7) % 11 === 0) {
-            gfx.fillStyle(0x6a8a6a, 0.4);
-            gfx.fillCircle(x + 6, y + 8, 1.5);
-          }
-        }
-
-        // 土路：浅棕+小石子
-        if (type === T.DIRT) {
-          // 石子纹理
-          if ((r + c) % 3 === 0) {
-            gfx.fillStyle(0xaa9977, 0.3);
-            gfx.fillRect(x + 4 + (c % 4), y + 6 + (r % 4), 2, 1);
-            gfx.fillRect(x + 8 + (r % 3), y + 3 + (c % 5), 1, 2);
-          }
-        }
-
-        // 河水：淡蓝+波纹白高光
-        if (type === T.WATER) {
-          // 波纹高光线
-          gfx.fillStyle(0xffffff, isDark ? 0.15 : 0.25);
-          const waveOffset = (r * 3 + c * 5) % 5;
-          gfx.fillRect(x + 2 + waveOffset, y + 5, 4, 1);
-          gfx.fillRect(x + 8 - waveOffset, y + 11, 5, 1);
-          // 水面反光
-          if (!isDark && (r * 7 + c * 11) % 9 === 0) {
-            gfx.fillStyle(0xaaccff, 0.2);
-            gfx.fillRect(x + 3, y + 3, 3, 2);
-          }
-        }
-
-        // 石桥：青灰色+拱桥纹理
-        if (type === T.BRIDGE) {
-          // 桥面横纹
-          gfx.lineStyle(1, 0x7a867c, 0.4);
-          gfx.beginPath();
-          gfx.moveTo(x + 1, y + 4);
-          gfx.lineTo(x + TILE -1, y + 4);
-          gfx.moveTo(x + 1, y + TILE -4);
-          gfx.lineTo(x + TILE-1, y + TILE-4);
-          gfx.strokePath();
-          // 拱形暗示
-          gfx.fillStyle(0xaebab0, 0.3);
-          gfx.fillRect(x + 2, y + 2, TILE-4, 2);
-        }
-
-        // 戏台：暖红+木棕+金黄（核心地标，最醒目）
-        if (type === T.STAGE) {
-          // 屋顶暗示（飞檐翘角）
-          if ((r + c) % 4 === 0) {
-            gfx.fillStyle(0xdd7744, 0.5);  // 朱红色屋顶
-            gfx.fillRect(x + 1, y + 1, TILE-2, 4);
-            // 翘角
-            gfx.fillStyle(0xcc6633, 0.4);
-            gfx.fillRect(x, y + 1, 2, 2);
-            gfx.fillRect(x + TILE-2, y + 1, 2, 2);
-          }
-          // 戏曲灯笼点缀（红色小圆）
-          if ((r * 5 + c * 9) % 17 === 0 && !isDark) {
-            gfx.fillStyle(0xee5533, 0.7);
-            gfx.fillCircle(x + TILE/2, y + 6, 2);
-          }
-          // 雕花暗示
-          if (isDark) {
-            gfx.fillStyle(0xaa7744, 0.2);
-            gfx.fillRect(x + 4, y + 7, 8, 2);
-          }
-        }
-
-        // 茶馆：米黄+茶褐+竹绿
-        if (type === T.TEA) {
-          // 木窗格
-          if ((r + c) % 3 === 0) {
-            gfx.lineStyle(1, 0x8a7a5a, 0.3);
-            gfx.strokeRect(x + 3, y + 3, TILE - 6, TILE - 6);
-          }
-          // 茶旗暗示
-          if ((r * 7 + c * 3) % 13 === 0) {
-            gfx.fillStyle(0x886644, 0.4);
-            gfx.fillRect(x + 10, y + 1, 3, 5);
-          }
-          // 竹桌椅暗示
-          if (isDark && (r + c) % 5 === 0) {
-            gfx.fillStyle(0x7a9a6a, 0.25);
-            gfx.fillRect(x + 4, y + 8, 6, 4);
-          }
-        }
-
-        // 码头：水蓝+青灰+雾白
-        if (type === T.DOCK) {
-          // 木桩暗示
-          if ((c) % 4 === 0) {
-            gfx.fillStyle(0x7a6a54, 0.5);
-            gfx.fillRect(x + 2, y + TILE - 5, 3, 5);
-          }
-          // 雾气感（半透明白）
-          if (!isDark) {
-            gfx.fillStyle(0xddeeff, 0.08);
-            gfx.fillRect(x, y, TILE, TILE);
-          }
-          // 石阶
-          if ((r) % 3 === 0) {
-            gfx.lineStyle(1, 0x8a9a94, 0.3);
-            gfx.beginPath();
-            gfx.moveTo(x, y + TILE - 2);
-            gfx.lineTo(x + TILE, y + TILE - 2);
-            gfx.strokePath();
-          }
-        }
-
-        // 祠堂：淡灰+米白（庄重）
-        if (type === T.TEMPLE) {
-          // 对称结构暗示
-          if (isDark) {
-            gfx.fillStyle(0xaca8a0, 0.2);
-            gfx.fillRect(x + TILE/2 - 2, y + 2, 4, TILE - 4);
-          }
-          // 门匾
-          if ((r + c) % 6 === 0) {
-            gfx.fillStyle(0x6a5a42, 0.4);
-            gfx.fillRect(x + 4, y + 4, TILE - 8, 3);
-          }
-        }
-
-        // 民居：淡灰+浅绿（日常烟火）
-        if (type === T.HOUSE) {
-          // 白墙暗示（高光块）
-          if (!isDark) {
-            gfx.fillStyle(0xe8e4dc, 0.15);
-            gfx.fillRect(x + 2, y + 2, TILE-4, TILE-5);
-          }
-          // 黛瓦屋顶
-          if ((r + c) % 4 === 0) {
-            gfx.fillStyle(0x555560, 0.3);
-            gfx.fillRect(x + 1, y + 1, TILE-2, 3);
-          }
-          // 晾衣绳/竹篮等生活气息
-          if ((r * 11 + c * 7) % 21 === 0) {
-            gfx.fillStyle(0x998877, 0.25);
-            gfx.fillRect(x + 3, y + TILE - 4, 8, 1);
-          }
-        }
-
-        // 树木：竹丛/垂柳（多层绿色圆形叠加）
-        if (type === T.TREE) {
-          const cx = x + TILE / 2;
-          const cy = y + TILE / 2;
-          // 外层暗绿（树冠底）
-          gfx.fillStyle(colors.dark);
-          gfx.fillCircle(cx, cy + 1, TILE / 2 - 1);
-          // 中层主色
-          gfx.fillStyle(color);
-          gfx.fillCircle(cx - 1, cy - 1, TILE / 2 - 2);
-          // 内层亮绿（高光）
-          gfx.fillStyle(colors.highlight);
-          gfx.fillCircle(cx - 1, cy - 2, TILE / 2 - 4);
-          // 树干
-          gfx.fillStyle(0x6a5844, 0.8);
-          gfx.fillRect(cx - 1, cy + 2, 3, 4);
-        }
-      }
-    }
-
-    // 地图外框粗边框（画幅感）
-    gfx.lineStyle(2, BLACK_EDGE, 0.6);
-    gfx.strokeRect(0, 0, MAP_COLS * TILE, MAP_ROWS * TILE);
+    // 使用素材图片替换程序化绘制，放大显示以支持摄像机滚动
+    this.mapImage = this.add.image(0, 0, 'town_worldmap').setOrigin(0, 0);
+    this.mapImage.setDepth(0);
+    this.mapImage.setScale(MAP_SCALE);
   }
 
   createCollisionLayer() {
+    // 从 localStorage 加载已保存的碰撞配置
     this.collisionZones = [];
-    const collideTypes = [T.WATER, T.STAGE, T.TEA, T.DOCK, T.TEMPLE, T.HOUSE, T.TREE];
-
-    for (let r = 0; r < MAP_ROWS; r++) {
-      for (let c = 0; c < MAP_COLS; c++) {
-        if (collideTypes.includes(this.mapData[r][c])) {
-          const zone = this.add.zone(
-            c * TILE + TILE / 2,
-            r * TILE + TILE / 2,
-            TILE,
-            TILE
-          );
-          this.physics.add.existing(zone, true);
-          this.collisionZones.push(zone);
-        }
+    try {
+      const saved = localStorage.getItem('editor_collision_map');
+      if (saved) {
+        this._collisionMap = JSON.parse(saved);
+        console.log('[Editor] 已加载碰撞数据, 碰撞格数:', Object.keys(this._collisionMap).length);
       }
+    } catch (e) {
+      console.warn('[Editor] 加载碰撞数据失败:', e);
+      this._collisionMap = {};
     }
   }
 
-  // ==================== 玩家（16×32 Q 版风格占位）====================
+  // ========== 可视化碰撞编辑器 ==========
+
+  /** 初始化编辑器（创建网格层、HUD、绑定事件） */
+  _initEditor() {
+    // 网格 + 碰撞高亮显示层（跟随地图滚动）
+    this._editGridGraphics = this.add.graphics().setDepth(50).setScrollFactor(1);
+
+    // 编辑器 HUD（固定屏幕）
+    this._editHUD = this.add.container(0, 0).setDepth(1000).setScrollFactor(0).setVisible(false);
+
+    const hudBg = this.add.graphics();
+    hudBg.fillStyle(0x1a1820, 0.95);
+    hudBg.fillRoundedRect(-200, -30, 400, 60, 8);
+    hudBg.lineStyle(2, 0xd4b896, 0.6);
+    hudBg.strokeRoundedRect(-200, -30, 400, 60, 8);
+    this._editHUD.add(hudBg);
+
+    this._editHUDText = this.add.text(0, 0, '', {
+      fontFamily: '"Consolas", monospace',
+      fontSize: '15px', color: '#d4b896',
+      align: 'center', lineSpacing: 4,
+    }).setOrigin(0.5);
+    this._editHUD.add(this._editHUDText);
+
+    // 鼠标点击/拖拽事件
+    this.input.on('pointerdown', (ptr) => this._onEditPointerDown(ptr));
+    this.input.on('pointermove', (ptr) => this._onEditPointerMove(ptr));
+    this.input.on('pointerup', (ptr) => this._onEditPointerUp(ptr));
+
+    console.log('[Editor] 初始化完成 — 按 [E] 进入编辑模式');
+  }
+
+  /** 切换编辑模式 */
+  _toggleEditMode() {
+    this._editMode = !this._editMode;
+    if (this._editMode) {
+      // 进入编辑模式：冻结玩家物理，启用自由摄像机滚动
+      this.player.setVelocity(0, 0);
+      this.player.body.enable = false;
+      this._editCamFreeScroll = true;
+
+      this._editHUD.setVisible(true);
+      this._editHUD.setPosition(this.cameras.main.width / 2, 40);
+      this._refreshEditHUD();
+      this._drawCollisionGrid();
+      console.log('[Editor] 已进入编辑模式 — WASD滚动视角 | 左键:切换碰撞 | 拖拽:NPC');
+    } else {
+      // 退出编辑模式：自动保存 + 恢复玩家物理
+      this._saveToLocalStorage();
+      console.log('[Editor] 碰撞数据已自动保存');
+      this.player.body.enable = true;
+      this._editCamFreeScroll = false;
+
+      this._editHUD.setVisible(false);
+      this._draggedNPC = null;
+      if (this._editGridGraphics) this._editGridGraphics.clear();
+      console.log('[Editor] 已退出编辑模式');
+    }
+  }
+
+  /** 刷新 HUD 显示 */
+  _refreshEditHUD() {
+    const count = Object.keys(this._collisionMap).length;
+    const mode = this._draggedNPC ? '拖拽NPC中...' : 'WASD:滚动视角 | 左键:碰撞 | 拖拽:NPC | S:保存 | C:清除';
+    this._editHUDText.setText(`[碰撞编辑模式]  碰撞格: ${count}\n${mode}`);
+  }
+
+  /** 绘制网格和碰撞区域 */
+  _drawCollisionGrid() {
+    const g = this._editGridGraphics;
+    if (!g) return;
+    g.clear();
+
+    const gridPx = TILE * MAP_SCALE;   // 每格像素大小
+    const mapW = MAP_COLS * gridPx;
+    const mapH = MAP_ROWS * gridPx;
+
+    // 1. 绘制浅色网格线（所有格子）
+    g.lineStyle(1, 0xffffff, 0.12);
+    for (let c = 0; c <= MAP_COLS; c++) {
+      g.moveTo(c * gridPx, 0); g.lineTo(c * gridPx, mapH);
+    }
+    for (let r = 0; r <= MAP_ROWS; r++) {
+      g.moveTo(0, r * gridPx); g.lineTo(mapW, r * gridPx);
+    }
+
+    // 2. 绘制碰撞格子（红色半透明填充 + 边框）
+    for (const key of Object.keys(this._collisionMap)) {
+      const [c, r] = key.split('_').map(Number);
+      g.fillStyle(0xff3333, 0.35);
+      g.fillRect(c * gridPx, r * gridPx, gridPx, gridPx);
+      g.lineStyle(2, 0xff6666, 0.8);
+      g.strokeRect(c * gridPx, r * gridPx, gridPx, gridPx);
+    }
+
+    // 3. 标注 NPC 位置
+    for (const npc of this.npcs) {
+      const tile = COORD.toTile(npc.x / MAP_SCALE, npc.y / MAP_SCALE);
+      const cx = tile.col * gridPx + gridPx / 2;
+      const cy = tile.row * gridPx + gridPx / 2;
+
+      // NPC 圆形标记（青色）
+      g.fillStyle(0x00ffff, 0.4);
+      g.fillCircle(cx, cy, gridPx * 0.4);
+      g.lineStyle(2, 0x00ffff, 0.9);
+      g.strokeCircle(cx, cy, gridPx * 0.4);
+    }
+  }
+
+  /** 获取鼠标指向的瓦片坐标（边界 clamp，防止边缘像素越界） */
+  _getPointerTile(ptr) {
+    const cam = this.cameras.main;
+    const worldX = ptr.x + cam.scrollX;
+    const worldY = ptr.y + cam.scrollY;
+    const gridPx = TILE * MAP_SCALE;
+    // 用 clamp 确保边缘像素映射到最后一个有效瓦片（而非越界） */
+    return {
+      col: Phaser.Math.Clamp(Math.floor(worldX / gridPx), 0, MAP_COLS - 1),
+      row: Phaser.Math.Clamp(Math.floor(worldY / gridPx), 0, MAP_ROWS - 1),
+    };
+  }
+
+  /** 编辑模式下的鼠标按下 */
+  _onEditPointerDown(ptr) {
+    if (!this._editMode) return;
+
+    const tile = this._getPointerTile(ptr);
+
+    // 检查是否点中 NPC（优先检测拖拽）
+    for (const npc of this.npcs) {
+      const dist = Phaser.Math.Distance.Between(
+        ptr.x + this.cameras.main.scrollX,
+        ptr.y + this.cameras.main.scrollY,
+        npc.x, npc.y
+      );
+      if (dist < 32) {
+        this._draggedNPC = npc;
+        this._refreshEditHUD();
+        console.log(`[Editor] 开始拖拽 NPC: ${npc.getData('name')}`);
+        return;
+      }
+    }
+
+    // 切换碰撞状态
+    if (tile.col >= 0 && tile.col < MAP_COLS && tile.row >= 0 && tile.row < MAP_ROWS) {
+      const key = `${tile.col}_${tile.row}`;
+      if (this._collisionMap[key]) {
+        delete this._collisionMap[key];
+      } else {
+        this._collisionMap[key] = true;
+      }
+      this._drawCollisionGrid();
+      this._refreshEditHUD();
+    }
+  }
+
+  /** 鼠标移动（绘制预览） */
+  _onEditPointerMove(ptr) {
+    if (!this._editMode) return;
+
+    // 如果正在拖拽 NPC
+    if (this._draggedNPC) {
+      const cam = this.cameras.main;
+      this._draggedNPC.x = ptr.x + cam.scrollX;
+      this._draggedNPC.y = ptr.y + cam.scrollY;
+
+      // 同步气泡位置
+      const idx = this.npcs.indexOf(this._draggedNPC);
+      if (idx >= 0 && this.npcBubbles[idx]) {
+        this.npcBubbles[idx].setPosition(
+          this._draggedNPC.x,
+          this._draggedNPC.y - 22
+        );
+      }
+      this._drawCollisionGrid();  // 重绘以更新 NPC 标记位置
+    }
+  }
+
+  /** 鼠标释放 */
+  _onEditPointerUp(ptr) {
+    if (!this._editMode || !this._draggedNPC) return;
+
+    const tile = COORD.toTile(this._draggedNPC.x / MAP_SCALE, this._draggedNPC.y / MAP_SCALE);
+    console.log(`[Editor] NPC ${this._draggedNPC.getData('name')} 新位置: col=${tile.col}, row=${tile.row}`);
+
+    // 吸附到格子中心
+    const { x: cx, y: cy } = COORD.toPixelCenter(tile.col, tile.row);
+    this._draggedNPC.x = cx * MAP_SCALE;
+    this._draggedNPC.y = cy * MAP_SCALE;
+
+    const idx = this.npcs.indexOf(this._draggedNPC);
+    if (idx >= 0 && this.npcBubbles[idx]) {
+      this.npcBubbles[idx].setPosition(this._draggedNPC.x, this._draggedNPC.y - 22);
+    }
+
+    this._draggedNPC = null;
+    this._drawCollisionGrid();
+    this._refreshEditHUD();
+  }
+
+  /** 仅写 localStorage（退出编辑时静默保存） */
+  _saveToLocalStorage() {
+    const npcPositions = {};
+    for (const npc of this.npcs) {
+      const tile = COORD.toTile(npc.x / MAP_SCALE, npc.y / MAP_SCALE);
+      npcPositions[npc.getData('npcId')] = { col: tile.col, row: tile.row };
+    }
+    try {
+      localStorage.setItem('editor_collision_map', JSON.stringify(this._collisionMap));
+      localStorage.setItem('editor_npc_positions', JSON.stringify(npcPositions));
+    } catch (e) {
+      console.warn('[Editor] localStorage 保存失败:', e);
+    }
+  }
+
+  /** 保存碰撞配置到 localStorage + 控制台导出 JSON（S 键手动触发） */
+  _saveCollisionConfig() {
+    this._saveToLocalStorage();
+
+    // 控制台输出可复制 JSON
+    console.log('═══════════════════════════════════');
+    console.log('[Editor] 配置已保存! 碰撞格数:', Object.keys(this._collisionMap).length);
+    console.log('\n// 碰撞数据 (复制到代码中使用):');
+    console.log(JSON.stringify(this._collisionMap, null, 2));
+    console.log('═══════════════════════════════════');
+
+    this.showToast(`已保存! 碰撞:${Object.keys(this._collisionMap).length}格`, 2500);
+    this._refreshEditHUD();
+  }
+
+  /** 清除所有碰撞数据 */
+  _clearAllCollisions() {
+    this._collisionMap = {};
+    // 同时清除 localStorage 中的碰撞数据
+    localStorage.removeItem('editor_collision_map');
+    this._drawCollisionGrid();
+    this._refreshEditHUD();
+    console.log('[Editor] 🗑️ 已清除所有碰撞');
+    this.showToast('已清除所有碰撞格', 1500);
+  }
+
+  /** 硬重置：仅清除游戏存档，保留编辑器配置 */
+  _hardReset() {
+    console.log('══════════════════════════════');
+    console.log('[硬重置] 清除游戏存档(保留编辑器配置)...');
+    // 仅清除游戏存档 session，不碰编辑器的碰撞/NPC位置
+    localStorage.removeItem('__active_session__');  // 只清存档session
+    // 注意: 不再删除 editor_collision_map 和 editor_npc_positions
+    console.log('[硬重置] ✅ 存档已清除，编辑器配置保留，正在重启...');
+    console.log('══════════════════════════════');
+
+    this.scene.stop('UIScene');
+    this.scene.restart();
+  }
+
+  /** 显示控制提示 */
+  _showControlsHint() {
+    const { width, height } = this.cameras.main;
+    const hint = this.add.text(width / 2, height - 50, [
+      '[WASD/方向键] 移动  |  [E] 碰撞编辑器(编辑器内WASD滚动视角)  |  [R] 硬重置',
+    ].join('\n'), {
+      fontFamily: '"Microsoft YaHei","Consolas",sans-serif',
+      fontSize: '13px',
+      color: '#aabbcc',
+      backgroundColor: '#0a0a15dd',
+      padding: { x: 12, y: 8 },
+      align: 'center',
+      lineSpacing: 3,
+    }).setOrigin(0.5).setDepth(800).setAlpha(0).setScrollFactor(0);
+
+    // 淡入 → 停留 → 淡出
+    this.tweens.add({
+      targets: hint,
+      alpha: 1,
+      duration: 500,
+      onComplete: () => {
+        this.time.delayedCall(6000, () => {
+          this.tweens.add({ targets: hint, alpha: 0, duration: 1500, onComplete: () => hint.destroy() });
+        });
+      },
+    });
+  }
+
+  /**
+   * 检测某世界坐标是否在碰撞格中
+   * @param {number} worldX 世界坐标 X（已含 MAP_SCALE）
+   * @param {number} worldY 世界坐标 Y（已含 MAP_SCALE）
+   * @returns {boolean} 是否碰撞
+   */
+  _checkCollisionAt(worldX, worldY) {
+    // 如果没有设置任何碰撞，直接返回 false（不阻挡）
+    if (!this._collisionMap || Object.keys(this._collisionMap).length === 0) return false;
+
+    const gridPx = TILE * MAP_SCALE;
+    const col = Math.floor(worldX / gridPx);
+    const row = Math.floor(worldY / gridPx);
+
+    // 检查玩家覆盖的 2x2 区域（角色比一格大）
+    for (let dc = 0; dc <= 1; dc++) {
+      for (let dr = 0; dr <= 1; dr++) {
+        const key = `${col + dc}_${row + dr}`;
+        if (this._collisionMap[key]) {
+          // [DEBUG] 首次碰撞时打印
+          if (!this._collDebug) { this._collDebug = true; console.log('[碰撞] 命中', key, 'at', Math.round(worldX), Math.round(worldY)); }
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  // ==================== 玩家（真实精灵图 + 2帧walk动画）====================
 
   createPlayer() {
-    const { x: startX, y: startY } = COORD.toPixel(44, 28);
+    const pos = COORD.toPixel(38, 26);
+    const startX = pos.x * MAP_SCALE;
+    const startY = pos.y * MAP_SCALE;
+    const p = PROTAGONIST;
 
-    // 按 design.md：16×32 px，Q版，头身比 1:2，棉麻衫（米白/浅蓝）
-    const pw = 14; // 接近16的视觉宽度
-    const ph = 28;  // 接近32的视觉高度
-    const playerGfx = this.make.graphics({ add: false });
+    // 用 idle_down 纹理创建主角
+    this.player = this.physics.add.sprite(startX, startY, `${p.prefix}_idle_down`);
+    this.player.setScale(p.scale);
+    this.player.setCollideWorldBounds(false); // 不用物理边界（用摄像机边界替代）
 
-    // 身体（棉麻衫 米白）
-    playerGfx.fillStyle(0xe8dcc8);
-    playerGfx.fillRect(1, 10, pw - 2, ph - 11);
-    // 衣服下摆
-    playerGfx.fillStyle(0xdcccb8);
-    playerGfx.fillRect(2, ph - 5, pw - 4, 4);
-    // 裤子（黑色）
-    playerGfx.fillStyle(0x333338);
-    playerGfx.fillRect(2, ph - 6, pw - 4, 6);
-    // 头（肤色）
-    playerGfx.fillStyle(0xf0d8b8);
-    playerGfx.fillRect(2, 1, pw - 4, 9);
-    // 发型（短发 黑色）
-    playerGfx.fillStyle(0x2a2420);
-    playerGfx.fillRect(2, 1, pw - 4, 4);
-    // 眼睛暗示
-    playerGfx.fillStyle(0x333340);
-    playerGfx.fillRect(4, 5, 2, 2);
-    playerGfx.fillRect(pw - 6, 5, 2, 2);
-    // 鞋子（布鞋 深褐）
-    playerGfx.fillStyle(0x5a4a38);
-    playerGfx.fillRect(2, ph - 2, 3, 2);
-    playerGfx.fillRect(pw - 5, ph - 2, 3, 2);
+    // 自定义碰撞体（脚底区域）
+    const br = p.bodyRatio;
+    const bodyW = Math.floor(this.player.displayWidth * br.w);
+    const bodyH = Math.floor(this.player.displayHeight * br.h);
+    this.player.body.setSize(bodyW, bodyH);
+    this.player.body.setOffset(bodyW * br.offsetX, this.player.displayHeight * br.offsetY);
 
-    // 1px 黑边轮廓
-    playerGfx.lineStyle(1, 0x111111, 0.8);
-    playerGfx.strokeRect(1, 1, pw - 2, ph - 2);
-
-    const textureKey = '__player_sprite__';
-    playerGfx.generateTexture(textureKey, pw, ph);
-
-    this.player = this.physics.add.sprite(startX, startY, textureKey);
-    this.player.setCollideWorldBounds(true);
-    this.player.body.setSize(pw - 4, ph - 4);
-    this.player.setOffset(2, 2);
     this.player.setDepth(10);
-
-    this.physics.add.collider(this.player, this.collisionZones);
+    this.player.setData('facing', 'down');
+    // 碰撞层已禁用，角色可自由行走
   }
 
   // ==================== NPC 交互按钮 ====================
@@ -966,8 +1265,16 @@ export class GameScene extends Phaser.Scene {
   }
 
   _showNPCActionButtons(npc) {
-    this.npcActionContainer.setPosition(npc.x, npc.y - 52);
     this.npcActionContainer.setVisible(true);
+    this._updateNPCActionPosition(npc);
+  }
+
+  _updateNPCActionPosition(npc) {
+    // 将世界坐标转换为屏幕坐标（scrollFactor=0 的容器用屏幕坐标）
+    const cam = this.cameras.main;
+    const relX = npc.x - cam.scrollX;
+    const relY = npc.y - cam.scrollY - 52 * MAP_SCALE;
+    this.npcActionContainer.setPosition(relX, relY);
   }
 
   _hideNPCActionButtons() {
@@ -977,70 +1284,48 @@ export class GameScene extends Phaser.Scene {
   // ==================== NPC ====================
 
   createNPCs() {
-    const npcData = [
-      { id: 'npc_chen', name: '陈师傅', ...COORD.toPixel(43, 16), greeting: '……（低头擦琴，仿佛没看见你）' },
-      { id: 'npc_xiaohua', name: '小华', ...COORD.toPixel(11, 10), greeting: '你也是来看戏班笑话的吗？' },
+    // 尝试从 localStorage 加载编辑器保存的 NPC 位置
+    let savedNPCPositions = null;
+    try {
+      const saved = localStorage.getItem('editor_npc_positions');
+      if (saved) savedNPCPositions = JSON.parse(saved);
+    } catch (e) { /* 忽略 */ }
+
+    const defaultNPCs = [
+      { id: 'npc_chen', name: '陈师傅', col: 38, row: 14, greeting: '……（低头擦琴，仿佛没看见你）' },
+      { id: 'npc_xiaohua', name: '小华', col: 15, row: 12, greeting: '你也是来看戏班笑话的吗？' },
+      { id: 'npc_laozhou', name: '老周', col: 10, row: 8, greeting: '……' },
+      { id: 'npc_meiyi', name: '梅姨', col: 40, row: 16, greeting: '哎呀，来客人了！快坐快坐，喝点什么？' },
+      { id: 'npc_laoli', name: '老李', col: 60, row: 22, greeting: '过河啊？等着，马上开船。' },
     ];
 
-    npcData.forEach((npc) => {
-      // NPC 精灵（同样 Q 版 14×28 占位）
-      const nw = 14;
-      const nh = 28;
-      const gfx = this.make.graphics({ add: false });
+    defaultNPCs.forEach((def) => {
+      // 使用保存的位置或默认位置
+      const pos = savedNPCPositions && savedNPCPositions[def.id]
+        ? savedNPCPositions[def.id]
+        : { col: def.col, row: def.row };
 
-      // 陈师傅：长衫（茶褐色），白发老头
-      if (npc.id === 'npc_chen') {
-        gfx.fillStyle(0xb8a078);  // 茶褐长衫
-        gfx.fillRect(1, 10, nw - 2, nh - 11);
-        gfx.fillStyle(0xa89068);  // 下摆
-        gfx.fillRect(2, nh - 5, nw - 4, 4);
-        gfx.fillStyle(0x333338);  // 裤
-        gfx.fillRect(2, nh - 6, nw - 4, 6);
-        gfx.fillStyle(0xf0d8b8);  // 脸
-        gfx.fillRect(2, 1, nw - 4, 9);
-        gfx.fillStyle(0xc8c8d0);  // 白发
-        gfx.fillRect(2, 1, nw - 4, 4);
-      } else {
-        // 小华：短衫（蓝色系），青年
-        gfx.fillStyle(0x7888a0);  // 蓝色短衫
-        gfx.fillRect(1, 10, nw - 2, nh - 11);
-        gfx.fillStyle(0x687890);
-        gfx.fillRect(2, nh - 5, nw - 4, 4);
-        gfx.fillStyle(0x333338);
-        gfx.fillRect(2, nh - 6, nw - 4, 6);
-        gfx.fillStyle(0xf0d8b8);  // 脸
-        gfx.fillRect(2, 1, nw - 4, 9);
-        gfx.fillStyle(0x2a2420);  // 黑发
-        gfx.fillRect(2, 1, nw - 4, 4);
-      }
+      const pixelPos = COORD.toPixel(pos.col, pos.row);
+      const cfg = NPC_SPRITES[def.id];
+      const startKey = cfg ? `${cfg.prefix}_idle_down` : null;
 
-      // 眼睛
-      gfx.fillStyle(0x333340);
-      gfx.fillRect(4, 5, 2, 2);
-      gfx.fillRect(nw - 6, 5, 2, 2);
-      // 鞋子
-      gfx.fillStyle(0x5a4a38);
-      gfx.fillRect(2, nh - 2, 3, 2);
-      gfx.fillRect(nw - 5, nh - 2, 3, 2);
-      // 黑边
-      gfx.lineStyle(1, 0x111111, 0.8);
-      gfx.strokeRect(1, 1, nw - 2, nh - 2);
-
-      const key = `__npc_${npc.id}__`;
-      gfx.generateTexture(key, nw, nh);
-
-      const sprite = this.physics.add.sprite(npc.x, npc.y, key);
-      sprite.setData('npcId', npc.id);
-      sprite.setData('name', npc.name);
-      sprite.setData('greeting', npc.greeting);
+      const sprite = this.physics.add.sprite(
+        pixelPos.x * MAP_SCALE, pixelPos.y * MAP_SCALE,
+        startKey || '__fallback_npc__'
+      );
+      if (cfg) sprite.setScale(cfg.scale);
+      sprite.setData('npcId', def.id);
+      sprite.setData('name', def.name);
+      sprite.setData('greeting', def.greeting);
+      sprite.setData('spriteCfg', cfg || null);  // 保存配置供后续切换纹理
       sprite.setImmovable(true);
       sprite.body.pushable = false;
       sprite.setDepth(5);
 
       // 气泡（江南风半透明深色背景）
-      const bubbleText = this.add.text(sprite.x, sprite.y - 20, npc.greeting, {
+      const bubbleText = this.add.text(sprite.x, sprite.y - 20 * MAP_SCALE, def.greeting, {
         fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
-        fontSize: '12px',
+        fontSize: '16px',
         color: '#e8dcc8',
         backgroundColor: '#2a2824dd',
         padding: { x: 8, y: 4 },
@@ -1061,42 +1346,151 @@ export class GameScene extends Phaser.Scene {
 
   // ==================== 更新循环 ====================
 
+  /**
+   * 切换主角朝向纹理（single模式：每方向独立图片）
+   * setTexture()会重置physics body，必须立即重建
+   */
+  switchPlayerTexture(facing, isMoving) {
+    const p = PROTAGONIST;
+    const animType = isMoving ? 'walk' : 'idle';
+    const texKey = `${p.prefix}_${animType}_${facing}`;
+
+    // 仅在纹理实际变化时切换（避免每帧都触发 setTexture）
+    if (this.player.texture.key === texKey) return;
+
+    this.player.setTexture(texKey);
+
+    // 重建 body（setTexture 重置为默认值）
+    const br = p.bodyRatio;
+    const bodyW = Math.floor(this.player.displayWidth * br.w);
+    const bodyH = Math.floor(this.player.displayHeight * br.h);
+    this.player.body.setSize(bodyW, bodyH);
+    this.player.body.setOffset(bodyW * br.offsetX, this.player.displayHeight * br.offsetY);
+  }
+
   update() {
-    if (!this.player || !this.cursors) return;
-
-    // 输入锁定（对话中禁止移动）
-    if (!this.inputLocked) {
-      const speed = GAME.PLAYER_SPEED;
-      this.player.setVelocity(0);
-
-      if (this.wasd.A.isDown || this.cursors.left.isDown) {
-        this.player.setVelocityX(-speed);
-      } else if (this.wasd.D.isDown || this.cursors.right.isDown) {
-        this.player.setVelocityX(speed);
-      }
-
-      if (this.wasd.W.isDown || this.cursors.up.isDown) {
-        this.player.setVelocityY(-speed);
-      } else if (this.wasd.S.isDown || this.cursors.down.isDown) {
-        this.player.setVelocityY(speed);
-      }
-
-      // 斜向归一化
-      if (this.player.body.velocity.x !== 0 && this.player.body.velocity.y !== 0) {
-        this.player.body.velocity.x *= 0.707;
-        this.player.body.velocity.y *= 0.707;
-      }
-    } else {
-      this.player.setVelocity(0);
+    // ★ R 键硬重置 — 永远可用（在 try 外面，防止被错误吞掉）
+    if (this.editKeys && Phaser.Input.Keyboard.JustDown(this.editKeys.R)) {
+      this._hardReset();
+      return;
     }
 
-    // NPC 气泡跟随 + 接近检测 + 交互按钮
+    try {
+      this._updateInner();
+    } catch (e) {
+      // 防止 JS 错误导致整个游戏卡死 + 在屏幕上显示错误
+      if (!this._errLogged) {
+        this._errLogged = true;
+        console.error('[GameScene] update 崩溃:', e);
+        // 在屏幕上显示红色错误信息
+        const { width } = this.cameras.main;
+        const errMsg = this.add.text(width / 2, 120,
+          `⚠️ 游戏出错: ${e.message}\n按 [R] 重置  |  按 F12 查看控制台`, {
+          fontSize: '18px', color: '#ff6666', backgroundColor: '#330000dd',
+          padding: { x: 16, y: 10 }, align: 'center',
+        }).setOrigin(0.5).setDepth(9999).setScrollFactor(0);
+        this._errorMsg = errMsg;
+      }
+    }
+  }
+
+  _updateInner() {
+    if (!this.player || !this.cursors) {
+      // 调试：如果 player 或 cursors 为空，在控制台打印原因
+      if (!this._initDebug) {
+        this._initDebug = true;
+        console.warn('[GameScene] player或cursors为空!', {
+          hasPlayer: !!this.player,
+          hasCursors: !!this.cursors,
+          hasWasd: !!this.wasd,
+        });
+      }
+      return;
+    }
+
+    // ========== 编辑器快捷键 ==========
+    if (Phaser.Input.Keyboard.JustDown(this.editKeys.E)) {
+      this._toggleEditMode();
+      return;
+    }
+    // R: 硬重置（清除所有缓存 + 重启游戏）
+    if (Phaser.Input.Keyboard.JustDown(this.editKeys.R)) {
+      this._hardReset();
+      return;
+    }
+    // S/C 保存/清除在任何模式下都可用
+    if (Phaser.Input.Keyboard.JustDown(this.editKeys.C)) {
+      this._clearAllCollisions();
+      console.log('[Game] 已强制清除所有碰撞 (按C触发)');
+    }
+    if (Phaser.Input.Keyboard.JustDown(this.editKeys.S) && this._editMode) {
+      this._saveCollisionConfig();
+    }
+    if (this._editMode) {
+      // 编辑模式下：WASD 自由滚动摄像机（不移动角色）
+      this.player.setVelocity(0, 0);
+      this._updateEditorCamera();
+      return;
+    }
+
+    if (!this.inputLocked) {
+      const speed = GAME.PLAYER_SPEED;
+
+      // ---- 第1步：计算目标速度 ----
+      let targetVX = 0, targetVY = 0;
+      if (this.wasd.A.isDown || this.cursors.left.isDown) targetVX = -speed;
+      else if (this.wasd.D.isDown || this.cursors.right.isDown) targetVX = speed;
+
+      if (this.wasd.W.isDown || this.cursors.up.isDown) targetVY = -speed;
+      else if (this.wasd.S.isDown || this.cursors.down.isDown) targetVY = speed;
+
+      // 斜向归一化
+      if (targetVX !== 0 && targetVY !== 0) { targetVX *= 0.707; targetVY *= 0.707; }
+
+      // ---- 第2步：确定朝向 + 切换纹理 ----
+      let facing = this.player.getData('facing') || 'down';
+      if (targetVX !== 0 || targetVY !== 0) {
+        if (Math.abs(targetVX) > Math.abs(targetVY)) {
+          facing = targetVX > 0 ? 'right' : 'left';
+        } else {
+          facing = targetVY > 0 ? 'down' : 'up';
+        }
+      }
+      this.switchPlayerTexture(facing, targetVX !== 0 || targetVY !== 0);
+      this.player.setData('facing', facing);
+
+      // ---- 第3步：碰撞检测 + 设置速度 ----
+      // 用固定小距离预判前方是否有碰撞格（避免被卡住）
+      const checkDist = 8;  // 向前探测的距离(px)
+      let finalVX = targetVX, finalVY = targetVY;
+
+      if (targetVX !== 0) {
+        const dirX = targetVX > 0 ? checkDist : -checkDist;
+        if (this._checkCollisionAt(this.player.x + dirX, this.player.y)) {
+          finalVX = 0;
+        }
+      }
+      if (targetVY !== 0) {
+        const dirY = targetVY > 0 ? checkDist : -checkDist;
+        if (this._checkCollisionAt(this.player.x, this.player.y + dirY)) {
+          finalVY = 0;
+        }
+      }
+
+      this.player.setVelocity(finalVX, finalVY);
+
+    } else {
+      this.player.setVelocity(0, 0);
+      // 锁定时也切到idle朝向
+      this.switchPlayerTexture(this.player.getData('facing') || 'down', false);
+    }
+
+    // ===== 主要 NPC 气泡跟随 + 接近检测 =====
     this.currentNearbyNPC = null;
     for (let i = 0; i < this.npcs.length; i++) {
       const npc = this.npcs[i];
       const bubble = this.npcBubbles[i];
-
-      bubble.setPosition(npc.x, npc.y - 22);
+      if (bubble) bubble.setPosition(npc.x, npc.y - 22);
 
       const dist = Phaser.Math.Distance.Between(
         this.player.x, this.player.y, npc.x, npc.y
@@ -1106,17 +1500,33 @@ export class GameScene extends Phaser.Scene {
       }
     }
 
-    if (this.currentNearbyNPC) {
-      this._hideNPCActionButtons(); // 先隐藏，下一帧定位后再显示
+    // ===== 普通 NPC（town-npcs）气泡跟随 + 接近检测 =====
+    for (let i = 0; i < this.townNpcs.length; i++) {
+      const npc = this.townNpcs[i];
+      const bubble = this.townNpcBubbles[i];
+      if (bubble) bubble.setPosition(npc.x, npc.y - 18 * MAP_SCALE);
+
+      const dist = Phaser.Math.Distance.Between(
+        this.player.x, this.player.y, npc.x, npc.y
+      );
+      if (dist < 64) {
+        this.currentNearbyNPC = npc;
+      }
+    }
+
+    // ===== NPC 交互按钮（简单可靠：有NPC就显示，没有就隐藏）=====
+    if (this.currentNearbyNPC && !this.inputLocked) {
       this.interactHint.setVisible(false);
-      // 在NPC上方显示交互按钮（延后一帧确保位置正确）
-      if (!this.inputLocked) {
-        this._showNPCActionButtons(this.currentNearbyNPC);
-      } else {
+      // setVisible(true) 在已显示时是空操作，不会导致 zone 点击丢失
+      if (!this.npcActionContainer.visible) {
+        this.npcActionContainer.setVisible(true);
+      }
+      // 每帧更新位置（轻量，且支持漫游中的 town-npc）
+      this._updateNPCActionPosition(this.currentNearbyNPC);
+    } else {
+      if (this.npcActionContainer.visible) {
         this._hideNPCActionButtons();
       }
-    } else {
-      this._hideNPCActionButtons();
     }
 
     // 物品接近检测（NPC 优先，NPC 范围内不显示物品提示）
@@ -1143,6 +1553,73 @@ export class GameScene extends Phaser.Scene {
         this.pickupItem(this.currentNearbyItem);
       }
     }
+
+    // ★ 完全手动摄像机跟随 + 边界（不用 startFollow，避免内部限制）
+    this._updateCameraOnly();
+
+    // ★ 更新普通NPC的漫游行为
+    const dt = this.game.loop.delta || 16.667;
+    this._updateTownNPCs(dt);
+  }
+
+  /** 仅更新相机跟随（编辑模式和游戏模式共用） */
+  _updateCameraOnly() {
+    if (this._mapBounds) {
+      const cam = this.cameras.main;
+      const { w: mapW, h: mapH } = this._mapBounds;
+
+      // [DEBUG] 每隔几帧打印一次
+      if (!this._camDebugCount) this._camDebugCount = 0;
+      this._camDebugCount++;
+      if (this._camDebugCount % 300 === 1) {
+        console.log('[GameScene] Camera debug:', {
+          playerPos: { x: Math.round(this.player.x), y: Math.round(this.player.y) },
+          scroll: { x: Math.round(cam.scrollX), y: Math.round(cam.scrollY) },
+          camSize: { w: cam.width, h: cam.height },
+          mapBounds: { mapW, mapH },
+          maxScroll: { maxX: mapW - cam.width, maxY: mapH - cam.height },
+          mapImageDisplaySize: this.mapImage ? {
+            w: this.mapImage.displayWidth,
+            h: this.mapImage.displayHeight,
+          } : null,
+        });
+      }
+
+      // 目标：角色在屏幕中心
+      const targetX = this.player.x - cam.width / 2;
+      const targetY = this.player.y - cam.height / 2;
+      // 平滑插值
+      cam.scrollX += (targetX - cam.scrollX) * 0.08;
+      cam.scrollY += (targetY - cam.scrollY) * 0.08;
+      // clamp 到地图范围（超出时角色自然偏离中心）
+      cam.scrollX = Phaser.Math.Clamp(cam.scrollX, 0, Math.max(0, mapW - cam.width));
+      cam.scrollY = Phaser.Math.Clamp(cam.scrollY, 0, Math.max(0, mapH - cam.height));
+    }
+  }
+
+  /**
+   * 编辑模式下的自由摄像机滚动（WASD/方向键移动视角，不移动角色）
+   */
+  _updateEditorCamera() {
+    if (!this._mapBounds) return;
+    const cam = this.cameras.main;
+    const { w: mapW, h: mapH } = this._mapBounds;
+
+    // 滚动速度
+    const scrollSpeed = 10;
+
+    let dx = 0, dy = 0;
+    if (this.wasd.A.isDown || this.cursors.left.isDown) dx = -scrollSpeed;
+    else if (this.wasd.D.isDown || this.cursors.right.isDown) dx = scrollSpeed;
+
+    if (this.wasd.W.isDown || this.cursors.up.isDown) dy = -scrollSpeed;
+    else if (this.wasd.S.isDown || this.cursors.down.isDown) dy = scrollSpeed;
+
+    cam.scrollX += dx;
+    cam.scrollY += dy;
+    // clamp 到地图范围
+    cam.scrollX = Phaser.Math.Clamp(cam.scrollX, 0, Math.max(0, mapW - cam.width));
+    cam.scrollY = Phaser.Math.Clamp(cam.scrollY, 0, Math.max(0, mapH - cam.height));
   }
 
   triggerDialogue(npc) {
@@ -1156,7 +1633,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
-   * 拾取场景物品（调用后端 discover API + Toast 动画 + 刷新背包）
+   * 拾取场景物品（调用后端 discover API + 即时视觉反馈 + Toast 动画 + 刷新背包）
    */
   async pickupItem(itemSprite) {
     const itemId = itemSprite.getData('itemId');
@@ -1164,39 +1641,42 @@ export class GameScene extends Phaser.Scene {
     const sessionId = localStorage.getItem('__active_session__');
     if (!sessionId) return;
 
-    this.events.emit('input:lock', true);
+    // ★ 立即从场景列表移除（避免重复检测）
+    const idx = this.sceneItems.indexOf(itemSprite);
+    if (idx >= 0) this.sceneItems.splice(idx, 1);
+    this.currentNearbyItem = null;
     this.interactHint.setVisible(false);
 
+    // ★ 仅锁定 400ms（动画时长），API 调用不阻塞移动
+    this.events.emit('input:lock', true);
+
+    this.tweens.add({
+      targets: itemSprite,
+      alpha: 0,
+      y: itemSprite.y - 30 * MAP_SCALE,
+      scaleX: 1.5,
+      scaleY: 1.5,
+      duration: 400,
+      onComplete: () => {
+        itemSprite.destroy();
+        this.events.emit('input:lock', false); // ★ 动画结束立即恢复移动
+      },
+    });
+
+    // API 调用后台进行，不阻塞
     try {
       const { discoverItem } = await import('../api/client.js');
       const result = await discoverItem(sessionId, itemId);
 
-      // 移除地图上的物品精灵
-      const idx = this.sceneItems.indexOf(itemSprite);
-      if (idx >= 0) this.sceneItems.splice(idx, 1);
-      this.currentNearbyItem = null;
-
-      // 淡出动画
-      this.tweens.add({
-        targets: itemSprite,
-        alpha: 0, y: itemSprite.y - 30, scaleX: 1.5, scaleY: 1.5,
-        duration: 400,
-        onComplete: () => itemSprite.destroy(),
-      });
-
       if (result.already_discovered) {
         this.showToast(`${itemName} 已在行囊中`);
       } else {
-        // Toast 动画
         this.showToast(`获得: ${itemName}`, 2500);
-        // 通知 UIScene 刷新背包
         this.events.emit('item:discovered', result.item);
       }
     } catch (e) {
       console.error('[GameScene] 拾取物品失败:', e);
       this.showToast('拾取失败', 1500);
-    } finally {
-      this.events.emit('input:lock', false);
     }
   }
 
@@ -1210,7 +1690,7 @@ export class GameScene extends Phaser.Scene {
       const { width, height } = this.cameras.main;
       this.loadingHint = this.add.text(width / 2, height / 2, '', {
         fontFamily: '"KaiTi","SimSun",serif',
-        fontSize: '20px', color: '#d4b896',
+        fontSize: '26px', color: '#d4b896',
         backgroundColor: '#0a0a12cc',
         padding: { x: 24, y: 16 },
         borderRadius: 8,
@@ -1236,7 +1716,7 @@ export class GameScene extends Phaser.Scene {
     const { width } = this.cameras.main;
     const toast = this.add.text(width / 2, 30, message, {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '13px', color: '#ffaa66',
+      fontSize: '18px', color: '#ffaa66',
       backgroundColor: '#1a1010ee',
       padding: { x: 14, y: 8 },
       borderRadius: 5,
