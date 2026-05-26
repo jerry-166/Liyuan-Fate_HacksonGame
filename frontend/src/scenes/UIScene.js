@@ -140,6 +140,35 @@ export class UIScene extends Phaser.Scene {
     gameScene.events.on('stage:change', this.onStageChange, this);
     gameScene.events.on('item:discovered', this.onItemDiscovered, this);
     gameScene.events.on('show-item:select', this.onShowItemSelect, this);
+
+    // ★ 点击画布时确保获得键盘焦点（否则 ESC 等按键无响应）
+    const canvas = this.sys.game.canvas;
+    if (canvas) {
+      canvas.setAttribute('tabindex', '0');
+      canvas.style.outline = 'none';
+      canvas.addEventListener('click', () => {
+        canvas.focus();
+        console.log('[UIScene] canvas focused by click');
+      }, { passive: true });
+      // 首次自动聚焦
+      setTimeout(() => { canvas.focus(); }, 500);
+    }
+
+    // ★ 原生 DOM 键盘事件作为 ESC 键的备用方案（Phaser Keyboard 有时无法捕获 ESC）
+    this._domKeyHandler = (e) => {
+      if (e.key === 'Escape' || e.key === 'Esc') {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('[UIScene] 原生 DOM 捕获到 ESC!', {
+          dialogActive: this.dialogActive,
+          pauseMenuVisible: this.pauseMenuVisible,
+          backpackPanelVisible: this.backpackPanelVisible,
+          historyPanelVisible: this.historyPanelVisible,
+        });
+        this._handleEscPress();
+      }
+    };
+    document.addEventListener('keydown', this._domKeyHandler);
   }
 
   // =========================== HUD ===========================
@@ -149,28 +178,52 @@ export class UIScene extends Phaser.Scene {
     this.hudContainer = this.add.container(0, 0).setDepth(200);
 
     // 右上角阶段指示器
-    this.stageBadge = this.add.text(width - 12, 12, '阶段一 · 不屑', {
+    this.stageBadge = this.add.text(width - 16, 16, '阶段一 · 不屑', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '13px', color: '#c4a882',
-      backgroundColor: '#1a1a2ecc', padding: { x: 10, y: 5 },
+      fontSize: '18px', color: '#c4a882',
+      backgroundColor: '#1a1a2ecc', padding: { x: 14, y: 7 },
     }).setOrigin(1, 0);
 
     // 左上角游戏标题
-    this.add.text(12, 12, '《梨园生死》', {
+    this.add.text(16, 16, '《梨园生死》', {
       fontFamily: '"KaiTi","SimSun",serif',
-      fontSize: '16px', color: '#d4b896',
+      fontSize: '22px', color: '#d4b896',
     }).setDepth(200);
 
     // 历史对话按钮
-    this.historyBtn = this.add.text(width - 12, 38, '📜 历史 [H]', {
+    this.historyBtn = this.add.text(width - 16, 48, '📜 历史 [H]', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '12px', color: '#887766',
-      backgroundColor: '#1a1a2ecc', padding: { x: 8, y: 4 },
+      fontSize: '16px', color: '#887766',
+      backgroundColor: '#1a1a2ecc', padding: { x: 10, y: 5 },
     }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
     this.historyBtn.on('pointerdown', () => this.toggleHistoryPanel());
     this.hudContainer.add(this.historyBtn);
 
+    // 背包按钮
+    this.backpackBtn = this.add.text(width - 16, 80, '🎒 行囊 [B]', {
+      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+      fontSize: '16px', color: '#c4a882',
+      backgroundColor: '#1a1a2ecc', padding: { x: 10, y: 5 },
+    }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
+    this.backpackBtn.on('pointerover', () => this.backpackBtn.setColor('#e8d4a0'));
+    this.backpackBtn.on('pointerout', () => this.backpackBtn.setColor('#c4a882'));
+    this.backpackBtn.on('pointerdown', () => {
+      if (!this.dialogActive && !this.pauseMenuVisible && !this.historyPanelVisible) {
+        this.toggleBackpackPanel();
+      }
+    });
+    this.hudContainer.add(this.backpackBtn);
+
     this.hudContainer.add(this.stageBadge);
+  }
+
+  /**
+   * 更新背包按钮上的物品数量显示
+   */
+  _updateBackpackBtnLabel() {
+    if (!this.backpackBtn) return;
+    const count = this.inventory.length;
+    this.backpackBtn.setText(`🎒 行囊 [B] (${count})`);
   }
 
   // =========================== 历史对话面板 ===========================
@@ -181,9 +234,9 @@ export class UIScene extends Phaser.Scene {
     this.historyScrollY = 0;
 
     // 统一内容区域参数（所有文本坐标和遮罩基于此计算）
-    const padX = 24;
-    const padTop = 60;          // 标题下方
-    const padBottom = 50;       // 底部提示上方
+    const padX = 48;
+    const padTop = 70;          // 标题下方
+    const padBottom = 60;       // 底部提示上方
     this._historyArea = {
       x: padX,
       y: padTop,
@@ -200,7 +253,7 @@ export class UIScene extends Phaser.Scene {
 
     const titleText = this.add.text(width / 2, 20, '—— 记忆回响 ——', {
       fontFamily: '"KaiTi","SimSun",serif',
-      fontSize: '20px', color: '#d4b896',
+      fontSize: '26px', color: '#d4b896',
     }).setOrigin(0.5, 0);
     this.historyPanel.add(titleText);
 
@@ -218,7 +271,7 @@ export class UIScene extends Phaser.Scene {
 
     const tipText = this.add.text(width / 2, height - 30, '[H] 或 [F] 关闭  |  滚轮滚动', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '12px', color: '#666655',
+      fontSize: '16px', color: '#666655',
     }).setOrigin(0.5, 0);
     this.historyPanel.add(tipText);
 
@@ -288,7 +341,7 @@ export class UIScene extends Phaser.Scene {
     if (this.dialogueHistory.length === 0) {
       const empty = this.add.text(width / 2, 20, '还没有任何对话记录', {
         fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-        fontSize: '14px', color: '#666655',
+        fontSize: '18px', color: '#666655',
       }).setOrigin(0.5, 0);
       this.historyContent.add(empty);
       this.historyContentHeight = 120;
@@ -299,32 +352,32 @@ export class UIScene extends Phaser.Scene {
       if (idx === 0 || entry.stage !== this.dialogueHistory[idx - 1].stage) {
         const sep = this.add.text(ha.w / 2, y, `—— 第${entry.stage}章 ——`, {
           fontFamily: '"KaiTi","SimSun",serif',
-          fontSize: '14px', color: '#998866',
+          fontSize: '18px', color: '#998866',
         }).setOrigin(0.5, 0);
         this.historyContent.add(sep);
-        y += 30;
+        y += 34;
       }
 
       const npcLabel = this.add.text(ha.x, y, `【${entry.npcName}】`, {
         fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-        fontSize: '14px', color: '#d4b896', fontStyle: 'bold',
+        fontSize: '18px', color: '#d4b896', fontStyle: 'bold',
       });
       this.historyContent.add(npcLabel);
-      y += 22;
+      y += 26;
 
       const npcT = this.add.text(ha.x, y, entry.npcText, {
         fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-        fontSize: '13px', color: '#c0b898',
+        fontSize: '17px', color: '#c0b898',
         wordWrap: { width: maxW, useAdvancedWrap: true },
-        lineSpacing: 4,
+        lineSpacing: 5,
       });
       this.historyContent.add(npcT);
-      y += npcT.height + 10;
+      y += npcT.height + 12;
 
       if (entry.playerText) {
         const pl = this.add.text(ha.x, y, `【你】${entry.playerText}`, {
           fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-          fontSize: '12px', color: '#88aacc',
+          fontSize: '16px', color: '#88aacc',
           wordWrap: { width: maxW, useAdvancedWrap: true },
         });
         this.historyContent.add(pl);
@@ -342,17 +395,17 @@ export class UIScene extends Phaser.Scene {
   createBackpackPanel() {
     const { width, height } = this.cameras.main;
 
-    // 面板尺寸
-    const panelW = 620;
-    const panelH = 420;
+    // 面板尺寸（适配大分辨率）
+    const panelW = 900;
+    const panelH = 560;
     const panelX = (width - panelW) / 2;
     const panelY = (height - panelH) / 2;
 
     // 左栏（物品列表）和右栏（详情区）
-    const leftW = 200;
+    const leftW = 300;
     const rightW = panelW - leftW;
-    const titleH = 40;
-    const bottomH = 30;
+    const titleH = 52;
+    const bottomH = 40;
     const sepX = panelX + leftW;
 
     this._backpackArea = { x: panelX, y: panelY, w: panelW, h: panelH, leftW, rightW, titleH, bottomH, sepX };
@@ -376,37 +429,37 @@ export class UIScene extends Phaser.Scene {
     // 面板背景
     const bg = this.add.graphics();
     bg.fillStyle(0x12111a, 0.97);
-    bg.fillRoundedRect(panelX, panelY, panelW, panelH, 8);
+    bg.fillRoundedRect(panelX, panelY, panelW, panelH, 10);
     // 外边框
     bg.lineStyle(2, 0x6b5b3e, 0.8);
-    bg.strokeRoundedRect(panelX, panelY, panelW, panelH, 8);
+    bg.strokeRoundedRect(panelX, panelY, panelW, panelH, 10);
     // 分隔线：标题下方
     bg.lineStyle(1, 0x6b5b3e, 0.4);
-    bg.lineBetween(panelX + 12, panelY + titleH, panelX + panelW - 12, panelY + titleH);
+    bg.lineBetween(panelX + 16, panelY + titleH, panelX + panelW - 16, panelY + titleH);
     // 分隔线：左右栏
     bg.lineBetween(sepX, panelY + titleH, sepX, panelY + panelH - bottomH);
     // 分隔线：底部提示上方
-    bg.lineBetween(panelX + 12, panelY + panelH - bottomH, panelX + panelW - 12, panelY + panelH - bottomH);
+    bg.lineBetween(panelX + 16, panelY + panelH - bottomH, panelX + panelW - 16, panelY + panelH - bottomH);
     this.backpackPanel.add(bg);
 
     // 标题
     this.bpTitle = this.add.text(panelX + panelW / 2, panelY + titleH / 2, '—— 行  囊 ——', {
       fontFamily: '"KaiTi","SimSun",serif',
-      fontSize: '18px', color: '#d4b896',
+      fontSize: '24px', color: '#d4b896',
     }).setOrigin(0.5);
     this.backpackPanel.add(this.bpTitle);
 
     // 左栏标题 "道具列表"
-    const leftTitle = this.add.text(sepX / 2, panelY + titleH + 12, '道具列表', {
+    const leftTitle = this.add.text(sepX / 2, panelY + titleH + 16, '道具列表', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '12px', color: '#887766',
+      fontSize: '17px', color: '#887766',
     }).setOrigin(0.5, 0);
     this.backpackPanel.add(leftTitle);
 
     // 右栏标题 "物品详情"
-    const rightTitle = this.add.text(sepX + rightW / 2, panelY + titleH + 12, '物品详情', {
+    const rightTitle = this.add.text(sepX + rightW / 2, panelY + titleH + 16, '物品详情', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '12px', color: '#887766',
+      fontSize: '17px', color: '#887766',
     }).setOrigin(0.5, 0);
     this.backpackPanel.add(rightTitle);
 
@@ -415,27 +468,27 @@ export class UIScene extends Phaser.Scene {
     this.backpackPanel.add(this.bpListContent);
 
     // 右侧详情文本元素
-    const detailX = sepX + 16;
-    const detailY = panelY + titleH + 32;
-    const detailW = rightW - 32;
+    const detailX = sepX + 24;
+    const detailY = panelY + titleH + 44;
+    const detailW = rightW - 48;
 
     this.bpDetailName = this.add.text(detailX, detailY, '', {
       fontFamily: '"KaiTi","SimSun",serif',
-      fontSize: '18px', color: '#e8dcc8', fontStyle: 'bold',
+      fontSize: '24px', color: '#e8dcc8', fontStyle: 'bold',
     });
     this.backpackPanel.add(this.bpDetailName);
 
-    this.bpDetailDesc = this.add.text(detailX, detailY + 36, '', {
+    this.bpDetailDesc = this.add.text(detailX, detailY + 46, '', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '14px', color: '#c0b898',
+      fontSize: '19px', color: '#c0b898',
       wordWrap: { width: detailW, useAdvancedWrap: true },
-      lineSpacing: 5,
+      lineSpacing: 6,
     });
     this.backpackPanel.add(this.bpDetailDesc);
 
-    this.bpDetailTags = this.add.text(detailX, detailY + 120, '', {
+    this.bpDetailTags = this.add.text(detailX, detailY + 160, '', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '13px', color: '#aa9977',
+      fontSize: '17px', color: '#aa9977',
     });
     this.backpackPanel.add(this.bpDetailTags);
 
@@ -444,21 +497,21 @@ export class UIScene extends Phaser.Scene {
     // 底部操作提示（展示物品模式时显示确认提示）
     this.bpTipNormal = this.add.text(panelX + panelW / 2, panelY + panelH - bottomH / 2, '[B] 关闭    [W/S] 上下选择', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '12px', color: '#666655',
+      fontSize: '16px', color: '#666655',
     }).setOrigin(0.5);
     this.backpackPanel.add(this.bpTipNormal);
 
     // 展示物品模式的确认提示 + 可点击确认按钮
-    this.bpTipShowItem = this.add.text(panelX + panelW / 2 - 60, panelY + panelH - bottomH / 2, '[Enter] 展示', {
+    this.bpTipShowItem = this.add.text(panelX + panelW / 2 - 80, panelY + panelH - bottomH / 2, '[Enter] 展示', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '12px', color: '#c4a882',
+      fontSize: '16px', color: '#c4a882',
     }).setOrigin(0.5).setVisible(false);
     this.backpackPanel.add(this.bpTipShowItem);
 
     // 「确认展示」可点击按钮（鼠标用户友好）
-    this.bpConfirmBtn = this.add.text(panelX + panelW / 2 + 60, panelY + panelH - bottomH / 2, '[ B ] 取消', {
+    this.bpConfirmBtn = this.add.text(panelX + panelW / 2 + 80, panelY + panelH - bottomH / 2, '[ B ] 取消', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '12px', color: '#887766',
+      fontSize: '16px', color: '#887766',
     }).setOrigin(0.5).setVisible(false).setInteractive({ useHandCursor: true });
     this.bpConfirmBtn.on('pointerover', () => this.bpConfirmBtn.setColor('#d4b896'));
     this.bpConfirmBtn.on('pointerout', () => this.bpConfirmBtn.setColor('#887766'));
@@ -469,24 +522,24 @@ export class UIScene extends Phaser.Scene {
 
     // 右侧详情区域的「确认展示」按钮
     this.bpShowItemBtnContainer = this.add.container(0, 0).setVisible(false);
-    const btnX = sepX + 16;
-    const btnY = panelY + panelH - bottomH - 48;
-    const sbw = rightW - 32;
-    const sbh = 34;
+    const btnX = sepX + 24;
+    const btnY = panelY + panelH - bottomH - 56;
+    const sbw = rightW - 48;
+    const sbh = 42;
 
     const sbBg = this.add.graphics();
     const drawShowBtn = (hover) => {
       sbBg.clear();
       sbBg.fillStyle(hover ? 0x3a3830 : 0x2a2824, 1);
-      sbBg.fillRoundedRect(btnX, btnY, sbw, sbh, 5);
+      sbBg.fillRoundedRect(btnX, btnY, sbw, sbh, 6);
       sbBg.lineStyle(1, hover ? 0xd4b896 : 0xc4a882, 0.7);
-      sbBg.strokeRoundedRect(btnX, btnY, sbw, sbh, 5);
+      sbBg.strokeRoundedRect(btnX, btnY, sbw, sbh, 6);
     };
     drawShowBtn(false);
 
     const sbText = this.add.text(btnX + sbw / 2, btnY + sbh / 2, '确认展示选中物品', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '13px', color: '#d4b896',
+      fontSize: '18px', color: '#d4b896',
     }).setOrigin(0.5);
 
     const sbZone = this.add.zone(btnX + sbw / 2, btnY + sbh / 2, sbw, sbh)
@@ -503,12 +556,13 @@ export class UIScene extends Phaser.Scene {
     // 滚轮滚动支持
     this.input.on('wheel', (pointer, gameObjects, deltaX, deltaY) => {
       if (!this.backpackPanelVisible) return;
+      const ba = this._backpackArea;
       if (this.inventory.length <= 8) return; // 8项以内不需要滚动
       this.bpListScrollY = Math.max(
         Math.min(0, (this.bpListScrollY || 0) - deltaY * 0.5),
-        -(this.bpListContentHeight - (panelH - titleH - 60))
+        -(this.bpListContentHeight - (ba.h - ba.titleH - 80))
       );
-      this.bpListContent.setY(panelY + titleH + 32 + (this.bpListScrollY || 0));
+      this.bpListContent.setY(ba.y + ba.titleH + 44 + (this.bpListScrollY || 0));
     });
   }
 
@@ -537,17 +591,17 @@ export class UIScene extends Phaser.Scene {
     this.bpListScrollY = 0;
 
     const ba = this._backpackArea;
-    const listY = ba.y + ba.titleH + 32;
-    const itemH = 38;
+    const listY = ba.y + ba.titleH + 44;
+    const itemH = 52;
     let y = 0;
 
     if (this.inventory.length === 0) {
-      const empty = this.add.text(ba.leftW / 2, 20, '空空如也', {
+      const empty = this.add.text(ba.leftW / 2, 24, '空空如也', {
         fontFamily: '"KaiTi","SimSun",serif',
-        fontSize: '16px', color: '#555544',
+        fontSize: '22px', color: '#555544',
       }).setOrigin(0.5, 0);
       this.bpListContent.add(empty);
-      this.bpListContentHeight = 60;
+      this.bpListContentHeight = 70;
       this.bpListContent.setY(listY);
       this.updateBackpackDetail(null);
       return;
@@ -556,24 +610,24 @@ export class UIScene extends Phaser.Scene {
     this.inventory.forEach((item, idx) => {
       const emoji = item.is_key ? '⭐' : '📦';
       const nameColor = item.is_key ? '#e8c86a' : '#c8b898';
-      const row = this.add.container(ba.x + 12, y);
+      const row = this.add.container(ba.x + 16, y);
 
       // 选中背景
       const selBg = this.add.graphics();
       selBg.fillStyle(0x3a3228, 0.6);
-      selBg.fillRoundedRect(0, 0, ba.leftW - 24, itemH - 4, 4);
+      selBg.fillRoundedRect(0, 0, ba.leftW - 32, itemH - 4, 5);
       selBg.setVisible(false);
       row.add(selBg);
       row.setData('selBg', selBg);
 
       // emoji 图标
-      const icon = this.add.text(12, itemH / 2, emoji, { fontSize: '18px' }).setOrigin(0.5);
+      const icon = this.add.text(16, itemH / 2, emoji, { fontSize: '24px' }).setOrigin(0.5);
       row.add(icon);
 
       // 物品名称
-      const name = this.add.text(34, itemH / 2, item.name || item.narrative_name || '未知物品', {
+      const name = this.add.text(46, itemH / 2, item.name || item.narrative_name || '未知物品', {
         fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-        fontSize: '14px', color: nameColor,
+        fontSize: '19px', color: nameColor,
       }).setOrigin(0.5);
       row.add(name);
 
@@ -631,6 +685,8 @@ export class UIScene extends Phaser.Scene {
     // 防止重复添加
     if (this.inventory.some(i => (i.id || i.item_id) === (item.id || item.item_id))) return;
     this.inventory.push(item);
+    // 更新背包按钮计数
+    this._updateBackpackBtnLabel();
     if (this.backpackPanelVisible) {
       this.refreshBackpackContent();
     }
@@ -743,19 +799,19 @@ export class UIScene extends Phaser.Scene {
 
   createDialogPanel() {
     const { width, height } = this.cameras.main;
-    const panelW = width - 80;
-    const panelH = 250;
+    const panelW = width - 100;
+    const panelH = 320;
     const panelX = (width - panelW) / 2;
-    const panelY = height - panelH - 24;
+    const panelY = height - panelH - 28;
 
     // 统一对话框区域参数（所有内部元素基于此定位）
     this._dialogArea = { x: panelX, y: panelY, w: panelW, h: panelH };
     // 文本安全区：名称栏下方 → 选项/输入框上方
     this._textArea = {
-      x: panelX + 20,
-      y: panelY + 46,
-      w: panelW - 40,
-      h: panelH - 40 - 74,   // 减去名称区(36px) + 底部选项+输入区(~74px)
+      x: panelX + 28,
+      y: panelY + 50,
+      w: panelW - 56,
+      h: panelH - 44 - 80,   // 减去名称区(38px) + 底部选项+输入区(~80px)
     };
 
     this.dialogContainer = this.add.container(0, 0).setDepth(300).setVisible(false);
@@ -773,9 +829,9 @@ export class UIScene extends Phaser.Scene {
     this.dialogContainer.add(bg);
 
     // NPC 名字
-    this.dialogName = this.add.text(panelX + 20, panelY + 10, '', {
+    this.dialogName = this.add.text(panelX + 28, panelY + 12, '', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '14px', color: '#d4b896', fontStyle: 'bold',
+      fontSize: '20px', color: '#d4b896', fontStyle: 'bold',
     });
     this.dialogContainer.add(this.dialogName);
 
@@ -783,9 +839,9 @@ export class UIScene extends Phaser.Scene {
     const ta = this._textArea;
     this.dialogText = this.add.text(ta.x, ta.y, '', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '15px', color: '#e8dcc8',
+      fontSize: '20px', color: '#e8dcc8',
       wordWrap: { width: ta.w, useAdvancedWrap: true },
-      lineSpacing: 6,
+      lineSpacing: 8,
     });
     this.dialogContainer.add(this.dialogText);
 
@@ -800,7 +856,7 @@ export class UIScene extends Phaser.Scene {
 
     // 光标闪烁
     this.cursorBlink = this.add.text(0, 0, '▎', {
-      fontFamily: 'monospace', fontSize: '15px', color: '#d4b896',
+      fontFamily: 'monospace', fontSize: '20px', color: '#d4b896',
     }).setVisible(false);
     this.dialogContainer.add(this.cursorBlink);
     this.cursorTimer = null;
@@ -813,14 +869,14 @@ export class UIScene extends Phaser.Scene {
     // 翻页提示（右下角）
     this.pageHint = this.add.text(panelX + panelW - 150, panelY + panelH - 50, '', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '11px', color: '#c4a882',
+      fontSize: '15px', color: '#c4a882',
     });
     this.dialogContainer.add(this.pageHint);
 
     // 提示文字（"按F关闭"等）
     this.dialogHint = this.add.text(panelX + panelW - 150, panelY + panelH - 52, '[F] 关闭', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '11px', color: '#888878',
+      fontSize: '15px', color: '#888878',
     });
     this.dialogContainer.add(this.dialogHint);
 
@@ -880,7 +936,7 @@ export class UIScene extends Phaser.Scene {
       const wrapW = Math.max(60, btnW - 44);
       const temp = this.add.text(0, 0, opt.text, {
         fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-        fontSize: '13px', color: '#d0c8b4',
+        fontSize: '17px', color: '#d0c8b4',
         wordWrap: { width: wrapW, useAdvancedWrap: true },
       });
       const h = Math.max(36, Math.min(60, temp.height + 14));
@@ -1020,14 +1076,14 @@ export class UIScene extends Phaser.Scene {
 
     // 编号标签
     const num = this.add.text(10, h / 2, `${index + 1}`, {
-      fontFamily: 'monospace', fontSize: '12px', color: '#c4a882',
+      fontFamily: 'monospace', fontSize: '16px', color: '#c4a882',
     }).setOrigin(0, 0.5);
     container.add(num);
 
     // 选项文字
     const text = this.add.text(30, h / 2, optionData.text, {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '13px', color: '#d0c8b4', wordWrap: { width: w - 44, useAdvancedWrap: true },
+      fontSize: '17px', color: '#d0c8b4', wordWrap: { width: w - 44, useAdvancedWrap: true },
     }).setOrigin(0, 0.5);
     container.add(text);
 
@@ -1603,6 +1659,7 @@ export class UIScene extends Phaser.Scene {
     this.currentChapterName = data.chapterName || null;
     this.inventory = data.inventory || [];
     this.updateStageBadge();
+    this._updateBackpackBtnLabel();
     this.refreshBackpackContent();
 
     // 加载存档时，从后端恢复对话历史
@@ -2204,6 +2261,52 @@ export class UIScene extends Phaser.Scene {
       this.freeInput.blur();
       this.freeInput.style.display = 'none';
     }
+    // 清理原生 DOM 键盘监听
+    if (this._domKeyHandler) {
+      document.removeEventListener('keydown', this._domKeyHandler);
+      this._domKeyHandler = null;
+    }
+  }
+
+  /**
+   * ESC 键统一处理（被 Phaser JustDown 和原生 DOM 两种方式调用）
+   */
+  _handleEscPress() {
+    // 1. 暂停菜单打开中 → 关闭
+    if (this.pauseMenuVisible) {
+      console.log('[UIScene] _handleEscPress → 关闭暂停菜单');
+      this.togglePauseMenu();
+      return;
+    }
+
+    // 2. 对话活跃中 → 关闭对话
+    if (this.dialogActive) {
+      console.log('[UIScene] _handleEscPress → 关闭对话');
+      this.closeDialog();
+      return;
+    }
+
+    // 3. 背包面板打开中 → 关闭
+    if (this.backpackPanelVisible) {
+      console.log('[UIScene] _handleEscPress → 关闭背包面板');
+      if (this.showItemMode) {
+        this.cancelShowItemMode();
+      } else {
+        this.toggleBackpackPanel();
+      }
+      return;
+    }
+
+    // 4. 历史面板打开中 → 关闭
+    if (this.historyPanelVisible) {
+      console.log('[UIScene] _handleEscPress → 关闭历史面板');
+      this.toggleHistoryPanel();
+      return;
+    }
+
+    // 5. 游戏正常运行中 → 打开暂停菜单
+    console.log('[UIScene] _handleEscPress → 打开暂停菜单!');
+    this.togglePauseMenu();
   }
 
   fadeInContainer(container, duration = 600) {
@@ -2231,38 +2334,24 @@ export class UIScene extends Phaser.Scene {
   // =========================== 输入处理 ===========================
 
   update() {
+    // [DEBUG] 确认 update 是否在执行（仅前 300 帧打印）
+    if (!this._updateFrameCount) this._updateFrameCount = 0;
+    this._updateFrameCount++;
+    if (this._updateFrameCount <= 5 || this._updateFrameCount % 600 === 0) {
+      console.log(`[UIScene] update 运行中 #${this._updateFrameCount}, focused=${this.input.keyboard.enabled}`);
+    }
+
     // ── 统一缓存按键状态（JustDown 每次调用会消费，必须在 update 开头缓存）──
     const escJustDown = Phaser.Input.Keyboard.JustDown(this.keyESC);
 
-    // ── ESC 键：退出暂停菜单 ──
-    if (this.pauseMenuVisible && escJustDown) {
-      this.togglePauseMenu();
-      return;
+    // [DEBUG]
+    if (escJustDown) {
+      console.log('[UIScene] Phaser JustDown 也检测到 ESC!');
     }
 
-    // ── ESC 键：退出对话（任何时候，包括流式输出中）──
-    if (this.dialogActive && escJustDown) {
-      this.closeDialog();
-      return;
-    }
-
-    // ── ESC 键（游戏中）：打开暂停菜单 ──
-    if (!this.dialogActive && !this.pauseMenuVisible && escJustDown) {
-      // 检查是否是背包面板打开中（展示物品模式也关闭）
-      if (this.backpackPanelVisible) {
-        if (this.showItemMode) {
-          this.cancelShowItemMode();
-        } else {
-          this.toggleBackpackPanel();
-        }
-        return;
-      }
-      // 检查是否是历史面板打开中
-      if (this.historyPanelVisible) {
-        this.toggleHistoryPanel();
-        return;
-      }
-      this.togglePauseMenu();
+    // ── ESC 键：统一处理（Phaser + 原生 DOM 双通道）──
+    if (escJustDown) {
+      this._handleEscPress();
       return;
     }
 

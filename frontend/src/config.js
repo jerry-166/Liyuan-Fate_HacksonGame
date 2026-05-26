@@ -2,10 +2,10 @@
  * 游戏常量配置
  */
 export const GAME = {
-  WIDTH: 1024,
-  HEIGHT: 768,
+  WIDTH: 1280,
+  HEIGHT: 800,
   TILE_SIZE: 16,
-  PLAYER_SPEED: 160,
+  PLAYER_SPEED: 200,
 };
 
 export const COLORS = {

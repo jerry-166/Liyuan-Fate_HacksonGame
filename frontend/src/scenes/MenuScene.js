@@ -54,19 +54,19 @@ export class MenuScene extends Phaser.Scene {
     // ========== 标题 ==========
     this.add.text(cx, 100, '—— 一段关于传承与选择的故事 ——', {
       fontFamily: '"KaiTi","SimSun",serif',
-      fontSize: '15px', color: '#887766',
+      fontSize: '20px', color: '#887766',
     }).setOrigin(0.5).setDepth(1).setAlpha(0);
 
     const title = this.add.text(cx, 170, '梨园生死', {
       fontFamily: '"KaiTi","SimSun",serif',
-      fontSize: '58px', color: '#d4b896',
+      fontSize: '72px', color: '#d4b896',
       stroke: '#332a20',
       strokeThickness: 3,
     }).setOrigin(0.5).setDepth(1);
 
     this.add.text(cx, 230, 'PEKING OPERA · LIFE & DEATH', {
       fontFamily: 'serif',
-      fontSize: '11px', color: '#886644', letterSpacing: 6,
+      fontSize: '15px', color: '#886644', letterSpacing: 6,
     }).setOrigin(0.5).setDepth(1);
 
     title.setAlpha(0).setScale(1.2);
@@ -103,17 +103,17 @@ export class MenuScene extends Phaser.Scene {
     // ========== 底部信息 ==========
     this.add.text(cx, height - 80, 'WASD 移动  ·  F 交互  ·  H 对话历史  ·  数字键选择', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '11px', color: '#555544',
+      fontSize: '15px', color: '#555544',
     }).setOrigin(0.5).setDepth(1);
 
     this.add.text(cx, height - 58, 'T-Hackathon 2026 · AI Narrative Game', {
       fontFamily: 'monospace',
-      fontSize: '10px', color: '#444433',
+      fontSize: '14px', color: '#444433',
     }).setOrigin(0.5).setDepth(1);
 
     this.add.text(width - 16, height - 16, 'v0.3', {
       fontFamily: 'monospace',
-      fontSize: '10px', color: '#333322',
+      fontSize: '13px', color: '#333322',
     }).setOrigin(1, 1).setDepth(1);
 
     // 按钮延迟淡入
@@ -148,7 +148,7 @@ export class MenuScene extends Phaser.Scene {
     // 文字
     const text = this.add.text(0, 0, label, {
       fontFamily: '"KaiTi","SimSun",serif',
-      fontSize: '20px', color: disabled ? '#555544' : '#d4b896',
+      fontSize: '26px', color: disabled ? '#555544' : '#d4b896',
       letterSpacing: 8,
     }).setOrigin(0.5);
     container.add(text);
@@ -164,7 +164,7 @@ export class MenuScene extends Phaser.Scene {
       // 禁用态显示存档为空提示
       const dimText = this.add.text(0, 20, '（没有存档）', {
         fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-        fontSize: '10px', color: '#443322',
+        fontSize: '14px', color: '#443322',
       }).setOrigin(0.5);
       container.add(dimText);
     }
@@ -194,8 +194,8 @@ export class MenuScene extends Phaser.Scene {
     this.archivePanel.add(mask);
 
     // 面板背景
-    const panelW = 580;
-    const panelH = 400;
+    const panelW = 780;
+    const panelH = 520;
     const panelX = (width - panelW) / 2;
     const panelY = (height - panelH) / 2 - 20;
     const panelBg = this.add.graphics();
@@ -206,29 +206,29 @@ export class MenuScene extends Phaser.Scene {
     this.archivePanel.add(panelBg);
 
     // 标题
-    const panelTitle = this.add.text(width / 2, panelY + 28, '—— 戏梦存档 ——', {
+    const panelTitle = this.add.text(width / 2, panelY + 32, '—— 戏梦存档 ——', {
       fontFamily: '"KaiTi","SimSun",serif',
-      fontSize: '22px', color: '#d4b896',
+      fontSize: '28px', color: '#d4b896',
     }).setOrigin(0.5);
     this.archivePanel.add(panelTitle);
 
     // 分割线
     const divGfx = this.add.graphics();
     divGfx.lineStyle(1, 0x887766, 0.3);
-    divGfx.lineBetween(panelX + 30, panelY + 52, panelX + panelW - 30, panelY + 52);
+    divGfx.lineBetween(panelX + 40, panelY + 60, panelX + panelW - 40, panelY + 60);
     this.archivePanel.add(divGfx);
 
     // 存档列表容器
-    this.archiveListContent = this.add.container(0, panelY + 62);
+    this.archiveListContent = this.add.container(0, panelY + 72);
     this.archivePanel.add(this.archiveListContent);
 
     // 列表区域参数（供滚动使用）
     this._archiveListArea = {
-      x: panelX + 10,
-      y: panelY + 56,
-      w: panelW - 20,
-      h: panelH - 110,
-      baseY: panelY + 62,
+      x: panelX + 16,
+      y: panelY + 66,
+      w: panelW - 32,
+      h: panelH - 130,
+      baseY: panelY + 72,
     };
 
     // 列表遮罩
@@ -250,16 +250,16 @@ export class MenuScene extends Phaser.Scene {
     });
 
     // 底部提示
-    this.archiveHint = this.add.text(width / 2, panelY + panelH - 30, '', {
+    this.archiveHint = this.add.text(width / 2, panelY + panelH - 36, '', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '12px', color: '#887766',
+      fontSize: '16px', color: '#887766',
     }).setOrigin(0.5);
     this.archivePanel.add(this.archiveHint);
 
     // 底部操作提示
-    this.add.text(width / 2, panelY + panelH - 10, '[ESC] 关闭  |  [Del] 删除选中  |  点击继续', {
+    this.add.text(width / 2, panelY + panelH - 12, '[ESC] 关闭  |  [Del] 删除选中  |  点击继续', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '10px', color: '#665544',
+      fontSize: '14px', color: '#665544',
     }).setOrigin(0.5).setDepth(101);
   }
 
@@ -322,7 +322,7 @@ export class MenuScene extends Phaser.Scene {
     const { width } = this.cameras.main;
     const emptyText = this.add.text(width / 2, 120, '还没有存档，请先开始新游戏', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '14px', color: '#666655',
+      fontSize: '18px', color: '#666655',
     }).setOrigin(0.5);
     this.archiveListContent.add(emptyText);
   }
@@ -360,28 +360,28 @@ export class MenuScene extends Phaser.Scene {
       const rowY = y;
       const rowBg = this.add.graphics();
       rowBg.fillStyle(0x1a1a28, 1);
-      rowBg.fillRoundedRect(panelX + 20, rowY - 4, colW - 20, 52, 6);
+      rowBg.fillRoundedRect(panelX + 28, rowY - 4, colW - 28, 58, 6);
       rowBg.lineStyle(1, 0x443322, 0.4);
-      rowBg.strokeRoundedRect(panelX + 20, rowY - 4, colW - 20, 52, 6);
+      rowBg.strokeRoundedRect(panelX + 28, rowY - 4, colW - 28, 58, 6);
       this.archiveListContent.add(rowBg);
 
       // 文字
-      const nameText = this.add.text(panelX + 34, rowY + 4, label, {
+      const nameText = this.add.text(panelX + 42, rowY + 6, label, {
         fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-        fontSize: '14px', color: s.game_ended ? '#886644' : '#d4b896',
+        fontSize: '18px', color: s.game_ended ? '#886644' : '#d4b896',
       });
       this.archiveListContent.add(nameText);
 
-      const dateText = this.add.text(panelX + 34, rowY + 26, subLabel, {
+      const dateText = this.add.text(panelX + 42, rowY + 30, subLabel, {
         fontFamily: 'monospace',
-        fontSize: '10px', color: '#665544',
+        fontSize: '14px', color: '#665544',
       });
       this.archiveListContent.add(dateText);
 
       // "继续" 按钮
-      const contW = 56;
+      const contW = 60;
       const contBtn = this.createSmallButton(
-        panelX + colW - contW - 90, rowY + 8, contW, 28,
+        panelX + colW - contW - 90, rowY + 10, contW, 32,
         '继续', '#889966', () => {
           this.loadArchive(s.session_id);
         }
@@ -389,16 +389,16 @@ export class MenuScene extends Phaser.Scene {
       this.archiveListContent.add(contBtn);
 
       // "删除" 按钮
-      const delW = 56;
+      const delW = 60;
       const delBtn = this.createSmallButton(
-        panelX + colW - delW - 30, rowY + 8, delW, 28,
+        panelX + colW - delW - 30, rowY + 10, delW, 32,
         '删除', '#aa6655', () => {
           this.confirmDeleteArchive(s.session_id, s.player_name);
         }
       );
       this.archiveListContent.add(delBtn);
 
-      y += 56;
+      y += 62;
     });
 
     this.archiveListContentHeight = y;
@@ -420,7 +420,7 @@ export class MenuScene extends Phaser.Scene {
 
     const text = this.add.text(w / 2, h / 2, label, {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '12px', color: color,
+      fontSize: '16px', color: color,
     }).setOrigin(0.5);
     container.add(text);
 

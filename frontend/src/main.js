@@ -7,14 +7,14 @@ import { UIScene } from './scenes/UIScene.js';
 const config = {
   type: Phaser.AUTO,
   parent: 'game-container',
-  width: 1024,
-  height: 768,
+  width: 1280,
+  height: 800,
   backgroundColor: '#1a1a2e',
   pixelArt: true,
   roundPixels: true,
   dom: { createContainer: true },
   scale: {
-    mode: Phaser.Scale.FIT,
+    mode: Phaser.Scale.RESIZE,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
   physics: {
@@ -38,7 +38,7 @@ export function createGlobalInput() {
   el.style.cssText = `
     position: fixed; display: none; z-index: 350;
     font-family: "Microsoft YaHei","PingFang SC",sans-serif;
-    font-size: 14px; color: #e8dcc8;
+    font-size: 18px; color: #e8dcc8;
     background: #16161e; border: none;
     border-top: 1px solid #c4a882;
     border-radius: 0 0 6px 6px; padding: 6px 12px; margin: 0;
