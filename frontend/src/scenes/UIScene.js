@@ -49,6 +49,10 @@ export class UIScene extends Phaser.Scene {
 
     // 物品
     this.inventory = [];
+    this.backpackPanelVisible = false;
+    this.backpackCursorIndex = 0;
+    this.showItemMode = false;        // 展示物品模式（从NPC交互触发）
+    this.showItemTargetNPC = null;    // 展示物品的目标 NPC
 
     // 暂停/存档菜单状态
     this.pauseMenuVisible = false;
@@ -63,7 +67,9 @@ export class UIScene extends Phaser.Scene {
     this.key3 = this.input.keyboard.addKey('THREE');
     this.key4 = this.input.keyboard.addKey('FOUR');
     this.keyH = this.input.keyboard.addKey('H');
-    this.keyI = this.input.keyboard.addKey('I');  // 物品栏
+    this.keyB = this.input.keyboard.addKey('B');  // 背包
+    this.keyW = this.input.keyboard.addKey('W');  // 背包内上移
+    this.keyS = this.input.keyboard.addKey('S');  // 背包内下移
     this.keyESC = this.input.keyboard.addKey('ESC');
     this.keyEnter = this.input.keyboard.addKey('ENTER');
 
@@ -122,6 +128,7 @@ export class UIScene extends Phaser.Scene {
     this.createDialogPanel();
     this.createHUD();
     this.createHistoryPanel();
+    this.createBackpackPanel();
     this.createStageTransitionOverlay();
     this.createEndingScreen();
     this.createPauseMenu();
@@ -131,6 +138,8 @@ export class UIScene extends Phaser.Scene {
     gameScene.events.on('dialogue:start', this.onDialogueStart, this);
     gameScene.events.on('game:init', this.onGameInit, this);
     gameScene.events.on('stage:change', this.onStageChange, this);
+    gameScene.events.on('item:discovered', this.onItemDiscovered, this);
+    gameScene.events.on('show-item:select', this.onShowItemSelect, this);
   }
 
   // =========================== HUD ===========================
@@ -326,6 +335,408 @@ export class UIScene extends Phaser.Scene {
     this.historyContentHeight = y;
     this.historyScrollY = 0;
     this.historyContent.setY(this._historyArea.y);
+  }
+
+  // =========================== 背包面板（左右版）===========================
+
+  createBackpackPanel() {
+    const { width, height } = this.cameras.main;
+
+    // 面板尺寸
+    const panelW = 620;
+    const panelH = 420;
+    const panelX = (width - panelW) / 2;
+    const panelY = (height - panelH) / 2;
+
+    // 左栏（物品列表）和右栏（详情区）
+    const leftW = 200;
+    const rightW = panelW - leftW;
+    const titleH = 40;
+    const bottomH = 30;
+    const sepX = panelX + leftW;
+
+    this._backpackArea = { x: panelX, y: panelY, w: panelW, h: panelH, leftW, rightW, titleH, bottomH, sepX };
+
+    this.backpackPanel = this.add.container(0, 0).setDepth(450).setVisible(false);
+
+    // 半透明全屏遮罩（点击关闭）
+    const overlay = this.add.graphics();
+    overlay.fillStyle(0x000000, 0.4);
+    overlay.fillRect(0, 0, width, height);
+    overlay.setInteractive(new Phaser.Geom.Rectangle(0, 0, width, height), Phaser.Geom.Rectangle.Contains);
+    overlay.on('pointerdown', () => {
+      if (this.showItemMode) {
+        this.cancelShowItemMode();
+      } else {
+        this.toggleBackpackPanel();
+      }
+    });
+    this.backpackPanel.add(overlay);
+
+    // 面板背景
+    const bg = this.add.graphics();
+    bg.fillStyle(0x12111a, 0.97);
+    bg.fillRoundedRect(panelX, panelY, panelW, panelH, 8);
+    // 外边框
+    bg.lineStyle(2, 0x6b5b3e, 0.8);
+    bg.strokeRoundedRect(panelX, panelY, panelW, panelH, 8);
+    // 分隔线：标题下方
+    bg.lineStyle(1, 0x6b5b3e, 0.4);
+    bg.lineBetween(panelX + 12, panelY + titleH, panelX + panelW - 12, panelY + titleH);
+    // 分隔线：左右栏
+    bg.lineBetween(sepX, panelY + titleH, sepX, panelY + panelH - bottomH);
+    // 分隔线：底部提示上方
+    bg.lineBetween(panelX + 12, panelY + panelH - bottomH, panelX + panelW - 12, panelY + panelH - bottomH);
+    this.backpackPanel.add(bg);
+
+    // 标题
+    this.bpTitle = this.add.text(panelX + panelW / 2, panelY + titleH / 2, '—— 行  囊 ——', {
+      fontFamily: '"KaiTi","SimSun",serif',
+      fontSize: '18px', color: '#d4b896',
+    }).setOrigin(0.5);
+    this.backpackPanel.add(this.bpTitle);
+
+    // 左栏标题 "道具列表"
+    const leftTitle = this.add.text(sepX / 2, panelY + titleH + 12, '道具列表', {
+      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+      fontSize: '12px', color: '#887766',
+    }).setOrigin(0.5, 0);
+    this.backpackPanel.add(leftTitle);
+
+    // 右栏标题 "物品详情"
+    const rightTitle = this.add.text(sepX + rightW / 2, panelY + titleH + 12, '物品详情', {
+      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+      fontSize: '12px', color: '#887766',
+    }).setOrigin(0.5, 0);
+    this.backpackPanel.add(rightTitle);
+
+    // 物品列表容器（左侧，可滚动）
+    this.bpListContent = this.add.container(0, 0);
+    this.backpackPanel.add(this.bpListContent);
+
+    // 右侧详情文本元素
+    const detailX = sepX + 16;
+    const detailY = panelY + titleH + 32;
+    const detailW = rightW - 32;
+
+    this.bpDetailName = this.add.text(detailX, detailY, '', {
+      fontFamily: '"KaiTi","SimSun",serif',
+      fontSize: '18px', color: '#e8dcc8', fontStyle: 'bold',
+    });
+    this.backpackPanel.add(this.bpDetailName);
+
+    this.bpDetailDesc = this.add.text(detailX, detailY + 36, '', {
+      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+      fontSize: '14px', color: '#c0b898',
+      wordWrap: { width: detailW, useAdvancedWrap: true },
+      lineSpacing: 5,
+    });
+    this.backpackPanel.add(this.bpDetailDesc);
+
+    this.bpDetailTags = this.add.text(detailX, detailY + 120, '', {
+      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+      fontSize: '13px', color: '#aa9977',
+    });
+    this.backpackPanel.add(this.bpDetailTags);
+
+    this._bpDetailArea = { x: detailX, y: detailY, w: detailW };
+
+    // 底部操作提示（展示物品模式时显示确认提示）
+    this.bpTipNormal = this.add.text(panelX + panelW / 2, panelY + panelH - bottomH / 2, '[B] 关闭    [W/S] 上下选择', {
+      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+      fontSize: '12px', color: '#666655',
+    }).setOrigin(0.5);
+    this.backpackPanel.add(this.bpTipNormal);
+
+    // 展示物品模式的确认提示 + 可点击确认按钮
+    this.bpTipShowItem = this.add.text(panelX + panelW / 2 - 60, panelY + panelH - bottomH / 2, '[Enter] 展示', {
+      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+      fontSize: '12px', color: '#c4a882',
+    }).setOrigin(0.5).setVisible(false);
+    this.backpackPanel.add(this.bpTipShowItem);
+
+    // 「确认展示」可点击按钮（鼠标用户友好）
+    this.bpConfirmBtn = this.add.text(panelX + panelW / 2 + 60, panelY + panelH - bottomH / 2, '[ B ] 取消', {
+      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+      fontSize: '12px', color: '#887766',
+    }).setOrigin(0.5).setVisible(false).setInteractive({ useHandCursor: true });
+    this.bpConfirmBtn.on('pointerover', () => this.bpConfirmBtn.setColor('#d4b896'));
+    this.bpConfirmBtn.on('pointerout', () => this.bpConfirmBtn.setColor('#887766'));
+    this.bpConfirmBtn.on('pointerdown', () => {
+      if (this.showItemMode) this.cancelShowItemMode();
+    });
+    this.backpackPanel.add(this.bpConfirmBtn);
+
+    // 右侧详情区域的「确认展示」按钮
+    this.bpShowItemBtnContainer = this.add.container(0, 0).setVisible(false);
+    const btnX = sepX + 16;
+    const btnY = panelY + panelH - bottomH - 48;
+    const sbw = rightW - 32;
+    const sbh = 34;
+
+    const sbBg = this.add.graphics();
+    const drawShowBtn = (hover) => {
+      sbBg.clear();
+      sbBg.fillStyle(hover ? 0x3a3830 : 0x2a2824, 1);
+      sbBg.fillRoundedRect(btnX, btnY, sbw, sbh, 5);
+      sbBg.lineStyle(1, hover ? 0xd4b896 : 0xc4a882, 0.7);
+      sbBg.strokeRoundedRect(btnX, btnY, sbw, sbh, 5);
+    };
+    drawShowBtn(false);
+
+    const sbText = this.add.text(btnX + sbw / 2, btnY + sbh / 2, '确认展示选中物品', {
+      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+      fontSize: '13px', color: '#d4b896',
+    }).setOrigin(0.5);
+
+    const sbZone = this.add.zone(btnX + sbw / 2, btnY + sbh / 2, sbw, sbh)
+      .setInteractive({ useHandCursor: true });
+    sbZone.on('pointerover', () => drawShowBtn(true));
+    sbZone.on('pointerout', () => drawShowBtn(false));
+    sbZone.on('pointerdown', () => {
+      if (this.showItemMode) this.confirmShowItem();
+    });
+
+    this.bpShowItemBtnContainer.add([sbBg, sbText, sbZone]);
+    this.backpackPanel.add(this.bpShowItemBtnContainer);
+
+    // 滚轮滚动支持
+    this.input.on('wheel', (pointer, gameObjects, deltaX, deltaY) => {
+      if (!this.backpackPanelVisible) return;
+      if (this.inventory.length <= 8) return; // 8项以内不需要滚动
+      this.bpListScrollY = Math.max(
+        Math.min(0, (this.bpListScrollY || 0) - deltaY * 0.5),
+        -(this.bpListContentHeight - (panelH - titleH - 60))
+      );
+      this.bpListContent.setY(panelY + titleH + 32 + (this.bpListScrollY || 0));
+    });
+  }
+
+  toggleBackpackPanel() {
+    if (this.dialogActive || this.pauseMenuVisible || this.historyPanelVisible) return;
+    this.backpackPanelVisible = !this.backpackPanelVisible;
+    if (this.backpackPanelVisible) {
+      this.refreshBackpackContent();
+      this.backpackPanel.setVisible(true);
+      this.backpackCursorIndex = Math.min(this.backpackCursorIndex, Math.max(0, this.inventory.length - 1));
+      this.highlightBackpackItem();
+      // 锁定输入
+      const gameScene = this.scene.get('GameScene');
+      if (gameScene) gameScene.events.emit('input:lock', true);
+    } else {
+      this.backpackPanel.setVisible(false);
+      // 恢复输入
+      const gameScene = this.scene.get('GameScene');
+      if (gameScene) gameScene.events.emit('input:lock', false);
+    }
+  }
+
+  refreshBackpackContent() {
+    // 重建左侧物品列表
+    this.bpListContent.removeAll(true);
+    this.bpListScrollY = 0;
+
+    const ba = this._backpackArea;
+    const listY = ba.y + ba.titleH + 32;
+    const itemH = 38;
+    let y = 0;
+
+    if (this.inventory.length === 0) {
+      const empty = this.add.text(ba.leftW / 2, 20, '空空如也', {
+        fontFamily: '"KaiTi","SimSun",serif',
+        fontSize: '16px', color: '#555544',
+      }).setOrigin(0.5, 0);
+      this.bpListContent.add(empty);
+      this.bpListContentHeight = 60;
+      this.bpListContent.setY(listY);
+      this.updateBackpackDetail(null);
+      return;
+    }
+
+    this.inventory.forEach((item, idx) => {
+      const emoji = item.is_key ? '⭐' : '📦';
+      const nameColor = item.is_key ? '#e8c86a' : '#c8b898';
+      const row = this.add.container(ba.x + 12, y);
+
+      // 选中背景
+      const selBg = this.add.graphics();
+      selBg.fillStyle(0x3a3228, 0.6);
+      selBg.fillRoundedRect(0, 0, ba.leftW - 24, itemH - 4, 4);
+      selBg.setVisible(false);
+      row.add(selBg);
+      row.setData('selBg', selBg);
+
+      // emoji 图标
+      const icon = this.add.text(12, itemH / 2, emoji, { fontSize: '18px' }).setOrigin(0.5);
+      row.add(icon);
+
+      // 物品名称
+      const name = this.add.text(34, itemH / 2, item.name || item.narrative_name || '未知物品', {
+        fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+        fontSize: '14px', color: nameColor,
+      }).setOrigin(0.5);
+      row.add(name);
+
+      row.setSize(ba.leftW - 24, itemH - 4);
+      row.setInteractive();
+      row.on('pointerdown', () => {
+        this.backpackCursorIndex = idx;
+        this.highlightBackpackItem();
+      });
+
+      this.bpListContent.add(row);
+      y += itemH;
+    });
+
+    this.bpListContentHeight = y;
+    this.bpListContent.setY(listY);
+    this.highlightBackpackItem();
+  }
+
+  highlightBackpackItem() {
+    if (!this.bpListContent || this.inventory.length === 0) return;
+
+    const items = this.bpListContent.list.filter(c => c.getData('selBg'));
+    items.forEach((row, idx) => {
+      const bg = row.getData('selBg');
+      if (bg) bg.setVisible(idx === this.backpackCursorIndex);
+    });
+
+    // 更新右侧详情
+    const item = this.inventory[this.backpackCursorIndex];
+    this.updateBackpackDetail(item);
+  }
+
+  updateBackpackDetail(item) {
+    if (!item) {
+      this.bpDetailName.setText('');
+      this.bpDetailDesc.setText('选择一件物品查看详情');
+      this.bpDetailTags.setText('');
+      return;
+    }
+
+    this.bpDetailName.setText(item.name || item.narrative_name || '未知物品');
+    this.bpDetailDesc.setText(item.description || '暂无描述');
+
+    let tags = '';
+    if (item.is_key) tags += '⭐ 关键道具';
+    if (item.related_npcs && item.related_npcs.length > 0) {
+      tags += (tags ? '    ' : '') + '👤 关联人物: ' + item.related_npcs.join('、');
+    }
+    this.bpDetailTags.setText(tags);
+  }
+
+  onItemDiscovered(item) {
+    if (!item) return;
+    // 防止重复添加
+    if (this.inventory.some(i => (i.id || i.item_id) === (item.id || item.item_id))) return;
+    this.inventory.push(item);
+    if (this.backpackPanelVisible) {
+      this.refreshBackpackContent();
+    }
+  }
+
+  /**
+   * 从 NPC 交互按钮触发「展示物品」→ 进入展示物品模式
+   */
+  onShowItemSelect({ npcId, npcName }) {
+    this.showItemMode = true;
+    this.showItemTargetNPC = { id: npcId, name: npcName };
+
+    // 锁定 GameScene 输入
+    const gameScene = this.scene.get('GameScene');
+    if (gameScene) gameScene.events.emit('input:lock', true);
+
+    // 隐藏 NPC 交互按钮
+    if (gameScene && gameScene._hideNPCActionButtons) {
+      gameScene._hideNPCActionButtons();
+    }
+
+    // 打开背包面板（展示物品模式）
+    this.backpackPanelVisible = true;
+    this.backpackCursorIndex = Math.min(this.backpackCursorIndex, Math.max(0, this.inventory.length - 1));
+    this.refreshBackpackContent();
+    this.backpackPanel.setVisible(true);
+    this.highlightBackpackItem();
+    this.bpTipNormal.setVisible(false);
+    this.bpTipShowItem.setVisible(true);
+    this.bpConfirmBtn.setVisible(true);
+    this.bpShowItemBtnContainer.setVisible(true);
+    this.bpTitle.setText(`—— 展示物品给 ${npcName} ——`);
+  }
+
+  /**
+   * 确认展示选中物品给 NPC → 调用 showItemToNpcStream 发起对话
+   */
+  async confirmShowItem() {
+    if (!this.showItemMode || !this.showItemTargetNPC) return;
+    const item = this.inventory[this.backpackCursorIndex];
+    if (!item) return;
+
+    const npcId = this.showItemTargetNPC.id;
+    const npcName = this.showItemTargetNPC.name;
+    const itemId = item.id || item.item_id;
+
+    // 关闭背包面板，退出展示物品模式
+    this.showItemMode = false;
+    this.showItemTargetNPC = null;
+    this.backpackPanelVisible = false;
+    this.backpackPanel.setVisible(false);
+    this.bpTipNormal.setVisible(true);
+    this.bpTipShowItem.setVisible(false);
+    this.bpConfirmBtn.setVisible(false);
+    this.bpShowItemBtnContainer.setVisible(false);
+    this.bpTitle.setText('—— 行  囊 ——');
+
+    // 记录到历史
+    this.addToHistory(npcName, null, `[展示了物品：${item.name || '未知物品'}]`);
+
+    // 设置对话状态
+    this.dialogActive = true;
+    this.isStreaming = true;
+    this.currentNPC = { id: npcId, name: npcName };
+
+    // 显示对话框
+    this.dialogContainer.setVisible(true);
+    this.dialogName.setText(npcName);
+    this.dialogText.setText('');
+    this.dialogHint.setText('对话生成中……');
+    this.clearOptions();
+    this.startCursorBlink();
+
+    try {
+      const stream = await showItemToNpcStream(
+        this.sessionId,
+        npcId,
+        itemId,
+        `我给你看样东西。${item.name || ''}`
+      );
+      await this.processDialogueStream(stream);
+    } catch (err) {
+      console.error('[UIScene] 展示物品对话失败:', err);
+      this.dialogText.setText(`【${err.message || '网络开小差了，请重试'}】`);
+      this.dialogHint.setText('[F] 关闭');
+    }
+  }
+
+  /**
+   * 取消展示物品模式
+   */
+  cancelShowItemMode() {
+    if (!this.showItemMode) return;
+    this.showItemMode = false;
+    this.showItemTargetNPC = null;
+    this.backpackPanelVisible = false;
+    this.backpackPanel.setVisible(false);
+    this.bpTipNormal.setVisible(true);
+    this.bpTipShowItem.setVisible(false);
+    this.bpConfirmBtn.setVisible(false);
+    this.bpShowItemBtnContainer.setVisible(false);
+    this.bpTitle.setText('—— 行  囊 ——');
+
+    // 恢复 GameScene 输入
+    const gameScene = this.scene.get('GameScene');
+    if (gameScene) gameScene.events.emit('input:lock', false);
   }
 
   // =========================== 对话框面板 ===========================
@@ -1192,6 +1603,7 @@ export class UIScene extends Phaser.Scene {
     this.currentChapterName = data.chapterName || null;
     this.inventory = data.inventory || [];
     this.updateStageBadge();
+    this.refreshBackpackContent();
 
     // 加载存档时，从后端恢复对话历史
     if (this.sessionId) {
@@ -1836,6 +2248,15 @@ export class UIScene extends Phaser.Scene {
 
     // ── ESC 键（游戏中）：打开暂停菜单 ──
     if (!this.dialogActive && !this.pauseMenuVisible && escJustDown) {
+      // 检查是否是背包面板打开中（展示物品模式也关闭）
+      if (this.backpackPanelVisible) {
+        if (this.showItemMode) {
+          this.cancelShowItemMode();
+        } else {
+          this.toggleBackpackPanel();
+        }
+        return;
+      }
       // 检查是否是历史面板打开中
       if (this.historyPanelVisible) {
         this.toggleHistoryPanel();
@@ -1843,6 +2264,46 @@ export class UIScene extends Phaser.Scene {
       }
       this.togglePauseMenu();
       return;
+    }
+
+    // ── B 键：背包面板开关 / 取消展示物品模式 ──
+    if (Phaser.Input.Keyboard.JustDown(this.keyB)) {
+      if (this.backpackPanelVisible) {
+        if (this.showItemMode) {
+          this.cancelShowItemMode();
+        } else {
+          this.toggleBackpackPanel();
+        }
+        return;
+      }
+      if (!this.dialogActive && !this.pauseMenuVisible && !this.historyPanelVisible) {
+        this.toggleBackpackPanel();
+        return;
+      }
+    }
+
+    // ── 背包面板内 W/S 导航 + Enter 确认（展示物品模式）──
+    if (this.backpackPanelVisible) {
+      if (Phaser.Input.Keyboard.JustDown(this.keyW)) {
+        if (this.inventory.length > 0) {
+          this.backpackCursorIndex = (this.backpackCursorIndex - 1 + this.inventory.length) % this.inventory.length;
+          this.highlightBackpackItem();
+        }
+        return;
+      }
+      if (Phaser.Input.Keyboard.JustDown(this.keyS)) {
+        if (this.inventory.length > 0) {
+          this.backpackCursorIndex = (this.backpackCursorIndex + 1) % this.inventory.length;
+          this.highlightBackpackItem();
+        }
+        return;
+      }
+      // 展示物品模式下 Enter 确认选中物品
+      if (this.showItemMode && Phaser.Input.Keyboard.JustDown(this.keyEnter)) {
+        this.confirmShowItem();
+        return;
+      }
+      return; // 背包打开时不处理其他按键
     }
 
     // 历史面板开关（对话外可用）

@@ -166,8 +166,10 @@ export class GameScene extends Phaser.Scene {
     this.player = null;
     this.npcs = [];
     this.npcBubbles = [];
+    this.sceneItems = [];      // 场景中可交互的物品精灵
     this.inputLocked = false;
     this.currentStage = 1;
+    this.currentNearbyItem = null;
 
     this.drawTileMap();
     this.createCollisionLayer();
@@ -199,6 +201,10 @@ export class GameScene extends Phaser.Scene {
       borderRadius: 4,
     }).setOrigin(0.5).setDepth(100).setVisible(false);
 
+    // NPC 交互按钮（靠近 NPC 时显示）
+    this.npcActionContainer = this.add.container(0, 0).setDepth(102).setVisible(false);
+    this._createNPCActionButtons();
+
     // 事件监听
     this.events.on('input:lock', (locked) => {
       this.inputLocked = locked;
@@ -211,6 +217,7 @@ export class GameScene extends Phaser.Scene {
 
     this.events.on('state:refresh', (state) => {
       this.refreshNPCsFromState(state);
+      this.refreshSceneItems(state);
     });
 
     this.events.on('stage:change', (newStage) => {
@@ -395,6 +402,66 @@ export class GameScene extends Phaser.Scene {
       console.warn('[GameScene] 恢复存档失败，开始新游戏:', e);
       this.initGame();
     }
+  }
+
+
+  // ==================== 场景物品系统 ====================
+
+  /**
+   * 从后端状态刷新场景物品（显示当前章节可拾取的物品精灵）
+   */
+  async refreshSceneItems(state) {
+    const sessionId = localStorage.getItem('__active_session__');
+    if (!sessionId) return;
+
+    try {
+      const { getItems } = await import('../api/client.js');
+      const data = await getItems(sessionId);
+
+      // 清除已有的物品精灵
+      this.sceneItems.forEach(sp => sp.destroy());
+      this.sceneItems = [];
+      this.currentNearbyItem = null;
+
+      // 创建新的物品精灵
+      const sceneItems = data.scene_items || [];
+      sceneItems.forEach(item => {
+        if (!item.location || !item.location.position) return;
+        const { col, row } = item.location.position;
+        this.createSceneItemSprite(item, col, row);
+      });
+
+      console.log(`[GameScene] 场景物品已刷新: ${this.sceneItems.length} 个`);
+    } catch (e) {
+      console.warn('[GameScene] 刷新场景物品失败:', e);
+    }
+  }
+
+  /**
+   * 创建一个场景物品精灵
+   */
+  createSceneItemSprite(itemData, col, row) {
+    const pos = COORD.toPixel(col, row);
+    // 使用 emoji 文字作为物品图标
+    const emoji = '📦';
+    const sprite = this.add.text(pos.x, pos.y, emoji, {
+      fontSize: '20px',
+    }).setOrigin(0.5).setDepth(90);
+
+    sprite.setData('itemId', itemData.item_id);
+    sprite.setData('name', itemData.name);
+
+    // 小幅上下浮动动画
+    this.tweens.add({
+      targets: sprite,
+      y: pos.y - 4,
+      duration: 1200,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut',
+    });
+
+    this.sceneItems.push(sprite);
   }
 
   /**
@@ -839,6 +906,74 @@ export class GameScene extends Phaser.Scene {
     this.physics.add.collider(this.player, this.collisionZones);
   }
 
+  // ==================== NPC 交互按钮 ====================
+
+  _createNPCActionButtons() {
+    const btnW = 130;
+    const btnH = 32;
+    const gap = 10;
+    const totalW = btnW * 2 + gap;
+
+    // 半透明背景条
+    const bg = this.add.graphics();
+    bg.fillStyle(0x1a1820, 0.92);
+    bg.fillRoundedRect(-totalW / 2 - 8, -btnH / 2 - 6, totalW + 16, btnH + 12, 6);
+    bg.lineStyle(1, 0xc4a882, 0.5);
+    bg.strokeRoundedRect(-totalW / 2 - 8, -btnH / 2 - 6, totalW + 16, btnH + 12, 6);
+    this.npcActionContainer.add(bg);
+
+    // 左按钮：「进行对话」
+    const makeBtn = (label, offsetX, callback, color = '#d4b896') => {
+      const btnGfx = this.add.graphics();
+      const drawBtn = (hover) => {
+        btnGfx.clear();
+        btnGfx.fillStyle(hover ? 0x3a3830 : 0x2a2824, 1);
+        btnGfx.fillRoundedRect(offsetX - btnW / 2, -btnH / 2, btnW, btnH, 4);
+        btnGfx.lineStyle(1, hover ? 0xd4b896 : 0x887766, 0.6);
+        btnGfx.strokeRoundedRect(offsetX - btnW / 2, -btnH / 2, btnW, btnH, 4);
+      };
+      drawBtn(false);
+
+      const text = this.add.text(offsetX, 0, label, {
+        fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+        fontSize: '13px', color,
+      }).setOrigin(0.5);
+
+      const zone = this.add.zone(offsetX, 0, btnW, btnH).setInteractive({ useHandCursor: true });
+      zone.on('pointerover', () => drawBtn(true));
+      zone.on('pointerout', () => drawBtn(false));
+      zone.on('pointerdown', callback);
+
+      this.npcActionContainer.add([btnGfx, text, zone]);
+    };
+
+    const leftX = -btnW / 2 - gap / 2;
+    const rightX = btnW / 2 + gap / 2;
+
+    makeBtn('💬 进行对话', leftX, () => {
+      if (this.currentNearbyNPC) {
+        this.triggerDialogue(this.currentNearbyNPC);
+      }
+    });
+
+    makeBtn('🎁 展示物品', rightX, () => {
+      if (this.currentNearbyNPC) {
+        const npcId = this.currentNearbyNPC.getData('npcId');
+        const npcName = this.currentNearbyNPC.getData('name');
+        this.events.emit('show-item:select', { npcId, npcName });
+      }
+    }, '#c0b898');
+  }
+
+  _showNPCActionButtons(npc) {
+    this.npcActionContainer.setPosition(npc.x, npc.y - 52);
+    this.npcActionContainer.setVisible(true);
+  }
+
+  _hideNPCActionButtons() {
+    this.npcActionContainer.setVisible(false);
+  }
+
   // ==================== NPC ====================
 
   createNPCs() {
@@ -955,7 +1090,7 @@ export class GameScene extends Phaser.Scene {
       this.player.setVelocity(0);
     }
 
-    // NPC 气泡跟随 + 接近检测
+    // NPC 气泡跟随 + 接近检测 + 交互按钮
     this.currentNearbyNPC = null;
     for (let i = 0; i < this.npcs.length; i++) {
       const npc = this.npcs[i];
@@ -968,20 +1103,44 @@ export class GameScene extends Phaser.Scene {
       );
       if (dist < 64) {
         this.currentNearbyNPC = npc;
-        this.interactHint.setText(`按 [F] 与 ${npc.getData('name')} 对话`);
-        this.interactHint.setPosition(npc.x, npc.y - 42);
-        this.interactHint.setVisible(true);
       }
     }
 
-    if (!this.currentNearbyNPC) {
+    if (this.currentNearbyNPC) {
+      this._hideNPCActionButtons(); // 先隐藏，下一帧定位后再显示
       this.interactHint.setVisible(false);
+      // 在NPC上方显示交互按钮（延后一帧确保位置正确）
+      if (!this.inputLocked) {
+        this._showNPCActionButtons(this.currentNearbyNPC);
+      } else {
+        this._hideNPCActionButtons();
+      }
+    } else {
+      this._hideNPCActionButtons();
     }
 
-    // F 键交互（仅非锁定状态）
+    // 物品接近检测（NPC 优先，NPC 范围内不显示物品提示）
+    this.currentNearbyItem = null;
+    if (!this.currentNearbyNPC) {
+      for (let i = 0; i < this.sceneItems.length; i++) {
+        const item = this.sceneItems[i];
+        const dist = Phaser.Math.Distance.Between(
+          this.player.x, this.player.y, item.x, item.y
+        );
+        if (dist < 48) {
+          this.currentNearbyItem = item;
+          this.interactHint.setText(`按 [F] 拾取 ${item.getData('name')}`);
+          this.interactHint.setPosition(item.x, item.y - 30);
+          this.interactHint.setVisible(true);
+          break;
+        }
+      }
+    }
+
+    // F 键交互（仅物品拾取；NPC 用按钮交互）
     if (!this.inputLocked && Phaser.Input.Keyboard.JustDown(this.wasd.F)) {
-      if (this.currentNearbyNPC) {
-        this.triggerDialogue(this.currentNearbyNPC);
+      if (this.currentNearbyItem) {
+        this.pickupItem(this.currentNearbyItem);
       }
     }
   }
@@ -994,6 +1153,51 @@ export class GameScene extends Phaser.Scene {
       name: npc.getData('name'),
       position: { col: tilePos.col, row: tilePos.row },
     });
+  }
+
+  /**
+   * 拾取场景物品（调用后端 discover API + Toast 动画 + 刷新背包）
+   */
+  async pickupItem(itemSprite) {
+    const itemId = itemSprite.getData('itemId');
+    const itemName = itemSprite.getData('name');
+    const sessionId = localStorage.getItem('__active_session__');
+    if (!sessionId) return;
+
+    this.events.emit('input:lock', true);
+    this.interactHint.setVisible(false);
+
+    try {
+      const { discoverItem } = await import('../api/client.js');
+      const result = await discoverItem(sessionId, itemId);
+
+      // 移除地图上的物品精灵
+      const idx = this.sceneItems.indexOf(itemSprite);
+      if (idx >= 0) this.sceneItems.splice(idx, 1);
+      this.currentNearbyItem = null;
+
+      // 淡出动画
+      this.tweens.add({
+        targets: itemSprite,
+        alpha: 0, y: itemSprite.y - 30, scaleX: 1.5, scaleY: 1.5,
+        duration: 400,
+        onComplete: () => itemSprite.destroy(),
+      });
+
+      if (result.already_discovered) {
+        this.showToast(`${itemName} 已在行囊中`);
+      } else {
+        // Toast 动画
+        this.showToast(`获得: ${itemName}`, 2500);
+        // 通知 UIScene 刷新背包
+        this.events.emit('item:discovered', result.item);
+      }
+    } catch (e) {
+      console.error('[GameScene] 拾取物品失败:', e);
+      this.showToast('拾取失败', 1500);
+    } finally {
+      this.events.emit('input:lock', false);
+    }
   }
 
   // ==================== 工具方法 ====================

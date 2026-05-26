@@ -4,7 +4,53 @@
 
 ---
 
-## 2025-05-26
+## 2026-05-26
+
+### 新增 (Added)
+
+#### NPC 交互按钮化 — 「进行对话」+「展示物品」
+
+**涉及文件：**
+- `frontend/src/scenes/GameScene.js`
+- `frontend/src/scenes/UIScene.js`
+- `frontend/src/api/client.js`
+
+**功能描述：**
+靠近 NPC 时不再显示简单的 "[F] 对话" 文字提示，改为两个可交互按钮。
+
+**GameScene.js 改动：**
+- `_createNPCActionButtons()`: 在 NPC 上方创建两个按钮容器，半透明深色背景条 + 圆角边框
+  - `💬 进行对话` (左) → 调用 `triggerDialogue()` 进入正常对话流程
+  - `🎁 展示物品` (右) → 发射 `show-item:select` 事件给 UIScene
+  - 支持悬停高亮效果（背景色、边框色变化）
+- `_showNPCActionButtons(npc)` / `_hideNPCActionButtons()`: 按钮定位在 NPC 头顶上方 52px
+- `update()` 中：靠近 NPC (<64px) 时显示按钮，远离或 `inputLocked` 时隐藏
+- F 键不再触发 NPC 对话，仅保留物品拾取功能
+
+**UIScene.js 改动：**
+- 新增 `showItemMode` / `showItemTargetNPC` 状态管理
+- 监听 `show-item:select` → `onShowItemSelect()`:
+  - 设置展示物品模式，记录目标 NPC
+  - 锁定 GameScene 输入，隐藏 NPC 按钮
+  - 打开背包面板，标题改为「—— 展示物品给 XXX ——」
+  - 底部提示切换为 `[Enter] 展示` + `[B] 取消`
+  - 右侧详情区显示「确认展示选中物品」按钮
+  - 背包为空时也打开面板（显示"空空如也"）
+- `confirmShowItem()`: 选中物品确认后，调用 `showItemToNpcStream()` 发起对话
+- `cancelShowItemMode()`: ESC / B / 点击 [B] 取消 / 点击遮罩 → 关闭背包，不触发对话
+- `update()` 中：背包打开时 Enter 键确认展示，W/S 选择物品，B/ESC 取消
+- **确认与选择分离**：鼠标点击物品行仅选中高亮，需 Enter 或点击"确认展示"按钮才触发对话
+- 未选择物品时关闭背包不触发任何对话
+
+**交互流程：**
+1. 靠近 NPC → 显示两个按钮
+2. 点击「💬 进行对话」→ 直接开始对话
+3. 点击「🎁 展示物品」→ 打开背包（展示物品模式）
+4. W/S 或鼠标选择物品 → 右侧显示详情
+5. Enter 或点击「确认展示选中物品」→ 调用 API 发起展示对话
+6. ESC / B / 点击取消 → 关闭背包，回归正常移动
+
+---
 
 ### 修复 (Fixed)
 

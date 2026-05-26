@@ -519,6 +519,25 @@ export async function getItems(sessionId) {
   return res.json();
 }
 
+export async function discoverItem(sessionId, itemId) {
+  if (USE_MOCK) {
+    const mock = MOCK_ITEMS.find(i => i.id === itemId);
+    return {
+      item_id: itemId,
+      already_discovered: false,
+      item: mock || { id: itemId, name: '未知物品', description: '', is_key: false },
+      discovery_narration: `你发现了「${mock?.name || '未知物品'}」。`,
+    };
+  }
+  const res = await fetch(`${BASE}/game/${sessionId}/item/discover`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ item_id: itemId }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
 // ========== 存档管理（后端 API）==========
 
 export async function getSessions() {
