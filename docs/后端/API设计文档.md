@@ -43,7 +43,7 @@ POST /api/game/{id}/chapter/start ← 前端调用，触发章节初始化
 | **AI 任务规划** | 每章开始时 LLM 根据剧本定义生成具体子任务 |
 | **NPC 共识投票** | 章节完成需多 NPC 投票确认 |
 
-### 1.4 API 总览（v2 共 15 个接口）
+### 1.4 API 总览（v2 共 16 个接口）
 
 | 模块 | 方法 | 路径 | 说明 |
 |------|------|------|------|
@@ -56,6 +56,7 @@ POST /api/game/{id}/chapter/start ← 前端调用，触发章节初始化
 | 游戏 | GET | `/api/game/{id}/events` | 事件时间线 |
 | 游戏 | DELETE | `/api/game/{id}` | 删除存档 |
 | 游戏 | GET | `/api/sessions` | 存档列表 |
+| 游戏 | POST | `/api/game/{id}/npc/position` | 上报 NPC 新位置 |
 | 章节 | POST | `/api/game/{id}/chapter/start` | 开始/推进章节（触发 LLM 任务规划） |
 | 章节 | GET | `/api/game/{id}/chapter` | 获取当前章节状态+任务进度 |
 | 章节 | GET | `/api/game/{id}/task` | 获取当前任务详情（子任务+投票） |
@@ -76,7 +77,25 @@ Content-Type: application/json; charset=utf-8
 字符编码:      UTF-8
 ```
 
-### 2.2 统一错误响应格式
+### 2.2 坐标约定
+
+**所有 API 中的 `position` 字段统一使用瓦片坐标（tile coordinate）：**
+
+```json
+{ "col": 43, "row": 16 }
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `col` | int | 列号，0 起，向右递增 |
+| `row` | int | 行号，0 起，向下递增 |
+
+- 后端不感知像素坐标，全部使用瓦片坐标
+- 前端通过 `COORD.toPixel(col, row)` 转换为像素坐标用于渲染
+- 前端通过 `COORD.toTile(px, py)` 将像素坐标转换为瓦片坐标
+- 详细规范见 `docs/_shared/坐标体系.md`
+
+### 2.3 统一错误响应格式
 
 ```json
 {
@@ -158,7 +177,7 @@ Content-Type: application/json; charset=utf-8
       "name": "陈师傅",
       "role": "老琴师",
       "scene": "teahouse",
-      "position": { "x": 688, "y": 256 },
+      "position": { "col": 43, "row": 16 },
       "sprite_key": "npc_chen_idle",
       "relationship": 20,
       "is_available": true,
@@ -297,6 +316,8 @@ Content-Type: application/json; charset=utf-8
         "title": "找到老戏院",
         "mode": "explore",
         "description": "在小镇上找到戏台的位置并进入",
+        "target_position": { "col": 48, "row": 8 },
+        "target_scene": "stage_ruin",
         "status": "active"
       },
       {
@@ -305,6 +326,7 @@ Content-Type: application/json; charset=utf-8
         "mode": "dialogue",
         "target_npc_id": "npc_xiaohua",
         "description": "在戏台内遇到小华，进行第一次对话",
+        "target_position": null,
         "status": "locked"
       }
     ],
@@ -380,6 +402,7 @@ Content-Type: application/json; charset=utf-8
         "mode": "explore",
         "description": "在小镇上找到戏台的位置并进入",
         "target_scene": "stage_ruin",
+        "target_position": { "col": 48, "row": 8 },
         "status": "completed"
       }
     ],
@@ -615,6 +638,37 @@ GET /api/game/sess_a1b2c3d4/relationships?npc_id=npc_chen
 }
 ```
 
+### 3.17 NPC 位置上报 — `POST /api/game/{session_id}/npc/position`
+
+**职责**: 前端在 NPC 移动动画完成后上报新位置，后端持久化以保证一致性。
+
+**Request**
+
+```json
+{
+  "npc_id": "npc_chen",
+  "position": { "col": 48, "row": 24 }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `npc_id` | string | 是 | NPC ID |
+| `position.col` | int | 是 | 新的列号 |
+| `position.row` | int | 是 | 新的行号 |
+
+**Response** `200 OK`
+
+```json
+{
+  "success": true,
+  "npc_id": "npc_chen",
+  "position": { "col": 48, "row": 24 }
+}
+```
+
+> **注意**: 后端应校验 `0 <= col < MAP_COLS` 且 `0 <= row < MAP_ROWS`。碰撞检测由前端处理，后端不参与。
+
 ---
 
 ## 四、完整调用时序（v2 章节驱动）
@@ -696,7 +750,7 @@ GET /api/game/sess_a1b2c3d4/relationships?npc_id=npc_chen
 
 | 维度 | v2.0（本文档范围） | 后续版本 |
 |------|-------------------|----------|
-| API 数量 | **16 个** | 扩展至 20+ 个 |
+| API 数量 | **17 个** | 扩展至 20+ 个 |
 | 章节系统 | 6 章线性推进 | 分支章节 + 多结局 |
 | 任务规划 | LLM 逐章规划 | 动态任务调整 + 失败回退 |
 | NPC 共识 | 投票机制 | NPC 主动行为 + 反目 |
@@ -709,7 +763,8 @@ GET /api/game/sess_a1b2c3d4/relationships?npc_id=npc_chen
 
 | 文件 | 对应接口 |
 |------|---------|
-| `mock/start_game.json` | `POST /api/game/start` |
-| `mock/game_state.json` | `GET /api/game/{id}` |
+| `frontend/src/api/client.js` | 所有接口（`USE_MOCK=true` 时使用内联 Mock） |
 | `mock/dialogue_sse.txt` | `POST /api/dialogue` |
 | `mock/evaluate.json` | `POST /api/game/{id}/evaluate` |
+
+> **注意**: Mock 数据仅用于开发降级，坐标格式已统一为 `{col, row}` 瓦片坐标。数据权威来源为 `data/scripts/liyuan_shengsi/`。
