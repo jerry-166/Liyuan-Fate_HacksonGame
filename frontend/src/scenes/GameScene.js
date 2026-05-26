@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { GAME } from '../config.js';
+import { GAME, COORD } from '../config.js';
 
 /**
  * 地图配置 — 小镇布局（严格参考 design.md Prompt 指南）
@@ -476,9 +476,11 @@ export class GameScene extends Phaser.Scene {
     const key = `__npc_${npcId}__`;
     gfx.generateTexture(key, nw, nh);
 
-    // 使用 API 返回的位置或默认位置
-    const posX = (stateNpc.position ? stateNpc.position.x : 43 * 16) || 43 * 16;
-    const posY = (stateNpc.position ? stateNpc.position.y : 16 * 16) || 16 * 16;
+    // 使用 API 返回的瓦片坐标或默认位置
+    const defaultPos = npcId === 'npc_chen' ? { col: 43, row: 16 } : { col: 11, row: 10 };
+    const col = stateNpc.position ? stateNpc.position.col : defaultPos.col;
+    const row = stateNpc.position ? stateNpc.position.row : defaultPos.row;
+    const { x: posX, y: posY } = COORD.toPixel(col || defaultPos.col, row || defaultPos.row);
 
     const sprite = this.physics.add.sprite(posX, posY, key);
     sprite.setData('npcId', npcId);
@@ -790,8 +792,7 @@ export class GameScene extends Phaser.Scene {
   // ==================== 玩家（16×32 Q 版风格占位）====================
 
   createPlayer() {
-    const startX = 44 * TILE;
-    const startY = 28 * TILE;
+    const { x: startX, y: startY } = COORD.toPixel(44, 28);
 
     // 按 design.md：16×32 px，Q版，头身比 1:2，棉麻衫（米白/浅蓝）
     const pw = 14; // 接近16的视觉宽度
@@ -842,8 +843,8 @@ export class GameScene extends Phaser.Scene {
 
   createNPCs() {
     const npcData = [
-      { id: 'npc_chen', name: '陈师傅', x: 43 * TILE, y: 16 * TILE, greeting: '……（低头擦琴，仿佛没看见你）' },
-      { id: 'npc_xiaohua', name: '小华', x: 11 * TILE, y: 10 * TILE, greeting: '你也是来看戏班笑话的吗？' },
+      { id: 'npc_chen', name: '陈师傅', ...COORD.toPixel(43, 16), greeting: '……（低头擦琴，仿佛没看见你）' },
+      { id: 'npc_xiaohua', name: '小华', ...COORD.toPixel(11, 10), greeting: '你也是来看戏班笑话的吗？' },
     ];
 
     npcData.forEach((npc) => {
@@ -986,11 +987,12 @@ export class GameScene extends Phaser.Scene {
   }
 
   triggerDialogue(npc) {
-    console.log(`[交互] 触发与 ${npc.getData('name')} (${npc.getData('npcId')}) 的对话`);
+    const tilePos = COORD.toTile(npc.x, npc.y);
+    console.log(`[交互] 触发与 ${npc.getData('name')} (${npc.getData('npcId')}) 的对话, tile=(${tilePos.col},${tilePos.row})`);
     this.events.emit('dialogue:start', {
       npcId: npc.getData('npcId'),
       name: npc.getData('name'),
-      position: { x: npc.x, y: npc.y },
+      position: { col: tilePos.col, row: tilePos.row },
     });
   }
 

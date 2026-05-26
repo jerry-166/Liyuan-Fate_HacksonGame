@@ -21,35 +21,35 @@ const MOCK_START = {
   npcs: [
     {
       id: 'npc_chen', name: '陈师傅', role: '老琴师', scene: 'teahouse',
-      position: { x: 688, y: 256 }, sprite_key: 'npc_chen_idle',
+      position: { col: 43, row: 16 }, sprite_key: 'npc_chen_idle',
       relationship: 20, is_available: true,
       current_greeting: '……（陈师傅低头擦拭琴弦，仿佛没看见你）',
       last_dialogue: '', last_options: [], dialogue_round_count: 0
     },
     {
       id: 'npc_xiaohua', name: '小华', role: '年轻学徒', scene: 'stage',
-      position: { x: 176, y: 160 }, sprite_key: 'npc_xiaohua_idle',
+      position: { col: 11, row: 10 }, sprite_key: 'npc_xiaohua_idle',
       relationship: 10, is_available: true,
       current_greeting: '你也是来看戏班笑话的吗？',
       last_dialogue: '', last_options: [], dialogue_round_count: 0
     },
     {
       id: 'npc_laozhou', name: '老周', role: '老艺人', scene: 'stage',
-      position: { x: 200, y: 140 }, sprite_key: 'npc_laozhou_idle',
+      position: { col: 9, row: 7 }, sprite_key: 'npc_laozhou_idle',
       relationship: 15, is_available: true,
       current_greeting: '（老人靠在柱子上打盹，偶尔咳嗽两声）',
       last_dialogue: '', last_options: [], dialogue_round_count: 0
     },
     {
       id: 'npc_meiyi', name: '梅姨', role: '茶馆老板娘', scene: 'teahouse',
-      position: { x: 620, y: 220 }, sprite_key: 'npc_meiyi_idle',
+      position: { col: 43, row: 18 }, sprite_key: 'npc_meiyi_idle',
       relationship: 5, is_available: true,
       current_greeting: '哎哟，新面孔啊？进来喝杯茶吧。',
       last_dialogue: '', last_options: [], dialogue_round_count: 0
     },
     {
       id: 'npc_laoli', name: '船夫老李', role: '船夫', scene: 'dock',
-      position: { x: 1040, y: 400 }, sprite_key: 'npc_laoli_idle',
+      position: { col: 65, row: 19 }, sprite_key: 'npc_laoli_idle',
       relationship: 5, is_available: true,
       current_greeting: '（蹲在船边抽旱烟，望着河水出神）',
       last_dialogue: '', last_options: [], dialogue_round_count: 0

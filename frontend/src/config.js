@@ -43,3 +43,46 @@ export const CHAPTER_MAP = {
   'ch_04': 5,
   'ch_05': 6,
 };
+
+/** 坐标转换工具 — 瓦片坐标 ↔ 像素坐标 */
+export const COORD = {
+  /**
+   * 瓦片坐标 → 像素坐标（渲染用）
+   * @param {number} col 列号
+   * @param {number} row 行号
+   * @returns {{x: number, y: number}}
+   */
+  toPixel(col, row) {
+    return {
+      x: col * GAME.TILE_SIZE,
+      y: row * GAME.TILE_SIZE,
+    };
+  },
+
+  /**
+   * 像素坐标 → 瓦片坐标（碰撞/判定用）
+   * @param {number} pixelX
+   * @param {number} pixelY
+   * @returns {{col: number, row: number}}
+   */
+  toTile(pixelX, pixelY) {
+    return {
+      col: Math.floor(pixelX / GAME.TILE_SIZE),
+      row: Math.floor(pixelY / GAME.TILE_SIZE),
+    };
+  },
+
+  /**
+   * 瓦片中心像素坐标（实体放置用，居中于格子）
+   * @param {number} col
+   * @param {number} row
+   * @returns {{x: number, y: number}}
+   */
+  toPixelCenter(col, row) {
+    const half = GAME.TILE_SIZE / 2;
+    return {
+      x: col * GAME.TILE_SIZE + half,
+      y: row * GAME.TILE_SIZE + half,
+    };
+  },
+};
