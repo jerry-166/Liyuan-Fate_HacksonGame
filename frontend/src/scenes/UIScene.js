@@ -560,7 +560,7 @@ export class UIScene extends Phaser.Scene {
       await this.processDialogueStream(stream);
     } catch (err) {
       console.error('[UIScene] 自由输入对话失败:', err);
-      this.dialogText.setText('【网络开小差了，请重试】');
+      this.dialogText.setText(`【${err.message || '网络开小差了，请重试'}】`);
       this.dialogHint.setText('[F] 关闭');
     }
   }
@@ -1310,7 +1310,7 @@ export class UIScene extends Phaser.Scene {
       await this.processDialogueStream(stream);
     } catch (err) {
       console.error('[UIScene] 对话请求失败:', err);
-      this.dialogText.setText('【网络开小差了，请重试】');
+      this.dialogText.setText(`【${err.message || '网络开小差了，请重试'}】`);
       this.dialogHint.setText('[F] 关闭');
     }
   }
@@ -1343,7 +1343,7 @@ export class UIScene extends Phaser.Scene {
       await this.processDialogueStream(stream);
     } catch (err) {
       console.error('[UIScene] 续接对话失败:', err);
-      this.dialogText.setText('【网络开小差了，请重试】');
+      this.dialogText.setText(`【${err.message || '网络开小差了，请重试'}】`);
       this.dialogHint.setText('[F] 关闭');
     }
   }

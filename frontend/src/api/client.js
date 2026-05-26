@@ -4,6 +4,27 @@
  */
 const BASE = '/api';
 
+/**
+ * 从 HTTP 错误响应中提取人类可读的错误消息。
+ * 后端返回 FastAPI 格式：{"detail": {"error": true, "code": "...", "message": "..."}}
+ */
+async function _extractApiError(res) {
+  try {
+    const body = await res.json();
+    const msg = body?.detail?.message;
+    if (msg) return msg;
+    // fallback: 直接用 HTTP 状态码
+    return `服务器错误 (${res.status})`;
+  } catch {
+    // 非 JSON 响应体，回退到纯文本
+    try {
+      return await res.text() || `服务器错误 (${res.status})`;
+    } catch {
+      return `服务器错误 (${res.status})`;
+    }
+  }
+}
+
 // ========== Mock 数据（v2 格式）==========
 
 const MOCK_START = {
@@ -429,7 +450,7 @@ export async function startDialogueStream(sessionId, npcId, playerMessage = null
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ session_id: sessionId, npc_id: npcId, player_message: playerMessage })
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) throw new Error(await _extractApiError(res));
   return res.body;
 }
 
@@ -443,7 +464,7 @@ export async function showItemToNpcStream(sessionId, npcId, itemId, playerMessag
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ session_id: sessionId, npc_id: npcId, item_id: itemId, player_message: playerMessage })
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) throw new Error(await _extractApiError(res));
   return res.body;
 }
 
