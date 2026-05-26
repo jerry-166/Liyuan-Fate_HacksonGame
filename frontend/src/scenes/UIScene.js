@@ -102,6 +102,23 @@ export class UIScene extends Phaser.Scene {
       }
     });
 
+    // 点击输入框外部区域时自动失焦
+    document.getElementById('game-container').addEventListener('mousedown', (e) => {
+      if (this.freeInput && this.freeInput.style.display === 'block' &&
+          e.target !== this.freeInput && !this.freeInput.contains(e.target)) {
+        this.freeInput.blur();
+      }
+    });
+
+    // 确保输入框在 game-container 中（fixed 定位需要与 canvas 同级，避免被遮挡）
+    const gameContainer = document.getElementById('game-container');
+    if (gameContainer && this.freeInput.parentElement !== gameContainer) {
+      gameContainer.appendChild(this.freeInput);
+    }
+
+    // 监听 Phaser 缩放变化，实时重定位输入框
+    this.scale.on('resize', this._onScaleResize, this);
+
     this.createDialogPanel();
     this.createHUD();
     this.createHistoryPanel();
@@ -214,6 +231,11 @@ export class UIScene extends Phaser.Scene {
       this.historyPanel.setVisible(true);
       // 历史面板打开时禁用对话框点击，避免误触发翻页
       this.dialogClickZone.disableInteractive();
+      // 历史面板打开时隐藏输入框并失焦（防止 DOM 输入框浮在历史面板之上）
+      if (this.freeInput) {
+        this.freeInput.blur();
+        this.freeInput.style.display = 'none';
+      }
       // 历史面板打开时锁定 WASD 移动输入
       const gameScene = this.scene.get('GameScene');
       if (gameScene) gameScene.events.emit('input:lock', true);
@@ -223,6 +245,11 @@ export class UIScene extends Phaser.Scene {
       if (this.dialogActive && !this.isStreaming && this.dialogPages.length > 1 &&
           this.dialogCurrentPage < this.dialogPages.length - 1) {
         this.dialogClickZone.setInteractive({ useHandCursor: true });
+      }
+      // 关闭历史面板时，若对话仍在且选项已显示，恢复输入框
+      if (this.dialogActive && !this.isStreaming && this.pendingOptions !== null &&
+          !this.pauseMenuVisible) {
+        this.showFreeInput();
       }
       // 关闭历史面板时，若当前没有活跃对话则恢复 WASD 移动
       if (!this.dialogActive) {
@@ -490,7 +517,9 @@ export class UIScene extends Phaser.Scene {
   }
 
   /**
-   * 显示自由文本输入框
+   * 显示自由文本输入框（fixed 定位，直接对齐 viewport 中的对话框）
+   * canvas.getBoundingClientRect() 返回 viewport 坐标；
+   * 输入框使用 fixed 定位，left/top 也是 viewport 坐标，两者天然对齐。
    */
   showFreeInput() {
     if (!this.freeInput || !this.dialogContainer.visible) return;
@@ -500,14 +529,15 @@ export class UIScene extends Phaser.Scene {
       w: width - 80, h: 250,
     };
     const { x: panelX, y: panelY, w: panelW, h: panelH } = da;
-    const inputY = panelY + panelH - 38;
+    const inputY = panelY + panelH - 36;
 
-    // 获取 canvas 在页面中的实际位置和缩放
     const canvas = this.sys.game.canvas;
     const rect = canvas.getBoundingClientRect();
     const scaleX = rect.width / width;
     const scaleY = rect.height / height;
-    const left = rect.left + panelX * scaleX + 20 * scaleX;
+
+    // fixed 定位：left/top 直接使用 viewport 像素，与 getBoundingClientRect() 坐标系一致
+    const left = rect.left + (panelX + 20) * scaleX;
     const top = rect.top + inputY * scaleY;
     const iw = (panelW - 40) * scaleX;
 
@@ -515,7 +545,7 @@ export class UIScene extends Phaser.Scene {
     this.freeInput.style.left = `${left}px`;
     this.freeInput.style.top = `${top}px`;
     this.freeInput.style.width = `${iw}px`;
-    this.freeInput.style.fontSize = `${13 * scaleY}px`;
+    this.freeInput.style.fontSize = `${14 * scaleY}px`;
     this.freeInput.value = '';
     this.freeInput.placeholder = '输入你想说的话……';
     setTimeout(() => this.freeInput.focus(), 100);
@@ -526,6 +556,7 @@ export class UIScene extends Phaser.Scene {
    */
   hideFreeInput() {
     if (this.freeInput) {
+      this.freeInput.blur();
       this.freeInput.style.display = 'none';
       this.freeInput.value = '';
     }
@@ -1743,6 +1774,23 @@ export class UIScene extends Phaser.Scene {
       getGameState(this.sessionId)
         .then(state => this.scene.get('GameScene').events.emit('state:refresh', state))
         .catch(() => {});
+    }
+  }
+
+  /**
+   * Phaser 缩放变化时重定位输入框
+   */
+  _onScaleResize() {
+    if (this.freeInput && this.freeInput.style.display === 'block') {
+      this.showFreeInput();
+    }
+  }
+
+  shutdown() {
+    this.scale.off('resize', this._onScaleResize, this);
+    if (this.freeInput) {
+      this.freeInput.blur();
+      this.freeInput.style.display = 'none';
     }
   }
 

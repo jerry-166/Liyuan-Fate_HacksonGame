@@ -29,20 +29,20 @@ const config = {
 
 const game = new Phaser.Game(config);
 
-// ========== 全局自由文本输入框（HTML DOM，覆盖在 Canvas 上）==========
+// ========== 全局自由文本输入框（HTML DOM，嵌入对话框内）==========
 export function createGlobalInput() {
   const el = document.createElement('input');
   el.type = 'text';
   el.id = 'game-free-input';
   el.placeholder = '输入你想说的话……';
   el.style.cssText = `
-    position: absolute; display: none; z-index: 1000;
+    position: fixed; display: none; z-index: 350;
     font-family: "Microsoft YaHei","PingFang SC",sans-serif;
     font-size: 14px; color: #e8dcc8;
-    background: #1a1820; border: 1px solid #443322;
+    background: #16161e; border: none;
     border-top: 1px solid #c4a882;
-    border-radius: 0 0 6px 6px; padding: 6px 12px;
-    outline: none; width: 520px; box-sizing: border-box;
+    border-radius: 0 0 6px 6px; padding: 6px 12px; margin: 0;
+    outline: none; box-sizing: border-box;
   `;
   document.getElementById('game-container').appendChild(el);
   return el;
