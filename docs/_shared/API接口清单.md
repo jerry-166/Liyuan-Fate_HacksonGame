@@ -1,6 +1,6 @@
 # API 接口清单（单一真相源）
 
-> 所有文档引用本文件获取完整的 API 接口列表。共 **15 个接口**。
+> 所有文档引用本文件获取完整的 API 接口列表。共 **24 个接口**。
 
 ## 游戏会话
 
@@ -31,5 +31,29 @@
 | 13 | `POST` | `/api/dialogue` | NPC 对话交互（支持自由文本和选项） | SSE 流式 |
 | 14 | `POST` | `/api/dialogue/show-item` | 向 NPC 展示物品（注入物品上下文） | SSE 流式 |
 | 15 | `POST` | `/api/dialogue/exit` | 显式退出 NPC 对话 | JSON |
+
+## NPC 管理
+
+| # | 方法 | 路径 | 职责 | 响应方式 |
+|---|------|------|------|----------|
+| 16 | `POST` | `/api/game/{id}/npc/position` | 单个 NPC 位置上报（移动完成） | JSON |
+| 17 | `POST` | `/api/game/{id}/npc/positions/batch` | 批量同步 NPC 位置（场景切换/存档） | JSON |
+| 18 | `POST` | `/api/game/{id}/npc/spawn` | 运行时动态生成临时 NPC | JSON |
+
+## 物品
+
+| # | 方法 | 路径 | 职责 | 响应方式 |
+|---|------|------|------|----------|
+| 19 | `GET` | `/api/game/{id}/items` | 获取物品清单（inventory背包 + scene_items场景） | JSON |
+| 20 | `GET` | `/api/game/{id}/item/{item_id}` | 查看单个物品完整详情 | JSON |
+| 21 | `POST` | `/api/game/{id}/item/discover` | 发现/拾取物品（标记+AI旁白+入包） | JSON |
+
+## 编辑（普通 NPC 管理）
+
+| # | 方法 | 路径 | 职责 | 响应方式 |
+|---|------|------|------|----------|
+| 22 | `GET` | `/api/scripts/{id}/town-npcs` | 查询普通 NPC 列表 | JSON |
+| 23 | `POST` | `/api/scripts/{id}/town-npcs` | 批量创建/覆盖普通 NPC | JSON |
+| 24 | `DELETE` | `/api/scripts/{id}/town-npcs/{nid}` | 删除普通 NPC | JSON |
 
 > 各接口的详细请求/响应格式见 [后端/API设计文档.md](../后端/API设计文档.md)。

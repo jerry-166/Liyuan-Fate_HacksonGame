@@ -1,0 +1,25 @@
+# ── 新图上线后，请填写以下位置的 tile 坐标 ──
+
+# 关键地标（用于子场景入口判定）
+landmarks:
+  teahouse_entrance: {col: ___, row: ___}    # 茶馆门口（进入子场景的传送点）
+  stage_entrance:    {col: ___, row: ___}    # 戏台入口
+  dock_area:         {col: ___, row: ___}    # 码头区域
+  temple_entrance:   {col: ___, row: ___}    # 祠堂入口
+  father_house:      {col: ___, row: ___}    # 父亲旧居
+
+# NPC 初始位置（对应 meta.yaml）
+npc_positions:
+  npc_chen:    {col: ___, row: ___}    # 陈师傅（茶馆内）
+  npc_xiaohua: {col: ___, row: ___}    # 小华（戏台区域）
+  npc_laozhou:{col: ___, row: ___}    # 老周（戏台区域）
+  npc_meiyi:  {col: ___, row: ___}    # 梅姨（茶馆内）
+  npc_laoli:  {col: ___, row: ___}    # 船夫（码头）
+
+# 玩家出生点
+player_spawn: {col: ___, row: ___}    # 当前是 (44, 28)
+
+# 地图参数（如果变了）
+# map_cols: 80        # 总列数
+# map_rows: 50        # 总行数  
+# tile_size_px: 16    # 每格像素数

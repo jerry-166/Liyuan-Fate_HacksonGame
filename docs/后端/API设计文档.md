@@ -43,7 +43,7 @@ POST /api/game/{id}/chapter/start ← 前端调用，触发章节初始化
 | **AI 任务规划** | 每章开始时 LLM 根据剧本定义生成具体子任务 |
 | **NPC 共识投票** | 章节完成需多 NPC 投票确认 |
 
-### 1.4 API 总览（v2 共 16 个接口）
+### 1.4 API 总览（v2 共 24 个接口）
 
 | 模块 | 方法 | 路径 | 说明 |
 |------|------|------|------|
@@ -57,13 +57,21 @@ POST /api/game/{id}/chapter/start ← 前端调用，触发章节初始化
 | 游戏 | DELETE | `/api/game/{id}` | 删除存档 |
 | 游戏 | GET | `/api/sessions` | 存档列表 |
 | 游戏 | POST | `/api/game/{id}/npc/position` | 上报 NPC 新位置 |
+| 游戏 | POST | `/api/game/{id}/npc/positions/batch` | 批量同步 NPC 位置 |
+| 游戏 | POST | `/api/game/{id}/npc/spawn` | 运行时生成临时 NPC |
 | 章节 | POST | `/api/game/{id}/chapter/start` | 开始/推进章节（触发 LLM 任务规划） |
 | 章节 | GET | `/api/game/{id}/chapter` | 获取当前章节状态+任务进度 |
 | 章节 | GET | `/api/game/{id}/task` | 获取当前任务详情（子任务+投票） |
 | 对话 | POST | `/api/dialogue` | NPC 对话（SSE 流式） |
 | 对话 | POST | `/api/dialogue/show-item` | 向 NPC 展示物品（SSE 流式） |
 | 对话 | POST | `/api/dialogue/exit` | 退出对话 |
-| 物品 | GET | `/api/game/{id}/items` | 获取已发现物品列表 |
+| 物品 | GET | `/api/game/{id}/items` | 获取物品清单（背包+场景） |
+| 物品 | GET | `/api/game/{id}/item/{item_id}` | 查看单个物品详情 |
+| 物品 | POST | `/api/game/{id}/item/discover` | 发现物品（标记+AI旁白） |
+| 编剧 | GET | `/api/scripts/{id}/town-npcs` | 查询普通 NPC 列表 |
+| 编剧 | POST | `/api/scripts/{id}/town-npcs` | 批量创建/覆盖普通 NPC |
+| 编剧 | DELETE | `/api/scripts/{id}/town-npcs/{nid}` | 删除普通 NPC |
+| 编剧 | PUT | `/api/scripts/{id}/town-npcs/{nid}` | 更新普通 NPC 配置 |
 
 ---
 
@@ -109,6 +117,7 @@ Content-Type: application/json; charset=utf-8
 | 错误码 | 说明 |
 |--------|------|
 | `SESSION_NOT_FOUND` | session_id 不存在或已删除 |
+| `SCRIPT_NOT_FOUND` | script_id 对应的剧本目录不存在 |
 | `NPC_NOT_FOUND` | npc_id 不存在 |
 | `NPC_NOT_AVAILABLE` | NPC 当前不可交互 |
 | `GAME_ENDED` | 游戏已结束 |
@@ -529,27 +538,143 @@ Content-Type: application/json; charset=utf-8
 }
 ```
 
-### 3.11 物品列表 — `GET /api/game/{session_id}/items`
+### 3.11 物品清单 — `GET /api/game/{session_id}/items`
 
-**职责**: 获取当前已发现/已获取的物品列表。
+**职责**: 获取物品清单，分为背包（已发现可持有）和场景物品（当前章节可发现但尚未拾取）。
 
 **Response** `200 OK`
 
 ```json
 {
-  "items": [
+  "inventory": [
     {
       "id": "item_urn",
       "name": "父亲的骨灰盒",
-      "description": "一个简朴的深色木盒",
-      "is_key": false,
+      "item_type": "key",
+      "base_description": "一个简朴的深色木盒，里面装着父亲柳三秋的骨灰。",
+      "ai_detail": null,
+      "ai_detail_locked": false,
+      "is_key": true,
       "is_discovered": true,
-      "location": { "scene": "cemetery" }
+      "location": { "scene": "cemetery" },
+      "discovery_context": "你在坟前找到了它，木盒还带着雨水的湿润。",
+      "related_npcs": [],
+      "holdable": true,
+      "acquire_method": "explore"
     }
   ],
-  "total": 1
+  "scene_items": [
+    {
+      "item_id": "item_child_costume",
+      "name": "小孩戏服",
+      "location": { "scene": "stage_ruin", "position": { "col": 10, "row": 12 } },
+      "acquire_method": "click"
+    }
+  ]
 }
 ```
+
+| 字段 | 说明 |
+|------|------|
+| `inventory` | 背包中已发现的物品（完整 NarrativeItem 详情） |
+| `scene_items` | 当前章节可发现但尚未拾取的物品（摘要） |
+
+### 3.11a 物品详情 — `GET /api/game/{session_id}/item/{item_id}`
+
+**职责**: 查看单个物品完整详情，背包中已发现的返回完整运行时信息，场景中未发现的返回静态定义。
+
+**Response** `200 OK` — 已发现（背包中）
+
+```json
+{
+  "item_id": "item_urn",
+  "from": "inventory",
+  "item": {
+    "id": "item_urn",
+    "name": "父亲的骨灰盒",
+    "item_type": "key",
+    "base_description": "一个简朴的深色木盒...",
+    "ai_detail": "盒盖上刻着柳三秋三个字，已经有些模糊了。",
+    "ai_detail_locked": true,
+    "is_key": true,
+    "is_discovered": true,
+    "discovery_context": "你在坟前找到了它...",
+    "related_npcs": [],
+    "holdable": true,
+    "location": { "scene": "cemetery" },
+    "acquire_method": "explore"
+  }
+}
+```
+
+**Response** `200 OK` — 未发现（场景中）
+
+```json
+{
+  "item_id": "item_child_costume",
+  "from": "scene",
+  "is_discovered": false,
+  "item": {
+    "id": "item_child_costume",
+    "name": "小孩戏服",
+    "base_description": "一件褪色的京剧童装，上面绣着精致的花纹。",
+    "item_type": "misc",
+    "is_key": false,
+    "is_discovered": false,
+    "holdable": true,
+    "location": { "scene": "stage_ruin", "position": { "col": 10, "row": 12 } },
+    "acquire_method": "click",
+    "related_npcs": ["npc_chen"],
+    "stage_relevance": [1, 2]
+  }
+}
+```
+
+### 3.11b 发现物品 — `POST /api/game/{session_id}/item/discover`
+
+**职责**: 拾取/发现物品，标记为已发现，触发 LLM 生成发现旁白，加入背包并持久化。幂等——已发现的物品直接返回。
+
+**Request**
+
+```json
+{
+  "item_id": "item_child_costume"
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `item_id` | string | 是 | 物品 ID |
+
+**Response** `200 OK` — 新发现
+
+```json
+{
+  "item_id": "item_child_costume",
+  "already_discovered": false,
+  "item": {
+    "id": "item_child_costume",
+    "name": "小孩戏服",
+    "base_description": "一件褪色的京剧童装...",
+    "is_discovered": true,
+    "holdable": true,
+    ...
+  },
+  "discovery_narration": "你拾起那件褪色的戏服，袖口已经磨损，但绣在上面的金线龙纹依然清晰可见。三十年前的梨园盛景，仿佛还在这件衣衫上残留着余温。"
+}
+```
+
+**Response** `200 OK` — 已发现（幂等）
+
+```json
+{
+  "item_id": "item_child_costume",
+  "already_discovered": true,
+  "item": { ... }
+}
+```
+
+> `discovery_narration` 由 LLM 根据物品定义 + 当前游戏上下文生成。生成失败时兜底为 `"你发现了「物品名」。"`。
 
 ### 3.12 存档列表 — `GET /api/sessions`
 
@@ -669,6 +794,209 @@ GET /api/game/sess_a1b2c3d4/relationships?npc_id=npc_chen
 
 > **注意**: 后端应校验 `0 <= col < MAP_COLS` 且 `0 <= row < MAP_ROWS`。碰撞检测由前端处理，后端不参与。
 
+### 3.18 批量 NPC 位置同步 — `POST /api/game/{session_id}/npc/positions/batch`
+
+**职责**: 场景切换或存档时将全部 NPC 位置一次上报，避免多次请求。
+
+**Request**
+
+```json
+{
+  "scene": "town",
+  "trigger": "subscene_enter",
+  "positions": [
+    { "npc_id": "npc_chen",    "position": { "col": 45, "row": 18 } },
+    { "npc_id": "npc_meiyi",   "position": { "col": 40, "row": 13 } },
+    { "npc_id": "npc_xiaohua", "position": { "col": 12, "row": 11 } },
+    { "npc_id": "town_001",    "position": { "col": 32, "row": 42 }, "scene": "market" }
+  ]
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `scene` | string | 否 | 当前场景标识 |
+| `trigger` | string | 否 | 触发原因: `subscene_enter` / `subscene_exit` / `save` |
+| `positions[].npc_id` | string | 是 | NPC ID |
+| `positions[].position` | object | 是 | 瓦片坐标 `{col, row}` |
+| `positions[].scene` | string | 否 | 更新 NPC 所在场景 |
+
+**Response** `200 OK`
+
+```json
+{
+  "success": true,
+  "updated_count": 4,
+  "errors": null,
+  "scene": "town",
+  "trigger": "subscene_enter"
+}
+```
+
+> `errors` 字段为非空数组时，列出未能更新的 NPC 及原因（坐标越界 / NPC 不存在）。
+
+### 3.19 运行时生成临时 NPC — `POST /api/game/{session_id}/npc/spawn`
+
+**职责**: 在游戏进行中动态生成临时 NPC（如剧情触发的过路客），不持久化到 YAML 数据源。
+
+**Request**
+
+```json
+{
+  "name": "神秘过客",
+  "sprite": "traveler_m",
+  "position": { "col": 50, "row": 35 },
+  "scene": "town",
+  "is_temporary": true,
+  "greeting": "这位先生请留步……",
+  "role": "过路人",
+  "movement_enabled": true,
+  "movement_speed": 25,
+  "idle_range": [3, 8],
+  "wander_range": [4, 12]
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `name` | string | 是 | NPC 显示名称 |
+| `sprite` | string | 否 | 精灵图 key |
+| `position` | object | 是 | 瓦片坐标 |
+| `scene` | string | 否 | 所在场景，默认 "town" |
+| `is_temporary` | bool | 否 | 标记为临时 NPC，默认 true |
+| `greeting` | string | 否 | 初始问候语 |
+| `role` | string | 否 | 角色描述 |
+| `movement_enabled` | bool | 否 | 是否启用自由移动 |
+| `movement_speed` | int | 否 | 移动速度（秒/步） |
+| `idle_range` | int[] | 否 | 原地待机时间范围 [min, max] |
+| `wander_range` | int[] | 否 | 漫游间隔范围 [min, max] |
+
+**Response** `201 Created`
+
+```json
+{
+  "success": true,
+  "npc_id": "npc_temp_a1b2c3",
+  "name": "神秘过客",
+  "position": { "col": 50, "row": 35 },
+  "scene": "town",
+  "is_temporary": true
+}
+```
+
+> `npc_id` 由后端自动生成（`npc_temp_` 前缀），前端需记录此 ID 用于后续交互。
+
+### 3.20 查询普通 NPC 列表 — `GET /api/scripts/{script_id}/town-npcs`
+
+**职责**: 获取指定剧本中所有普通 NPC（路人/商贩等非剧情关键角色）的配置列表。
+
+**Response** `200 OK`
+
+```json
+{
+  "script_id": "liyuan_shengsi",
+  "town_npcs": [
+    {
+      "id": "town_001",
+      "name": "卖菜大婶",
+      "sprite": "vendor_f",
+      "position": { "col": 30, "row": 40 },
+      "scene": "town",
+      "greeting": "新鲜的青菜嘞——",
+      "role": "菜贩",
+      "movement": {
+        "enabled": true,
+        "speed": 30,
+        "idle_range": [3, 8],
+        "wander_range": [4, 12]
+      }
+    }
+  ],
+  "total": 1
+}
+```
+
+### 3.21 批量创建/覆盖普通 NPC — `POST /api/scripts/{script_id}/town-npcs`
+
+**职责**: 地图编辑器/开发阶段批量创建普通 NPC，写入 `meta.yaml` 的 `town_npcs` 列表（**全量覆盖**）。
+
+**Request**
+
+```json
+{
+  "town_npcs": [
+    {
+      "name": "卖菜大婶",
+      "sprite": "vendor_f",
+      "position": { "col": 30, "row": 40 },
+      "scene": "town",
+      "greeting": "新鲜的青菜嘞——",
+      "role": "菜贩",
+      "movement_enabled": true,
+      "movement_speed": 30,
+      "idle_range": [3, 8],
+      "wander_range": [4, 12]
+    }
+  ]
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `town_npcs[].name` | string | 是 | NPC 名称 |
+| `town_npcs[].sprite` | string | 否 | 精灵图 key |
+| `town_npcs[].position` | object | 是 | 瓦片坐标 |
+| `town_npcs[].scene` | string | 否 | 所在场景 |
+| `town_npcs[].greeting` | string | 否 | 问候语 |
+
+**Response** `201 Created`
+
+```json
+{
+  "success": true,
+  "created": [{ "id": "town_001", "name": "卖菜大婶", ... }],
+  "total": 1
+}
+```
+
+> **注意**: 此接口**全量替换**已有的 `town_npcs` 列表。如需增量添加，前端需先 GET 获取当前列表，合并后再 POST。
+
+### 3.22 删除普通 NPC — `DELETE /api/scripts/{script_id}/town-npcs/{npc_id}`
+
+**Response** `200 OK`
+
+```json
+{ "success": true, "message": "已删除普通 NPC: town_001" }
+```
+
+### 3.23 更新普通 NPC — `PUT /api/scripts/{script_id}/town-npcs/{npc_id}`
+
+**职责**: 部分更新普通 NPC 配置，只传需要修改的字段。
+
+**Request**（所有字段可选）
+
+```json
+{
+  "name": "卖菜大妈",
+  "position": { "col": 32, "row": 41 },
+  "movement_enabled": false
+}
+```
+
+**Response** `200 OK`
+
+```json
+{
+  "success": true,
+  "npc": {
+    "id": "town_001",
+    "name": "卖菜大妈",
+    "position": { "col": 32, "row": 41 },
+    ...
+  }
+}
+```
+
 ---
 
 ## 四、完整调用时序（v2 章节驱动）
@@ -750,7 +1078,7 @@ GET /api/game/sess_a1b2c3d4/relationships?npc_id=npc_chen
 
 | 维度 | v2.0（本文档范围） | 后续版本 |
 |------|-------------------|----------|
-| API 数量 | **17 个** | 扩展至 20+ 个 |
+| API 数量 | **24 个** | 扩展至 26+ 个 |
 | 章节系统 | 6 章线性推进 | 分支章节 + 多结局 |
 | 任务规划 | LLM 逐章规划 | 动态任务调整 + 失败回退 |
 | NPC 共识 | 投票机制 | NPC 主动行为 + 反目 |

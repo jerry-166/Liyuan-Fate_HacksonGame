@@ -92,6 +92,12 @@ MAX_DIALOGUE_ROUNDS: int = int(os.getenv("MAX_DIALOGUE_ROUNDS", "10"))
 SESSION_TTL_SECONDS: float = float(os.getenv("SESSION_TTL_SECONDS", "7200"))
 DB_PATH: str = os.getenv("DB_PATH", os.path.join(os.path.dirname(__file__), "game.db"))
 
+# ─── 地图配置 ───────────────────────────────────────────
+
+MAP_COLS: int = 80
+MAP_ROWS: int = 50
+TILE_SIZE: int = 32
+
 # ─── 剧本路径 ───────────────────────────────────────────
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "data")
