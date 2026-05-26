@@ -15,6 +15,7 @@ from state.session import GameSession
 from llm.client import LLMClient
 from agents.prompt_builder import PromptBuilder
 from agents.npc_agent import AgentOrchestrator
+from agents.content_moderator import moderate_input
 from state.chapter_engine import ChapterEngine
 
 router = APIRouter()
@@ -86,6 +87,15 @@ async def dialogue(req: DialogueRequest, raw_request: Request):
             "error": True, "code": "GAME_ENDED",
             "message": "游戏已结束"
         })
+
+    # 输入内容审核
+    if req.player_message:
+        mod_result = moderate_input(req.player_message)
+        if not mod_result.safe:
+            raise HTTPException(status_code=400, detail={
+                "error": True, "code": "CONTENT_BLOCKED",
+                "message": mod_result.reason,
+            })
 
     orchestrator = _get_orchestrator(session)
 
@@ -181,10 +191,18 @@ async def show_item(req: ShowItemRequest, raw_request: Request):
             "message": f"NPC 不存在: {req.npc_id}"
         })
 
-    orchestrator = _get_orchestrator(session)
-
     # 构造带物品提示的玩家消息
     message = req.player_message or f"（向{session.npcs[req.npc_id].name}展示了{item.name}）"
+
+    # 输入内容审核
+    mod_result = moderate_input(message)
+    if not mod_result.safe:
+        raise HTTPException(status_code=400, detail={
+            "error": True, "code": "CONTENT_BLOCKED",
+            "message": mod_result.reason,
+        })
+
+    orchestrator = _get_orchestrator(session)
 
     async def event_stream():
         try:

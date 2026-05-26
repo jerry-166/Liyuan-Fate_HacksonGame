@@ -73,8 +73,7 @@ class NPCAgent:
             if len(current_dialogue) > prev_dialogue_len:
                 new_chars = current_dialogue[prev_dialogue_len:]
                 prev_dialogue_len = len(current_dialogue)
-                for ch in new_chars:
-                    yield ("token", ch)
+                yield ("token", new_chars)
 
         result = parse_dialogue_response(full_text)
         self._apply_result(session, npc_id, result, player_message, full_text)
