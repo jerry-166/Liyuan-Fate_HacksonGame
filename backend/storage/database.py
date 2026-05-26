@@ -50,6 +50,9 @@ class Database:
             "ALTER TABLE sessions ADD COLUMN current_chapter_id TEXT",
             "ALTER TABLE sessions ADD COLUMN script_id TEXT DEFAULT 'liyuan_shengsi'",
             "ALTER TABLE sessions ADD COLUMN active_item TEXT",
+            "ALTER TABLE npc_states ADD COLUMN position_col INTEGER DEFAULT 0",
+            "ALTER TABLE npc_states ADD COLUMN position_row INTEGER DEFAULT 0",
+            "ALTER TABLE npc_states ADD COLUMN scene TEXT NOT NULL DEFAULT ''",
         ]
         with self._conn() as conn:
             for sql in migrations:
@@ -256,47 +259,63 @@ class Database:
 
     def save_npc_state(self, session_id: str, npc_id: str, relationship: int = 0,
                        is_available: bool = True, current_greeting: str = "",
-                       dialogue_round_count: int = 0) -> None:
+                       dialogue_round_count: int = 0,
+                       position_col: int = 0, position_row: int = 0,
+                       scene: str = "") -> None:
         with self._conn() as conn:
             conn.execute(
                 "INSERT INTO npc_states (session_id, npc_id, relationship, is_available, "
-                "current_greeting, dialogue_round_count, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                "current_greeting, dialogue_round_count, position_col, position_row, scene, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
                 "ON CONFLICT(session_id, npc_id) DO UPDATE SET "
                 "relationship = excluded.relationship, "
                 "is_available = excluded.is_available, "
                 "current_greeting = excluded.current_greeting, "
                 "dialogue_round_count = excluded.dialogue_round_count, "
+                "position_col = excluded.position_col, "
+                "position_row = excluded.position_row, "
+                "scene = excluded.scene, "
                 "updated_at = CURRENT_TIMESTAMP",
                 (session_id, npc_id, relationship, 1 if is_available else 0,
-                 current_greeting, dialogue_round_count),
+                 current_greeting, dialogue_round_count, position_col, position_row, scene),
             )
 
     def save_npc_states_batch(self, session_id: str, npcs: dict) -> None:
         with self._conn() as conn:
             for npc_id, npc in npcs.items():
+                pos = npc.position if isinstance(npc.position, dict) else {}
                 conn.execute(
                     "INSERT INTO npc_states (session_id, npc_id, relationship, is_available, "
-                    "current_greeting, dialogue_round_count, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
+                    "current_greeting, dialogue_round_count, position_col, position_row, scene, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP) "
                     "ON CONFLICT(session_id, npc_id) DO UPDATE SET "
                     "relationship = excluded.relationship, "
                     "is_available = excluded.is_available, "
                     "current_greeting = excluded.current_greeting, "
                     "dialogue_round_count = excluded.dialogue_round_count, "
+                    "position_col = excluded.position_col, "
+                    "position_row = excluded.position_row, "
+                    "scene = excluded.scene, "
                     "updated_at = CURRENT_TIMESTAMP",
                     (session_id, npc_id, npc.relationship, 1 if npc.is_available else 0,
-                     npc.current_greeting, npc.dialogue_round_count),
+                     npc.current_greeting, npc.dialogue_round_count,
+                     pos.get("col", 0), pos.get("row", 0), npc.scene),
                 )
 
     def load_npc_states(self, session_id: str) -> list[dict]:
         with self._conn() as conn:
             rows = conn.execute(
                 "SELECT npc_id, relationship, is_available, current_greeting, "
-                "dialogue_round_count FROM npc_states WHERE session_id = ?",
+                "dialogue_round_count, position_col, position_row, scene "
+                "FROM npc_states WHERE session_id = ?",
                 (session_id,),
             ).fetchall()
-        return [dict(r) for r in rows]
+        result = []
+        for r in rows:
+            d = dict(r)
+            d["position"] = {"col": d.pop("position_col", 0), "row": d.pop("position_row", 0)}
+            result.append(d)
+        return result
 
     # ─── Relationship Log ──────────────────────────────
 

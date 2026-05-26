@@ -150,6 +150,13 @@ class SessionManager:
                 npc.is_available = bool(saved.get("is_available", 1))
                 npc.current_greeting = saved.get("current_greeting", "") or self._default_greeting(npc_id)
                 npc.dialogue_round_count = saved.get("dialogue_round_count", 0)
+                # 恢复位置（优先 DB 快照）
+                saved_pos = saved.get("position")
+                if saved_pos and isinstance(saved_pos, dict) and saved_pos.get("col") is not None:
+                    npc.position = saved_pos
+                saved_scene = saved.get("scene")
+                if saved_scene:
+                    npc.scene = saved_scene
             else:
                 npc.relationship = npc.relationship_default
                 npc.current_greeting = self._default_greeting(npc_id)
@@ -222,9 +229,13 @@ class SessionManager:
         npc = session.npcs.get(npc_id)
         if not npc:
             return
+        pos = npc.position if isinstance(npc.position, dict) else {}
         self._db.save_npc_state(session.session_id, npc_id,
                                 npc.relationship, npc.is_available,
-                                npc.current_greeting, npc.dialogue_round_count)
+                                npc.current_greeting, npc.dialogue_round_count,
+                                position_col=pos.get("col", 0),
+                                position_row=pos.get("row", 0),
+                                scene=npc.scene)
 
     def persist_relationship_log(self, session, npc_id, delta, old_value, new_value,
                                  reason="", dialogue_id=None):

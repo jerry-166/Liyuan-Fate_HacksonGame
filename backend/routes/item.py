@@ -1,5 +1,5 @@
 """
-物品路由 — GET /api/game/{id}/items, POST /api/game/{id}/item/discover
+物品路由 — GET /api/game/{id}/items, GET /api/game/{id}/item/{item_id}, POST /api/game/{id}/item/discover
 """
 
 import logging
@@ -59,6 +59,55 @@ async def get_items(session_id: str):
         "inventory": inventory,
         "scene_items": scene_items,
     }
+
+
+@router.get("/game/{session_id}/item/{item_id}")
+async def get_item_detail(session_id: str, item_id: str):
+    """查看单个物品完整详情（背包中已发现的 + 场景中未发现的均可查）。"""
+    manager = get_session_manager()
+    session = manager.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail={
+            "error": True, "code": "SESSION_NOT_FOUND",
+            "message": f"游戏会话不存在: {session_id}"
+        })
+
+    # 先查背包
+    inventory_item = session.get_inventory_item(item_id)
+    if inventory_item:
+        return {
+            "item_id": item_id,
+            "from": "inventory",
+            "item": inventory_item.to_dict(),
+        }
+
+    # 再查场景物品定义
+    for item_def in session.item_defs:
+        def_id = item_def.get("item_id", item_def.get("id", ""))
+        if def_id == item_id:
+            return {
+                "item_id": item_id,
+                "from": "scene",
+                "is_discovered": False,
+                "item": {
+                    "id": def_id,
+                    "name": item_def.get("narrative_name", item_def.get("name", "")),
+                    "base_description": item_def.get("narrative_desc", item_def.get("description", "")),
+                    "item_type": item_def.get("item_type", item_def.get("category", "misc")),
+                    "is_key": item_def.get("is_key", False),
+                    "is_discovered": False,
+                    "holdable": item_def.get("holdable", True),
+                    "location": item_def.get("location"),
+                    "acquire_method": item_def.get("acquire_method", ""),
+                    "related_npcs": item_def.get("related_npcs", []),
+                    "stage_relevance": item_def.get("stage_relevance", []),
+                },
+            }
+
+    raise HTTPException(status_code=404, detail={
+        "error": True, "code": "ITEM_NOT_FOUND",
+        "message": f"物品不存在: {item_id}"
+    })
 
 
 @router.post("/game/{session_id}/item/discover")
