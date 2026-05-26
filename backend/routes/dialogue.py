@@ -15,7 +15,7 @@ from state.session import GameSession
 from llm.client import LLMClient
 from agents.prompt_builder import PromptBuilder
 from agents.npc_agent import AgentOrchestrator
-from agents.content_moderator import moderate_input
+from agents.content_moderator import moderate_input, check_rate_limit, record_block
 from state.chapter_engine import ChapterEngine
 
 router = APIRouter()
@@ -88,10 +88,19 @@ async def dialogue(req: DialogueRequest, raw_request: Request):
             "message": "游戏已结束"
         })
 
+    # 频率限制检查：无论是否携带 player_message，被封禁就拒绝
+    rate_result = check_rate_limit(req.session_id)
+    if not rate_result.allowed:
+        raise HTTPException(status_code=429, detail={
+            "error": True, "code": "RATE_LIMITED",
+            "message": rate_result.reason,
+        })
+
     # 输入内容审核
     if req.player_message:
         mod_result = moderate_input(req.player_message)
         if not mod_result.safe:
+            record_block(req.session_id)  # 记录拦截，可能触发封禁
             raise HTTPException(status_code=400, detail={
                 "error": True, "code": "CONTENT_BLOCKED",
                 "message": mod_result.reason,
@@ -194,9 +203,18 @@ async def show_item(req: ShowItemRequest, raw_request: Request):
     # 构造带物品提示的玩家消息
     message = req.player_message or f"（向{session.npcs[req.npc_id].name}展示了{item.name}）"
 
+    # 频率限制检查：无论是否携带 player_message，被封禁就拒绝
+    rate_result = check_rate_limit(req.session_id)
+    if not rate_result.allowed:
+        raise HTTPException(status_code=429, detail={
+            "error": True, "code": "RATE_LIMITED",
+            "message": rate_result.reason,
+        })
+
     # 输入内容审核
     mod_result = moderate_input(message)
     if not mod_result.safe:
+        record_block(req.session_id)
         raise HTTPException(status_code=400, detail={
             "error": True, "code": "CONTENT_BLOCKED",
             "message": mod_result.reason,
