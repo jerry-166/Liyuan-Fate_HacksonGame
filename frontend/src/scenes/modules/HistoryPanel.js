@@ -44,7 +44,10 @@ export class HistoryPanel {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '16px', color: '#666655',
     }).setOrigin(0.5, 0));
 
-    ui.input.on('wheel', (_p, _go, _dx, deltaY) => {
+    if (this._wheelHandler) {
+      ui.input.off('wheel', this._wheelHandler);
+    }
+    this._wheelHandler = (_p, _go, _dx, deltaY) => {
       if (!ui.historyPanelVisible) return;
       const ha = ui._historyArea;
       if (ui.historyContentHeight <= ha.h) return;
@@ -53,7 +56,31 @@ export class HistoryPanel {
         -(ui.historyContentHeight - ha.h)
       );
       ui.historyContent.setY(ha.y + ui.historyScrollY);
-    });
+    };
+    ui.input.on('wheel', this._wheelHandler);
+  }
+
+  /** 窗口缩放时重建历史面板并恢复当前状态 */
+  onResize() {
+    const ui = this.ui;
+    const wasVisible = ui.historyPanelVisible;
+    const savedScrollY = ui.historyScrollY || 0;
+
+    if (ui.historyPanel) {
+      ui.historyPanel.destroy();
+      ui.historyPanel = null;
+    }
+
+    this.createPanel();
+
+    if (wasVisible) {
+      ui.historyPanelVisible = true;
+      ui.historyPanel.setVisible(true);
+      this.refreshContent();
+      ui.historyScrollY = savedScrollY;
+      const ha = ui._historyArea;
+      ui.historyContent.setY(ha.y + savedScrollY);
+    }
   }
 
   /** 切换面板显隐 */

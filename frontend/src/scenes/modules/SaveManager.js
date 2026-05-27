@@ -595,4 +595,34 @@ export class SaveManager {
       duration: 1800, delay: 600, onComplete: () => toast.destroy(),
     });
   }
+
+  /** 窗口缩放时重建暂停菜单并恢复当前状态 */
+  onResize() {
+    const ui = this.ui;
+    const wasPauseVisible = ui.pauseMenuVisible;
+    const wasSlotsVisible = ui.saveSlotsVisible;
+    const savedMode = ui.saveMode;
+
+    if (ui.pauseContainer) {
+      ui.pauseContainer.destroy();
+      ui.pauseContainer = null;
+    }
+    if (ui.saveSlotContainer) {
+      ui.saveSlotContainer.destroy();
+      ui.saveSlotContainer = null;
+    }
+
+    this.createPauseMenu();
+
+    ui.pauseMenuVisible = false;
+    ui.saveSlotsVisible = false;
+    ui.pauseContainer.setVisible(false);
+
+    if (wasSlotsVisible && savedMode) {
+      this.showSlots(savedMode);
+    } else if (wasPauseVisible) {
+      ui.pauseMenuVisible = true;
+      ui.pauseContainer.setVisible(true);
+    }
+  }
 }

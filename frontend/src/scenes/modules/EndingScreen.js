@@ -140,4 +140,35 @@ export class EndingScreen {
   _wait(ms) {
     return new Promise(resolve => this.ui.time.delayedCall(ms, resolve));
   }
+
+  /** 窗口缩放时重建结局画面并恢复当前状态 */
+  onResize() {
+    const ui = this.ui;
+    const wasVisible = ui.endingContainer && ui.endingContainer.visible;
+    const savedAlpha = ui.endingContainer ? ui.endingContainer.alpha : 0;
+    const savedTexts = {
+      title: ui.endingTitle ? ui.endingTitle.text : '',
+      subtitle: ui.endingSubtitle ? ui.endingSubtitle.text : '',
+      moments: ui.endingKeyMoments ? ui.endingKeyMoments.text : '',
+      lesson: ui.endingLesson ? ui.endingLesson.text : '',
+      npc: ui.endingNPCText ? ui.endingNPCText.text : '',
+    };
+
+    if (ui.endingContainer) {
+      ui.endingContainer.destroy();
+      ui.endingContainer = null;
+    }
+
+    this.createScreen();
+
+    if (wasVisible) {
+      ui.endingContainer.setVisible(true);
+      ui.endingContainer.setAlpha(savedAlpha);
+      ui.endingTitle.setText(savedTexts.title);
+      ui.endingSubtitle.setText(savedTexts.subtitle);
+      ui.endingKeyMoments.setText(savedTexts.moments);
+      ui.endingLesson.setText(savedTexts.lesson);
+      ui.endingNPCText.setText(savedTexts.npc);
+    }
+  }
 }

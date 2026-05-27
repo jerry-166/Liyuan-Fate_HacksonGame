@@ -144,7 +144,10 @@ export class InventoryPanel {
     ui.backpackPanel.add(ui.bpShowItemBtnContainer);
 
     // 滚轮滚动
-    ui.input.on('wheel', (_p, _go, _dx, deltaY) => {
+    if (this._wheelHandler) {
+      ui.input.off('wheel', this._wheelHandler);
+    }
+    this._wheelHandler = (_p, _go, _dx, deltaY) => {
       if (!ui.backpackPanelVisible) return;
       const ba = ui._backpackArea;
       if (ui.inventory.length <= 8) return;
@@ -153,7 +156,43 @@ export class InventoryPanel {
         -(ui.bpListContentHeight - (ba.h - ba.titleH - 80))
       );
       ui.bpListContent.setY(ba.y + ba.titleH + 44 + (ui.bpListScrollY || 0));
-    });
+    };
+    ui.input.on('wheel', this._wheelHandler);
+  }
+
+  /** 窗口缩放时重建背包面板并恢复当前状态 */
+  onResize() {
+    const ui = this.ui;
+    const wasVisible = ui.backpackPanelVisible;
+    const wasShowItemMode = ui.showItemMode;
+    const savedTargetNPC = ui.showItemTargetNPC;
+    const savedCursorIndex = ui.backpackCursorIndex;
+
+    if (ui.backpackPanel) {
+      ui.backpackPanel.destroy();
+      ui.backpackPanel = null;
+    }
+
+    this.createPanel();
+
+    if (wasVisible) {
+      ui.backpackPanelVisible = true;
+      ui.backpackPanel.setVisible(true);
+      ui.showItemMode = wasShowItemMode;
+      ui.showItemTargetNPC = savedTargetNPC;
+      ui.backpackCursorIndex = savedCursorIndex;
+
+      this.refreshContent();
+      this.highlightItem();
+
+      if (wasShowItemMode && savedTargetNPC) {
+        ui.bpTipNormal.setVisible(false);
+        ui.bpTipShowItem.setVisible(true);
+        ui.bpConfirmBtn.setVisible(true);
+        ui.bpShowItemBtnContainer.setVisible(true);
+        ui.bpTitle.setText(`—— 展示物品给 ${savedTargetNPC.name} ——`);
+      }
+    }
   }
 
   /** 刷新物品列表 */

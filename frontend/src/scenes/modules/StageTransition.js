@@ -85,4 +85,29 @@ export class StageTransition {
   _wait(ms) {
     return new Promise(resolve => this.ui.time.delayedCall(ms, resolve));
   }
+
+  /** 窗口缩放时重建过渡覆盖层并恢复当前状态 */
+  onResize() {
+    const ui = this.ui;
+    const wasVisible = ui.transitionContainer && ui.transitionContainer.visible;
+    const savedTitle = ui.transitionTitle ? ui.transitionTitle.text : '';
+    const savedDesc = ui.transitionDesc ? ui.transitionDesc.text : '';
+    const savedHint = ui.transitionHint ? ui.transitionHint.text : '';
+    const savedAlpha = ui.transitionContainer ? ui.transitionContainer.alpha : 0;
+
+    if (ui.transitionContainer) {
+      ui.transitionContainer.destroy();
+      ui.transitionContainer = null;
+    }
+
+    this.createOverlay();
+
+    if (wasVisible) {
+      ui.transitionContainer.setVisible(true);
+      ui.transitionContainer.setAlpha(savedAlpha);
+      ui.transitionTitle.setText(savedTitle);
+      ui.transitionDesc.setText(savedDesc);
+      ui.transitionHint.setText(savedHint);
+    }
+  }
 }

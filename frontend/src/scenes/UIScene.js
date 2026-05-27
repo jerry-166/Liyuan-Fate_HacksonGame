@@ -83,6 +83,9 @@ export class UIScene extends Phaser.Scene {
     this.endingScreen.createScreen();
     this.saveManager.createPauseMenu();
 
+    // ========== 响应式适配：窗口缩放时重定位所有 UI ==========
+    this.scale.on('resize', this._onResize, this);
+
     // ========== 绑定 GameScene 事件 ==========
     const gameScene = this.scene.get('GameScene');
     gameScene.events.on('dialogue:start', this._onDialogueStart, this);
@@ -483,6 +486,49 @@ export class UIScene extends Phaser.Scene {
     }
   }
 
+  /** 窗口/画布尺寸变化时统一重定位所有 UI */
+  _onResize() {
+    // 防抖：100ms 内只执行一次，避免 Phaser 初始化时连续触发导致崩溃
+    if (this._resizeTimer) return;
+    this._resizeTimer = this.time.delayedCall(100, () => {
+      this._resizeTimer = null;
+      this._doResize();
+    });
+  }
+
+  _doResize() {
+    const { width, height } = this.cameras.main;
+
+    // 更新右上角 HUD 位置（仅更新坐标，不重建）
+    if (this.stageBadge) this.stageBadge.setPosition(width - 16, 16);
+    if (this.historyBtn) this.historyBtn.setPosition(width - 16, 48);
+    if (this.backpackBtn) this.backpackBtn.setPosition(width - 16, 80);
+
+    // 重定位自由输入框（DOM 元素，需单独处理）
+    try {
+      if (this.dialogContainer && this.dialogContainer.visible && this.freeInput && this.freeInput.style.display === 'block') {
+        this.dialogue.showFreeInput();
+      }
+    } catch (e) { console.warn('[UIScene] resize：freeInput 重定位失败', e); }
+
+    // 按优先级顺序重建各面板，每个模块独立 try-catch 防止连锁崩溃
+    const modules = [
+      { name: 'dialogue',       inst: this.dialogue },
+      { name: 'inventoryPanel', inst: this.inventoryPanel },
+      { name: 'historyPanel',   inst: this.historyPanel },
+      { name: 'saveManager',    inst: this.saveManager },
+      { name: 'stageTransition',inst: this.stageTransition },
+      { name: 'endingScreen',   inst: this.endingScreen },
+    ];
+    for (const m of modules) {
+      try {
+        m.inst.onResize();
+      } catch (e) {
+        console.warn(`[UIScene] resize：${m.name}.onResize() 失败`, e);
+      }
+    }
+  }
+
   // =========================== 对话历史恢复 ============================
 
   async _restoreDialogueHistory(sessionId) {
@@ -655,7 +701,8 @@ export class UIScene extends Phaser.Scene {
   }
 
   shutdown() {
-    this.scale.off('resize', () => {});
+    this.scale.off('resize', this._onResize, this);
+    if (this._resizeTimer) { this._resizeTimer.remove(false); this._resizeTimer = null; }
     if (this.freeInput) { this.freeInput.blur(); this.freeInput.style.display = 'none'; }
     if (this._domKeyHandler) { document.removeEventListener('keydown', this._domKeyHandler); this._domKeyHandler = null; }
   }

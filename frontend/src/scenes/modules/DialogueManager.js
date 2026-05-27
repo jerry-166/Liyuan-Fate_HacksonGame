@@ -156,16 +156,6 @@ export class DialogueManager {
     if (gameContainer && ui.freeInput.parentElement !== gameContainer) {
       gameContainer.appendChild(ui.freeInput);
     }
-
-    ui.scale.on('resize', () => this._onScaleResize(), ui);
-  }
-
-  /** 缩放变化时重定位输入框 */
-  _onScaleResize() {
-    const ui = this.ui;
-    if (ui.freeInput && ui.freeInput.style.display === 'block') {
-      this.showFreeInput();
-    }
   }
 
   /** 显示选项按钮 */
@@ -603,6 +593,62 @@ export class DialogueManager {
     if (ui.cursorTimer) {
       ui.cursorTimer.remove();
       ui.cursorTimer = null;
+    }
+  }
+
+  /** 窗口缩放时重建对话框并恢复当前状态 */
+  onResize() {
+    const ui = this.ui;
+    const wasVisible = ui.dialogContainer && ui.dialogContainer.visible;
+    const savedName = ui.dialogName ? ui.dialogName.text : '';
+    const savedText = ui.dialogText ? ui.dialogText.text : '';
+    const savedHint = ui.dialogHint ? ui.dialogHint.text : '';
+    const savedPageHint = ui.pageHint ? ui.pageHint.text : '';
+    const savedPages = ui.dialogPages ? [...ui.dialogPages] : [];
+    const savedCurrentPage = ui.dialogCurrentPage || 0;
+    const savedOptions = ui.pendingOptions;
+    const savedDialogActive = ui.dialogActive;
+    const savedIsStreaming = ui.isStreaming;
+    const savedPendingChapterChange = ui.pendingChapterChange;
+    const savedPendingEnding = ui.pendingEnding;
+
+    this.clearOptions();
+    if (ui.dialogText) ui.dialogText.setMask(null);
+    if (ui.dialogContainer) {
+      ui.dialogContainer.destroy();
+      ui.dialogContainer = null;
+    }
+
+    this.createPanel();
+
+    if (wasVisible) {
+      ui.dialogContainer.setVisible(true);
+      ui.dialogName.setText(savedName);
+      ui.dialogText.setText(savedText);
+      ui.dialogHint.setText(savedHint);
+      ui.pageHint.setText(savedPageHint);
+      ui.dialogPages = savedPages;
+      ui.dialogCurrentPage = savedCurrentPage;
+      ui.dialogActive = savedDialogActive;
+      ui.isStreaming = savedIsStreaming;
+      ui.pendingChapterChange = savedPendingChapterChange;
+      ui.pendingEnding = savedPendingEnding;
+
+      if (savedIsStreaming) {
+        this.startCursorBlink();
+      } else if (savedPages.length > 0) {
+        const total = savedPages.length;
+        const cur = savedCurrentPage;
+        if (total > 1 && cur < total - 1) {
+          ui.pageHint.setText(`点击继续 (${cur + 1}/${total})`);
+          ui.dialogClickZone.setInteractive({ useHandCursor: true });
+        } else {
+          ui.pageHint.setText(`(${cur + 1}/${total})`);
+          if (savedOptions && savedOptions.length > 0 && !savedPendingEnding && !savedPendingChapterChange) {
+            this.showOptions(savedOptions);
+          }
+        }
+      }
     }
   }
 }
