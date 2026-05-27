@@ -723,7 +723,13 @@ Content-Type: application/json; charset=utf-8
   "player_position": { "col": 48, "row": 24 },
   "town_npc_positions": [
     { "npc_id": "town_001", "position": { "col": 30, "row": 40 } }
-  ]
+  ],
+  "_sub_scene_id": "tea_house",
+  "_sub_scene_player_position": { "col": 46, "row": 62 },
+  "_sub_scene_story_npc_positions": [
+    { "npc_id": "npc_laozhou", "position": { "col": 50, "row": 35 } }
+  ],
+  "_sub_scene_town_npc_positions": []
 }
 ```
 
@@ -731,8 +737,12 @@ Content-Type: application/json; charset=utf-8
 |------|------|------|------|
 | `slot_id` | int | 否 | 指定槽位 1-6，不传则自动分配 |
 | `label` | string | 否 | 存档标签（自动生成时含阶段+章节+时间） |
-| `player_position` | object | 否 | 主角当前瓦片坐标 `{col, row}` |
-| `town_npc_positions` | array | 否 | 城镇 NPC 位置快照 |
+| `player_position` | object | 否 | 主角当前瓦片坐标 `{col, row}`（主地图） |
+| `town_npc_positions` | array | 否 | 城镇 NPC 位置快照（主地图） |
+| `_sub_scene_id` | string | 否 | 子场景标识（null = 主地图），用于区分场景层级 |
+| `_sub_scene_player_position` | object | 否 | 子场景中主角瓦片坐标 |
+| `_sub_scene_story_npc_positions` | array | 否 | 子场景中故事 NPC 位置快照 |
+| `_sub_scene_town_npc_positions` | array | 否 | 子场景中普通 NPC 位置快照 |
 
 **Response** `201 Created`
 
@@ -793,11 +803,15 @@ Content-Type: application/json; charset=utf-8
   "game_ended": false,
   "_player_position": { "col": 10, "row": 20 },
   "_town_npc_positions": [ ... ],
+  "_sub_scene_id": "tea_house",
+  "_sub_scene_player_position": { "col": 46, "row": 62 },
+  "_sub_scene_story_npc_positions": [ ... ],
+  "_sub_scene_town_npc_positions": [ ... ],
   "loaded_from_save": "sv_a1b2c3d4"
 }
 ```
 
-> **注意**: `loaded_from_save` 标识此次状态来自存档恢复。`_player_position` 和 `_town_npc_positions` 为前端专用的位置快照。
+> **注意**: `loaded_from_save` 标识此次状态来自存档恢复。`_player_position` / `_town_npc_positions` 为主地图位置快照。`_sub_scene_*` 系列字段为子场景专用位置与标识，仅当存档时玩家处于子场景中才有值。
 
 ### 3.13d 删除存档 — `DELETE /api/game/{session_id}/saves/{save_id}` 🔥v3
 
