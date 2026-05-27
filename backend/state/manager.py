@@ -264,7 +264,11 @@ class SessionManager:
     def save_snapshot(self, session: GameSession, save_id: str,
                        label: str, slot_id: int,
                        player_position: Optional[dict] = None,
-                       town_npc_positions: Optional[list] = None) -> int:
+                       town_npc_positions: Optional[list] = None,
+                       sub_scene_id: Optional[str] = None,
+                       sub_scene_player_position: Optional[dict] = None,
+                       sub_scene_story_npc_positions: Optional[list] = None,
+                       sub_scene_town_npc_positions: Optional[list] = None) -> int:
         """将完整 GameSession 序列化写入存档文件 + 元数据写入 DB。"""
         import datetime
 
@@ -304,6 +308,10 @@ class SessionManager:
                 "current_task": session.current_task.to_dict() if session.current_task else None,
                 "_player_position": player_position,
                 "_town_npc_positions": town_npc_positions,
+                "_sub_scene_id": sub_scene_id,
+                "_sub_scene_player_position": sub_scene_player_position,
+                "_sub_scene_story_npc_positions": sub_scene_story_npc_positions,
+                "_sub_scene_town_npc_positions": sub_scene_town_npc_positions,
             }
         }
 

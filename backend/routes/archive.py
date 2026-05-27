@@ -91,6 +91,10 @@ async def create_save(session_id: str,
         slot_id=slot_id,
         player_position=player_pos,
         town_npc_positions=town_npc_pos,
+        sub_scene_id=body.get("_sub_scene_id"),
+        sub_scene_player_position=body.get("_sub_scene_player_position"),
+        sub_scene_story_npc_positions=body.get("_sub_scene_story_npc_positions"),
+        sub_scene_town_npc_positions=body.get("_sub_scene_town_npc_positions"),
     )
 
     logger.info(f"[Archive] Created save {save_id} for session {session_id} (slot={slot_id})")
@@ -177,10 +181,14 @@ async def load_save(session_id: str, save_id: str):
 
     logger.info(f"[Archive] Loaded save {save_id} into session {session_id}")
 
-    # 返回完整状态给前端
+    # 返回完整状态给前端（含子场景标识与位置）
     response = session.to_api_response()
     response["_player_position"] = game_state.get("_player_position")
     response["_town_npc_positions"] = game_state.get("_town_npc_positions")
+    response["_sub_scene_id"] = game_state.get("_sub_scene_id")
+    response["_sub_scene_player_position"] = game_state.get("_sub_scene_player_position")
+    response["_sub_scene_story_npc_positions"] = game_state.get("_sub_scene_story_npc_positions")
+    response["_sub_scene_town_npc_positions"] = game_state.get("_sub_scene_town_npc_positions")
     response["loaded_from_save"] = save_id
     return response
 
