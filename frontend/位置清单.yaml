@@ -1,25 +1,42 @@
-# ── 新图上线后，请填写以下位置的 tile 坐标 ──
+# ── 新图上线后的 tile 坐标（测试用随机值）──
+# 地图: 80×50 tiles | 江南水乡小镇
 
 # 关键地标（用于子场景入口判定）
 landmarks:
-  teahouse_entrance: {col: ___, row: ___}    # 茶馆门口（进入子场景的传送点）
-  stage_entrance:    {col: ___, row: ___}    # 戏台入口
-  dock_area:         {col: ___, row: ___}    # 码头区域
-  temple_entrance:   {col: ___, row: ___}    # 祠堂入口
-  father_house:      {col: ___, row: ___}    # 父亲旧居
+  teahouse_entrance: {col: 36, row: 20}    # 茶馆正门
+  stage_entrance:    {col: 18, row: 16}    # 戏台大门
+  dock_area:         {col: 58, row: 24}    # 码头区域
+  temple_entrance:   {col: 32, row: 10}    # 祠堂入口
+  father_house:      {col: 22, row: 6}     # 父亲旧居
 
 # NPC 初始位置（对应 meta.yaml）
 npc_positions:
-  npc_chen:    {col: ___, row: ___}    # 陈师傅（茶馆内）
-  npc_xiaohua: {col: ___, row: ___}    # 小华（戏台区域）
-  npc_laozhou:{col: ___, row: ___}    # 老周（戏台区域）
-  npc_meiyi:  {col: ___, row: ___}    # 梅姨（茶馆内）
-  npc_laoli:  {col: ___, row: ___}    # 船夫（码头）
+  npc_chen:    {col: 38, row: 14}    # 陈师傅（茶馆内）
+  npc_xiaohua: {col: 15, row: 12}    # 小华（戏台前）
+  npc_laozhou: {col: 10, row: 8}     # 老周（戏台后台）
+  npc_meiyi:   {col: 40, row: 16}    # 梅姨（茶馆柜台）
+  npc_laoli:   {col: 60, row: 22}    # 船夫（码头）
 
 # 玩家出生点
-player_spawn: {col: ___, row: ___}    # 当前是 (44, 28)
+player_spawn: {col: 38, row: 26}    # 小镇中心十字路口
 
-# 地图参数（如果变了）
-# map_cols: 80        # 总列数
-# map_rows: 50        # 总行数  
-# tile_size_px: 16    # 每格像素数
+# 物品位置（按子场景分布）
+item_positions:
+  # father_house:
+  item_child_costume:       {col: 23, row: 7}     # 墙角老木箱
+  item_father_script:       {col: 20, row: 5}     # 旧木桌上
+  item_childhood_photo:     {col: 24, row: 5}     # 照片墙上
+  item_father_single_photo: {col: 23, row: 4}     # 照片墙上
+  # temple:
+  item_genealogy:           {col: 34, row: 12}    # 祠堂后堂书架
+  item_temple_tablet:       {col: 36, row: 8}     # 供桌上
+  # stage_ruin:
+  item_old_trunk:           {col: 14, row: 10}    # 戏台后台角落
+  item_old_jinghu:          {col: 12, row: 8}     # 墙上
+  # teahouse:
+  item_stage_group_photo:   {col: 34, row: 16}    # 雅间墙上
+
+# 地图参数
+map_cols: 80
+map_rows: 50
+tile_size_px: 16

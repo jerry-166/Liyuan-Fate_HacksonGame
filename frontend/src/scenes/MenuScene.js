@@ -1,11 +1,105 @@
+/**
+ * MenuScene — 游戏主菜单场景
+ *
+ * 职责：提供游戏入口，管理主页 UI
+ * - 标题画面（"梨园生死" + 粒子动画）
+ * - "开始游戏" / "继续游戏" 按钮
+ * - 存档列表面板（列出所有已保存的游戏会话）
+ *
+ * 通过 GameScene(savedSessionId) 传递存档 ID 来区分新游戏 vs 继续游戏
+ *
+ * @module scenes/MenuScene
+ */
+
 import Phaser from 'phaser';
-import { GAME, COLORS, STAGE_TONES } from '../config.js';
+import { STAGE_TONES } from '../config.js';
 import { getSessions, deleteSession } from '../api/client.js';
 
+// ========== UI 工具函数 ==========
+
 /**
- * MenuScene — 游戏主菜单
- * 包含标题画面、"开始游戏"和"继续游戏"选项、存档管理面板
+ * 创建菜单按钮容器
+ * @param {Phaser.Scene} scene
+ * @param {number} x - 中心 X
+ * @param {number} y - 中心 Y
+ * @param {number} w - 按钮宽度
+ * @param {number} h - 按钮高度
+ * @param {string} label - 按钮文字
+ * @param {function} callback - 点击回调
+ * @param {boolean} [disabled=false]
+ * @returns {Phaser.GameObjects.Container}
  */
+function createMenuButton(scene, x, y, w, h, label, callback, disabled = false) {
+  const container = scene.add.container(x, y);
+
+  const bg = scene.add.graphics();
+  const drawBg = (hover) => {
+    bg.clear();
+    const baseColor = disabled ? 0x1a1a20 : (hover ? 0x3a3830 : 0x2a2820);
+    const borderColor = disabled ? 0x443322 : (hover ? 0xd4b896 : 0x887766);
+    bg.fillStyle(baseColor, 1);
+    bg.fillRoundedRect(-w / 2, -h / 2, w, h, 6);
+    bg.lineStyle(1, borderColor, disabled ? 0.3 : 0.7);
+    bg.strokeRoundedRect(-w / 2, -h / 2, w, h, 6);
+  };
+  drawBg(false);
+  container.add(bg);
+
+  const text = scene.add.text(0, 0, label, {
+    fontFamily: '"KaiTi","SimSun",serif',
+    fontSize: '26px', color: disabled ? '#555544' : '#d4b896',
+    letterSpacing: 8,
+  }).setOrigin(0.5);
+  container.add(text);
+
+  if (!disabled) {
+    const zone = scene.add.zone(0, 0, w, h).setInteractive({ useHandCursor: true });
+    zone.on('pointerover', () => drawBg(true));
+    zone.on('pointerout', () => drawBg(false));
+    zone.on('pointerdown', callback);
+    container.add(zone);
+  } else {
+    container.add(scene.add.text(0, 20, '（没有存档）', {
+      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+      fontSize: '14px', color: '#443322',
+    }).setOrigin(0.5));
+  }
+
+  return container;
+}
+
+/**
+ * 创建小型操作按钮（存档列表内用）
+ */
+function createSmallButton(scene, x, y, w, h, label, color, callback) {
+  const container = scene.add.container(x, y);
+  const bg = scene.add.graphics();
+  const drawBtn = (hover) => {
+    bg.clear();
+    bg.fillStyle(hover ? 0x3a3834 : 0x2a2824, 1);
+    bg.fillRoundedRect(0, 0, w, h, 4);
+    bg.lineStyle(1, Phaser.Display.Color.HexStringToColor(color).color, hover ? 0.8 : 0.5);
+    bg.strokeRoundedRect(0, 0, w, h, 4);
+  };
+  drawBtn(false);
+  container.add(bg);
+
+  container.add(scene.add.text(w / 2, h / 2, label, {
+    fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+    fontSize: '16px', color: color,
+  }).setOrigin(0.5));
+
+  const zone = scene.add.zone(w / 2, h / 2, w, h).setInteractive({ useHandCursor: true });
+  zone.on('pointerover', () => drawBtn(true));
+  zone.on('pointerout', () => drawBtn(false));
+  zone.on('pointerdown', callback);
+  container.add(zone);
+
+  return container;
+}
+
+// ========== MenuScene ==========
+
 export class MenuScene extends Phaser.Scene {
   constructor() {
     super({ key: 'MenuScene' });
@@ -15,16 +109,15 @@ export class MenuScene extends Phaser.Scene {
     const { width, height } = this.cameras.main;
     const cx = width / 2;
 
-    // ========== 背景层 ==========
+    // 背景
     this.cameras.main.setBackgroundColor('#0d0d1a');
 
     // 顶部装饰纹样
     const topDeco = this.add.graphics();
     topDeco.lineStyle(1, 0x887766, 0.25);
     for (let i = 0; i < 8; i++) {
-      const dx = (i - 3.5) * 130;
-      topDeco.strokeCircle(cx + dx, 30, 18);
-      topDeco.strokeCircle(cx + dx, 30, 8);
+      topDeco.strokeCircle(cx + (i - 3.5) * 130, 30, 18);
+      topDeco.strokeCircle(cx + (i - 3.5) * 130, 30, 8);
     }
     topDeco.lineBetween(0, 56, width, 56);
 
@@ -32,12 +125,11 @@ export class MenuScene extends Phaser.Scene {
     botDeco.lineStyle(1, 0x887766, 0.2);
     botDeco.lineBetween(0, height - 56, width, height - 56);
 
-    // ========== 飘落粒子 ==========
+    // 飘落粒子
     this.fallingParticles = [];
     for (let i = 0; i < 14; i++) {
       const petal = this.add.text(
-        Math.random() * width,
-        Math.random() * height,
+        Math.random() * width, Math.random() * height,
         ['◆', '◇', '❋', '·', '♢'][Math.floor(Math.random() * 5)],
         {
           fontFamily: 'serif',
@@ -51,153 +143,82 @@ export class MenuScene extends Phaser.Scene {
       this.fallingParticles.push(petal);
     }
 
-    // ========== 标题 ==========
+    // 标题
     this.add.text(cx, 100, '—— 一段关于传承与选择的故事 ——', {
-      fontFamily: '"KaiTi","SimSun",serif',
-      fontSize: '20px', color: '#887766',
+      fontFamily: '"KaiTi","SimSun",serif', fontSize: '20px', color: '#887766',
     }).setOrigin(0.5).setDepth(1).setAlpha(0);
 
     const title = this.add.text(cx, 170, '梨园生死', {
-      fontFamily: '"KaiTi","SimSun",serif',
-      fontSize: '72px', color: '#d4b896',
-      stroke: '#332a20',
-      strokeThickness: 3,
+      fontFamily: '"KaiTi","SimSun",serif', fontSize: '72px', color: '#d4b896',
+      stroke: '#332a20', strokeThickness: 3,
     }).setOrigin(0.5).setDepth(1);
 
     this.add.text(cx, 230, 'PEKING OPERA · LIFE & DEATH', {
-      fontFamily: 'serif',
-      fontSize: '15px', color: '#886644', letterSpacing: 6,
+      fontFamily: 'serif', fontSize: '15px', color: '#886644', letterSpacing: 6,
     }).setOrigin(0.5).setDepth(1);
 
     title.setAlpha(0).setScale(1.2);
-    this.tweens.add({
-      targets: title,
-      alpha: 1, scaleX: 1, scaleY: 1,
-      duration: 1200, ease: 'Sine.easeOut',
-    });
+    this.tweens.add({ targets: title, alpha: 1, scaleX: 1, scaleY: 1, duration: 1200, ease: 'Sine.easeOut' });
 
-    // ========== 按钮 ==========
-    const btnY1 = height / 2 + 40;
-    const btnY2 = btnY1 + 62;
-    const btnW = 220;
-    const btnH = 48;
-
+    // 按钮
+    const btnY1 = height / 2 + 40, btnY2 = btnY1 + 62, btnW = 220, btnH = 48;
     this.allButtons = [];
 
     this.allButtons.push(
-      this.createMenuButton(cx, btnY1, btnW, btnH, '开 始 游 戏', () => {
-        this.onNewGame();
-      }, 1)
+      createMenuButton(this, cx, btnY1, btnW, btnH, '开 始 游 戏', () => this._startNewGame())
     );
-
     this.allButtons.push(
-      this.createMenuButton(cx, btnY2, btnW, btnH, '继 续 游 戏', () => {
-        this.onContinue();
-      }, 1)
+      createMenuButton(this, cx, btnY2, btnW, btnH, '继 续 游 戏', () => this._showArchives())
     );
 
-    // ========== 存档列表面板 ==========
+    // 存档列表面板
     this.keyEsc = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
-    this.createArchivePanel();
+    this._createArchivePanel();
 
-    // ========== 底部信息 ==========
+    // 底部信息
     this.add.text(cx, height - 80, 'WASD 移动  ·  F 交互  ·  H 对话历史  ·  数字键选择', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
       fontSize: '15px', color: '#555544',
     }).setOrigin(0.5).setDepth(1);
 
     this.add.text(cx, height - 58, 'T-Hackathon 2026 · AI Narrative Game', {
-      fontFamily: 'monospace',
-      fontSize: '14px', color: '#444433',
+      fontFamily: 'monospace', fontSize: '14px', color: '#444433',
     }).setOrigin(0.5).setDepth(1);
 
     this.add.text(width - 16, height - 16, 'v0.3', {
-      fontFamily: 'monospace',
-      fontSize: '13px', color: '#333322',
+      fontFamily: 'monospace', fontSize: '13px', color: '#333322',
     }).setOrigin(1, 1).setDepth(1);
 
-    // 按钮延迟淡入
+    // 按钮淡入
     const btnContainer = this.add.container(0, 0).setDepth(2).setAlpha(0);
     this.allButtons.forEach(b => btnContainer.add(b));
-    this.tweens.add({
-      targets: btnContainer, alpha: 1,
-      duration: 800, delay: 600, ease: 'Sine.easeIn',
-    });
+    this.tweens.add({ targets: btnContainer, alpha: 1, duration: 800, delay: 600, ease: 'Sine.easeIn' });
   }
 
-  /**
-   * 创建菜单按钮
-   */
-  createMenuButton(x, y, w, h, label, callback, alpha = 1, disabled = false) {
-    const container = this.add.container(x, y);
+  // ==================== 存档面板 ====================
 
-    // 背景
-    const bg = this.add.graphics();
-    const drawBg = (hover) => {
-      bg.clear();
-      const baseColor = disabled ? 0x1a1a20 : (hover ? 0x3a3830 : 0x2a2820);
-      const borderColor = disabled ? 0x443322 : (hover ? 0xd4b896 : 0x887766);
-      bg.fillStyle(baseColor, 1);
-      bg.fillRoundedRect(-w / 2, -h / 2, w, h, 6);
-      bg.lineStyle(1, borderColor, disabled ? 0.3 : 0.7);
-      bg.strokeRoundedRect(-w / 2, -h / 2, w, h, 6);
-    };
-    drawBg(false);
-    container.add(bg);
-
-    // 文字
-    const text = this.add.text(0, 0, label, {
-      fontFamily: '"KaiTi","SimSun",serif',
-      fontSize: '26px', color: disabled ? '#555544' : '#d4b896',
-      letterSpacing: 8,
-    }).setOrigin(0.5);
-    container.add(text);
-
-    if (!disabled) {
-      // 交互区域
-      const zone = this.add.zone(0, 0, w, h).setInteractive({ useHandCursor: true });
-      zone.on('pointerover', () => drawBg(true));
-      zone.on('pointerout', () => drawBg(false));
-      zone.on('pointerdown', callback);
-      container.add(zone);
-    } else {
-      // 禁用态显示存档为空提示
-      const dimText = this.add.text(0, 20, '（没有存档）', {
-        fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-        fontSize: '14px', color: '#443322',
-      }).setOrigin(0.5);
-      container.add(dimText);
-    }
-
-    return container;
-  }
-
-  /**
-   * 创建存档列表覆盖面板
-   */
-  createArchivePanel() {
+  _createArchivePanel() {
     const { width, height } = this.cameras.main;
     this.archivePanel = this.add.container(0, 0).setDepth(100).setVisible(false);
     this.archiveScrollY = 0;
 
-    // 半透明遮罩（仅面板外部响应点击关闭）
+    const panelW = 780, panelH = 520;
+    const panelX = (width - panelW) / 2;
+    const panelY = (height - panelH) / 2 - 20;
+
+    // 遮罩
     const mask = this.add.graphics();
     mask.fillStyle(0x000000, 0.75);
     mask.fillRect(0, 0, width, height);
     mask.setInteractive(new Phaser.Geom.Rectangle(0, 0, width, height), Phaser.Geom.Rectangle.Contains);
     mask.on('pointerdown', (pointer) => {
-      const px = pointer.x, py = pointer.y;
-      // 如果点击在面板内部，不关闭（避免和按钮冲突）
-      if (px >= panelX && px <= panelX + panelW && py >= panelY && py <= panelY + panelH) return;
-      this.hideArchivePanel();
+      if (pointer.x >= panelX && pointer.x <= panelX + panelW &&
+          pointer.y >= panelY && pointer.y <= panelY + panelH) return;
+      this._hideArchivePanel();
     });
     this.archivePanel.add(mask);
 
     // 面板背景
-    const panelW = 780;
-    const panelH = 520;
-    const panelX = (width - panelW) / 2;
-    const panelY = (height - panelH) / 2 - 20;
     const panelBg = this.add.graphics();
     panelBg.fillStyle(0x151520, 0.97);
     panelBg.fillRoundedRect(panelX, panelY, panelW, panelH, 12);
@@ -205,42 +226,28 @@ export class MenuScene extends Phaser.Scene {
     panelBg.strokeRoundedRect(panelX, panelY, panelW, panelH, 12);
     this.archivePanel.add(panelBg);
 
-    // 标题
-    const panelTitle = this.add.text(width / 2, panelY + 32, '—— 戏梦存档 ——', {
-      fontFamily: '"KaiTi","SimSun",serif',
-      fontSize: '28px', color: '#d4b896',
-    }).setOrigin(0.5);
-    this.archivePanel.add(panelTitle);
+    this.archivePanel.add(this.add.text(width / 2, panelY + 32, '—— 戏梦存档 ——', {
+      fontFamily: '"KaiTi","SimSun",serif', fontSize: '28px', color: '#d4b896',
+    }).setOrigin(0.5));
 
-    // 分割线
     const divGfx = this.add.graphics();
     divGfx.lineStyle(1, 0x887766, 0.3);
     divGfx.lineBetween(panelX + 40, panelY + 60, panelX + panelW - 40, panelY + 60);
     this.archivePanel.add(divGfx);
 
-    // 存档列表容器
     this.archiveListContent = this.add.container(0, panelY + 72);
     this.archivePanel.add(this.archiveListContent);
 
-    // 列表区域参数（供滚动使用）
-    this._archiveListArea = {
-      x: panelX + 16,
-      y: panelY + 66,
-      w: panelW - 32,
-      h: panelH - 130,
-      baseY: panelY + 72,
-    };
+    this._archiveListArea = { x: panelX + 16, y: panelY + 66, w: panelW - 32, h: panelH - 130, baseY: panelY + 72 };
 
     // 列表遮罩
     const listMaskGfx = this.add.graphics();
     listMaskGfx.fillRect(panelX + 10, panelY + 56, panelW - 20, panelH - 110);
     listMaskGfx.setVisible(false);
-    const listMask = listMaskGfx.createGeometryMask();
-    this.archiveListContent.setMask(listMask);
-    this.archiveListMask = listMask;
+    this.archiveListContent.setMask(listMaskGfx.createGeometryMask());
 
-    // 滚轮滚动
-    this.input.on('wheel', (_pointer, _go, _dx, deltaY) => {
+    // 滚轮
+    this.input.on('wheel', (_p, _go, _dx, deltaY) => {
       if (!this.archivePanel || !this.archivePanel.visible) return;
       const area = this._archiveListArea;
       if (!this.archiveListContentHeight || this.archiveListContentHeight <= area.h) return;
@@ -249,99 +256,69 @@ export class MenuScene extends Phaser.Scene {
       this.archiveListContent.setY(area.baseY + this.archiveScrollY);
     });
 
-    // 底部提示
     this.archiveHint = this.add.text(width / 2, panelY + panelH - 36, '', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
       fontSize: '16px', color: '#887766',
     }).setOrigin(0.5);
     this.archivePanel.add(this.archiveHint);
 
-    // 底部操作提示
     this.add.text(width / 2, panelY + panelH - 12, '[ESC] 关闭  |  [Del] 删除选中  |  点击继续', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
       fontSize: '14px', color: '#665544',
     }).setOrigin(0.5).setDepth(101);
   }
 
-  /**
-   * 显示存档面板并加载存档列表
-   */
-  async showArchivePanel() {
+  async _showArchives() {
     this.archivePanel.setVisible(true);
     this.archiveListContent.removeAll(true);
     this.archiveScrollY = 0;
     this.archiveListContentHeight = 0;
     this.archiveHint.setText('加载存档列表中……');
 
-    // 禁用主菜单按钮
     this.allButtons.forEach(btn => {
-      if (btn.list) {
-        btn.list.forEach(child => {
-          if (child.input) child.disableInteractive();
-        });
-      }
+      if (btn.list) btn.list.forEach(child => { if (child.input) child.disableInteractive(); });
     });
 
     try {
       const data = await getSessions();
       const sessions = data.sessions || [];
-
       if (sessions.length === 0) {
         this.archiveHint.setText('没有存档记录');
-        this.displayEmptyArchive();
+        this._displayEmptyArchive();
       } else {
         this.archiveHint.setText(`共 ${sessions.length} 个存档`);
-        this.renderArchiveList(sessions);
+        this._renderArchiveList(sessions);
       }
     } catch (err) {
       console.warn('[MenuScene] 获取存档列表失败:', err);
       this.archiveHint.setText('无法连接到服务器');
-      this.displayEmptyArchive();
+      this._displayEmptyArchive();
     }
   }
 
-  /**
-   * 隐藏存档面板
-   */
-  hideArchivePanel() {
+  _hideArchivePanel() {
     this.archivePanel.setVisible(false);
-    // 恢复按钮交互
     this.allButtons.forEach(btn => {
-      if (btn.list) {
-        btn.list.forEach(child => {
-          if (child.input) child.setInteractive({ useHandCursor: true });
-        });
-      }
+      if (btn.list) btn.list.forEach(child => { if (child.input) child.setInteractive({ useHandCursor: true }); });
     });
   }
 
-  /**
-   * 空存档提示
-   */
-  displayEmptyArchive() {
-    const { width } = this.cameras.main;
-    const emptyText = this.add.text(width / 2, 120, '还没有存档，请先开始新游戏', {
+  _displayEmptyArchive() {
+    const emptyText = this.add.text(this.cameras.main.width / 2, 120, '还没有存档，请先开始新游戏', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
       fontSize: '18px', color: '#666655',
     }).setOrigin(0.5);
     this.archiveListContent.add(emptyText);
   }
 
-  /**
-   * 渲染存档列表
-   */
-  renderArchiveList(sessions) {
+  _renderArchiveList(sessions) {
     const { width } = this.cameras.main;
-    const panelW = 580;
-    const panelX = (width - panelW) / 2;
+    const panelW = 580, panelX = (width - panelW) / 2;
 
-    // 阶段名映射（从 STAGE_TONES 动态生成）
+    // 阶段名映射
     const stageNames = {};
-    for (const [k, v] of Object.entries(STAGE_TONES)) {
-      stageNames[k] = v.name;
-    }
+    for (const [k, v] of Object.entries(STAGE_TONES)) stageNames[k] = v.name;
 
-    // 按更新时间降序
     const sorted = [...sessions].sort((a, b) =>
       (b.updated_at || b.created_at || '').localeCompare(a.updated_at || a.created_at || '')
     );
@@ -349,54 +326,39 @@ export class MenuScene extends Phaser.Scene {
     const colW = panelW - 60;
     let y = 8;
 
-    sorted.forEach((s, idx) => {
+    sorted.forEach((s) => {
       const stageName = s.stage_name || stageNames[s.stage] || '未知';
       const date = (s.updated_at || s.created_at || '').slice(0, 16);
       const ended = s.game_ended ? ' [已结局]' : '';
       const label = `${s.player_name || '玩家'} · 第${s.stage || '?'}章「${stageName}」${ended}`;
-      const subLabel = date || '未知时间';
 
-      // 行容器
-      const rowY = y;
       const rowBg = this.add.graphics();
       rowBg.fillStyle(0x1a1a28, 1);
-      rowBg.fillRoundedRect(panelX + 28, rowY - 4, colW - 28, 58, 6);
+      rowBg.fillRoundedRect(panelX + 28, y - 4, colW - 28, 58, 6);
       rowBg.lineStyle(1, 0x443322, 0.4);
-      rowBg.strokeRoundedRect(panelX + 28, rowY - 4, colW - 28, 58, 6);
+      rowBg.strokeRoundedRect(panelX + 28, y - 4, colW - 28, 58, 6);
       this.archiveListContent.add(rowBg);
 
-      // 文字
-      const nameText = this.add.text(panelX + 42, rowY + 6, label, {
+      this.archiveListContent.add(this.add.text(panelX + 42, y + 6, label, {
         fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
         fontSize: '18px', color: s.game_ended ? '#886644' : '#d4b896',
-      });
-      this.archiveListContent.add(nameText);
+      }));
 
-      const dateText = this.add.text(panelX + 42, rowY + 30, subLabel, {
-        fontFamily: 'monospace',
-        fontSize: '14px', color: '#665544',
-      });
-      this.archiveListContent.add(dateText);
+      this.archiveListContent.add(this.add.text(panelX + 42, y + 30, date || '未知时间', {
+        fontFamily: 'monospace', fontSize: '14px', color: '#665544',
+      }));
 
-      // "继续" 按钮
-      const contW = 60;
-      const contBtn = this.createSmallButton(
-        panelX + colW - contW - 90, rowY + 10, contW, 32,
-        '继续', '#889966', () => {
-          this.loadArchive(s.session_id);
-        }
+      // 继续按钮
+      this.archiveListContent.add(
+        createSmallButton(this, panelX + colW - 150, y + 10, 60, 32, '继续', '#889966',
+          () => this._loadArchive(s.session_id))
       );
-      this.archiveListContent.add(contBtn);
 
-      // "删除" 按钮
-      const delW = 60;
-      const delBtn = this.createSmallButton(
-        panelX + colW - delW - 30, rowY + 10, delW, 32,
-        '删除', '#aa6655', () => {
-          this.confirmDeleteArchive(s.session_id, s.player_name);
-        }
+      // 删除按钮
+      this.archiveListContent.add(
+        createSmallButton(this, panelX + colW - 90, y + 10, 60, 32, '删除', '#aa6655',
+          () => this._confirmDelete(s.session_id, s.player_name))
       );
-      this.archiveListContent.add(delBtn);
 
       y += 62;
     });
@@ -406,76 +368,24 @@ export class MenuScene extends Phaser.Scene {
     this.archiveListContent.setY(this._archiveListArea.baseY);
   }
 
-  /**
-   * 创建小型操作按钮（存档列表内用）
-   */
-  createSmallButton(x, y, w, h, label, color, callback) {
-    const container = this.add.container(x, y);
-    const bg = this.add.graphics();
-    bg.fillStyle(0x2a2824, 1);
-    bg.fillRoundedRect(0, 0, w, h, 4);
-    bg.lineStyle(1, Phaser.Display.Color.HexStringToColor(color).color, 0.5);
-    bg.strokeRoundedRect(0, 0, w, h, 4);
-    container.add(bg);
-
-    const text = this.add.text(w / 2, h / 2, label, {
-      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '16px', color: color,
-    }).setOrigin(0.5);
-    container.add(text);
-
-    const zone = this.add.zone(w / 2, h / 2, w, h).setInteractive({ useHandCursor: true });
-    zone.on('pointerover', () => {
-      bg.clear();
-      bg.fillStyle(0x3a3834, 1);
-      bg.fillRoundedRect(0, 0, w, h, 4);
-      bg.lineStyle(1, Phaser.Display.Color.HexStringToColor(color).color, 0.8);
-      bg.strokeRoundedRect(0, 0, w, h, 4);
-    });
-    zone.on('pointerout', () => {
-      bg.clear();
-      bg.fillStyle(0x2a2824, 1);
-      bg.fillRoundedRect(0, 0, w, h, 4);
-      bg.lineStyle(1, Phaser.Display.Color.HexStringToColor(color).color, 0.5);
-      bg.strokeRoundedRect(0, 0, w, h, 4);
-    });
-    zone.on('pointerdown', callback);
-    container.add(zone);
-
-    return container;
-  }
-
-  /**
-   * 确认删除存档
-   */
-  async confirmDeleteArchive(sessionId, playerName) {
-    const confirmed = confirm(`确定要删除「${playerName || '玩家'}」的存档吗？此操作不可撤销。`);
-    if (!confirmed) return;
-
+  async _confirmDelete(sessionId, playerName) {
+    if (!confirm(`确定要删除「${playerName || '玩家'}」的存档吗？此操作不可撤销。`)) return;
     try {
       await deleteSession(sessionId);
-
-      // 清理本地关联
       if (localStorage.getItem('__active_session__') === sessionId) {
         localStorage.removeItem('__active_session__');
       }
       localStorage.removeItem(`game_state_${sessionId}`);
-
-      // 刷新列表
       this.archiveListContent.removeAll(true);
-      this.showArchivePanel();
+      this._showArchives();
     } catch (err) {
       console.error('[MenuScene] 删除存档失败:', err);
       this.archiveHint.setText('删除失败，请重试');
     }
   }
 
-  /**
-   * 加载指定存档
-   */
-  loadArchive(sessionId) {
+  _loadArchive(sessionId) {
     if (!sessionId) return;
-
     localStorage.setItem('__active_session__', sessionId);
     this.cameras.main.fadeOut(600, 0, 0, 0);
     this.time.delayedCall(600, () => {
@@ -483,42 +393,13 @@ export class MenuScene extends Phaser.Scene {
     });
   }
 
-  /**
-   * 开始新游戏
-   */
-  onNewGame() {
+  _startNewGame() {
     this.cameras.main.fadeOut(600, 0, 0, 0);
-    this.time.delayedCall(600, () => {
-      this.scene.start('GameScene');
-    });
+    this.time.delayedCall(600, () => this.scene.start('GameScene'));
   }
 
-  /**
-   * 继续游戏 — 直接显示存档面板，让玩家选择会话
-   */
-  async onContinue() {
-    this.showArchivePanel();
-  }
+  // ==================== 更新循环 ====================
 
-  /**
-   * 检查是否有可用存档（已废弃，改用 API 动态获取）
-   */
-  hasSavedGame() {
-    const sessionId = localStorage.getItem('__active_session__');
-    if (!sessionId) return false;
-    const saved = localStorage.getItem(`game_state_${sessionId}`);
-    if (!saved) return false;
-    try {
-      const state = JSON.parse(saved);
-      return !state.game_ended;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * 更新循环 — 粒子飘落动画 + 存档面板键盘操作
-   */
   update() {
     if (!this.fallingParticles) return;
 
@@ -532,11 +413,8 @@ export class MenuScene extends Phaser.Scene {
       }
     }
 
-    // ESC 关闭存档面板
     if (this.archivePanel && this.archivePanel.visible) {
-      if (Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
-        this.hideArchivePanel();
-      }
+      if (Phaser.Input.Keyboard.JustDown(this.keyEsc)) this._hideArchivePanel();
     }
   }
 }

@@ -1,3 +1,14 @@
+/**
+ * Phaser 游戏入口
+ *
+ * 职责：
+ * - 创建 Phaser.Game 实例并配置渲染参数
+ * - 注册所有场景（BootScene → MenuScene → GameScene → UIScene）
+ * - 导出全局自由文本输入工具（供对话系统使用）
+ *
+ * @module main
+ */
+
 import Phaser from 'phaser';
 import { BootScene } from './scenes/BootScene.js';
 import { MenuScene } from './scenes/MenuScene.js';
@@ -27,9 +38,16 @@ const config = {
   scene: [BootScene, MenuScene, GameScene, UIScene],
 };
 
+// eslint-disable-next-line no-unused-vars
 const game = new Phaser.Game(config);
 
-// ========== 全局自由文本输入框（HTML DOM，嵌入对话框内）==========
+/**
+ * 创建全局自由文本输入框（HTML DOM input）
+ * 使用 fixed 定位，嵌入 game-container 中与 canvas 同级
+ * 用于对话框内的自由文本回复
+ *
+ * @returns {HTMLInputElement} 输入框 DOM 元素
+ */
 export function createGlobalInput() {
   const el = document.createElement('input');
   el.type = 'text';
@@ -48,5 +66,5 @@ export function createGlobalInput() {
   return el;
 }
 
-// 保存输入值集（用于清理）
+/** 全局输入值引用 — 保存最新提交的文本 */
 export const globalInputValues = { current: '' };
