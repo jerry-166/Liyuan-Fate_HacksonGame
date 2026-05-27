@@ -37,6 +37,16 @@ export const SCENES = {
   UI: 'UIScene',
 };
 
+/** 子场景 key 常量 */
+export const SUBSCENE = {
+  STAGE: 'stage',
+  TEA_HOUSE: 'tea_house',
+  DOCK: 'dock',
+  ANCESTRAL_HALL: 'ancestral_hall',
+  FATHERS_HOUSE: 'fathers_house',
+  GRAVEYARD: 'graveyard',
+};
+
 /** 六章节色调映射（《梨园生死》剧情线） */
 export const STAGE_TONES = {
   1: { name: '归乡',       tint: 0x8899aa, mood: 'melancholy', hex: '#8899aa' },

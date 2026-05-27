@@ -521,16 +521,26 @@ export class SaveManager {
       const state = await getGameState(ui.sessionId);
       state._saved_stage = ui.currentStage;
 
-      // ★ 直接更新 state 中的位置数据
+      // ★ 直接更新 state 中的位置数据 + 子场景标识
       if (positions) {
-        if (state.npcs && Array.isArray(state.npcs)) {
-          for (const pos of positions.storyNpcs) {
-            const npc = state.npcs.find(n => n.id === pos.npc_id);
-            if (npc) npc.position = pos.position;
+        if (positions.subSceneId) {
+          // 子场景中：不污染主地图位置字段，保存到子场景专属 key
+          state._sub_scene_id = positions.subSceneId;
+          state._sub_scene_player_position = positions.player;
+          state._sub_scene_story_npc_positions = positions.storyNpcs;
+          state._sub_scene_town_npc_positions = positions.townNpcs;
+        } else {
+          // 主地图：正常更新位置
+          state._sub_scene_id = null;
+          if (state.npcs && Array.isArray(state.npcs)) {
+            for (const pos of positions.storyNpcs) {
+              const npc = state.npcs.find(n => n.id === pos.npc_id);
+              if (npc) npc.position = pos.position;
+            }
           }
+          state._town_npc_positions = positions.townNpcs;
+          state._player_position = positions.player;
         }
-        state._town_npc_positions = positions.townNpcs;
-        state._player_position = positions.player;
       }
 
       // 调用后端存档 API

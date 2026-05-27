@@ -656,6 +656,10 @@ export async function createSave(sessionId, gameState, slotId = null,
     slot_id: slotId,
     player_position: playerPos,
     town_npc_positions: townNpcPos,
+    _sub_scene_id: gameState?._sub_scene_id || null,
+    _sub_scene_player_position: gameState?._sub_scene_player_position || null,
+    _sub_scene_story_npc_positions: gameState?._sub_scene_story_npc_positions || null,
+    _sub_scene_town_npc_positions: gameState?._sub_scene_town_npc_positions || null,
   };
   const res = await fetch(`${BASE}/game/${sessionId}/saves`, {
     method: 'POST',

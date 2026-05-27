@@ -26,6 +26,8 @@ import {
   PROTAGONIST, NPC_SPRITES, FALLBACK_NPC_SPRITE, DIRS,
   showToast as _showToast, showLoadingHint as _showLoadingHint, hideLoadingHint as _hideLoadingHint,
 } from './modules/GameUIHelpers.js';
+import { SUBSCENES } from './modules/SubSceneConfig.js';
+import { SubSceneManager } from './modules/SubSceneManager.js';
 
 const TILE = GAME.TILE_SIZE;
 
@@ -48,6 +50,19 @@ function _mergeLocalPositionState(sessionId, gameState) {
     // 合并主角位置
     if (local._player_position) {
       gameState._player_position = local._player_position;
+    }
+    // 合并子场景标识与位置（用于 restoreGame 时恢复子场景状态）
+    if (local._sub_scene_id) {
+      gameState._sub_scene_id = local._sub_scene_id;
+    }
+    if (local._sub_scene_player_position) {
+      gameState._sub_scene_player_position = local._sub_scene_player_position;
+    }
+    if (local._sub_scene_story_npc_positions) {
+      gameState._sub_scene_story_npc_positions = local._sub_scene_story_npc_positions;
+    }
+    if (local._sub_scene_town_npc_positions) {
+      gameState._sub_scene_town_npc_positions = local._sub_scene_town_npc_positions;
     }
     // 合并故事 NPC 位置（localStorage 中的可能比后端 DB 更新）
     if (local.npcs && Array.isArray(local.npcs) && gameState.npcs && Array.isArray(gameState.npcs)) {
@@ -87,6 +102,14 @@ export class GameScene extends Phaser.Scene {
     }
     // 加载大地图素材
     this.load.image('town_worldmap', '/assets/images/maps/town_worldmap.png');
+
+    // 加载子场景地图图片
+    for (const config of Object.values(SUBSCENES)) {
+      this.load.image(config.imageKey, config.imagePath);
+      if (config.hasStateSwitch && config.altImageKey) {
+        this.load.image(config.altImageKey, config.altImagePath);
+      }
+    }
   }
 
   create() {
@@ -108,6 +131,9 @@ export class GameScene extends Phaser.Scene {
 
     // 碰撞数据
     this._collisionMap = {};
+
+    // 子场景管理器
+    this.subSceneManager = new SubSceneManager(this);
 
     this.drawTileMap();
 
@@ -178,12 +204,25 @@ export class GameScene extends Phaser.Scene {
       this.scene.restart();
     });
     this.events.on('state:refresh', (state) => {
+      // 子场景中有独立 NPC 生命周期，跳过主地图状态刷新
+      if (this.subSceneManager.isInSubScene()) return;
       this.refreshNPCsFromState(state);
       this.refreshSceneItems();
     });
     this.events.on('state:reload', this._reloadFromState, this);
     this.events.on('stage:change', (newStage) => {
       this.applyStageTone(newStage);
+    });
+
+    // 子场景相关事件
+    this.events.on('subscene:stage-renewed', () => {
+      this.subSceneManager.triggerStageRenewed();
+    });
+    this.events.on('subscene:enter', (subSceneId) => {
+      this.subSceneManager.enterSubScene(subSceneId);
+    });
+    this.events.on('subscene:exit', () => {
+      this.subSceneManager.exitSubScene();
     });
 
     // 阶段色调遮罩
@@ -287,6 +326,9 @@ export class GameScene extends Phaser.Scene {
    * 恢复存档游戏
    */
   async restoreGame(sessionId) {
+    // ★ 防御性：如果当前在子场景中，强制退出避免状态残留
+    this.subSceneManager.forceExitSubScene();
+
     try {
       const { getGameState, saveGameState } = await import('../api/client.js');
       this._loadingHint = _showLoadingHint(this, '正在加载存档……');
@@ -333,6 +375,19 @@ export class GameScene extends Phaser.Scene {
         inventory: gameState.inventory || [],
       });
 
+      // ★ 子场景存档恢复：如果存档时玩家在子场景中，跳过主地图加载
+      if (gameState._sub_scene_id) {
+        console.log('[GameScene] restoreGame: 检测到子场景存档', gameState._sub_scene_id);
+        saveGameState(sessionId, gameState);
+        this.time.delayedCall(300, () => {
+          this._reloadSubSceneFromState(gameState, gameState._sub_scene_id);
+        });
+        if (gameState.stage_params) {
+          this.time.delayedCall(500, () => this.applyStageTone(gameState.stage_params));
+        }
+        return;
+      }
+
       if (gameState.npcs) {
         this.time.delayedCall(300, () => this.refreshNPCsFromState(gameState));
       }
@@ -373,15 +428,22 @@ export class GameScene extends Phaser.Scene {
     const sessionId = gameState.session_id;
     if (!sessionId) return;
 
-    console.log('[GameScene] reloadFromState: stage=', gameState.current_stage, 'npcs=', gameState.npcs?.length);
+    // ★ 强制退出当前子场景（如果正在某子场景中，确保 UI 清理干净）
+    this.subSceneManager.forceExitSubScene();
 
-    // ★ 从 localStorage 合并位置数据（后端 state 不含 _town_npc_positions / _player_position）
-    _mergeLocalPositionState(sessionId, gameState);
+    const savedSubSceneId = gameState._sub_scene_id;
+    console.log('[GameScene] reloadFromState: stage=', gameState.current_stage,
+      'npcs=', gameState.npcs?.length,
+      'subSceneId=', savedSubSceneId);
+
+    // ★ 从 localStorage 合并位置数据（仅主地图场景使用）
+    if (!savedSubSceneId) {
+      _mergeLocalPositionState(sessionId, gameState);
+    }
 
     // 1. 更新本地阶段 + 缓存
     this.currentStage = gameState.current_stage || 1;
     localStorage.setItem('__active_session__', sessionId);
-    // 异步导入 saveGameState 避免循环依赖
     import('../api/client.js').then(({ saveGameState }) => {
       saveGameState(sessionId, gameState);
     });
@@ -397,12 +459,80 @@ export class GameScene extends Phaser.Scene {
       inventory: gameState.inventory || [],
     });
 
-    // 3. 刷新剧情 NPC（位置 + 语气词）
+    // 3. 应用阶段色调
+    if (gameState.stage_params) {
+      this.time.delayedCall(300, () => this.applyStageTone(gameState.stage_params));
+    }
+
+    // 4. 结局状态处理
+    if (gameState.game_ended && gameState.ending) {
+      this.time.delayedCall(500, () => {
+        this.events.emit('ending:restore', gameState.ending);
+      });
+    }
+
+    // ====== 分路径处理 ======
+    if (savedSubSceneId) {
+      // ★★★ 子场景存档：跳过主地图 NPC/主角/物品加载，直接进入子场景 ★★★
+      console.log(`[GameScene] 检测到子场景存档: ${savedSubSceneId}，直接恢复子场景`);
+      this._reloadSubSceneFromState(gameState, savedSubSceneId);
+    } else {
+      // ★★★ 主地图存档：正常加载主地图实体 ★★★
+      this._reloadMainMapFromState(gameState);
+    }
+
+    // 解锁输入
+    this.events.emit('input:lock', false);
+  }
+
+  /**
+   * 从子场景存档恢复 — 直接进入子场景，不加载主地图实体
+   */
+  _reloadSubSceneFromState(gameState, subSceneId) {
+    // ★ 同步恢复主角可见性（forceExitSubScene 已放到主地图兜底位置）
+    if (this.player) {
+      this.player.setVisible(true);
+      this.player.setAlpha(1);
+      this.player.setTexture(`${PROTAGONIST.prefix}_idle_down`);
+    }
+
+    // 延迟进入子场景，等待 forceExitSubScene 的地图渲染完成
+    this.time.delayedCall(200, () => {
+      this.subSceneManager.enterSubScene(subSceneId, {
+        playerPos: gameState._sub_scene_player_position || null,
+        storyNpcPositions: gameState._sub_scene_story_npc_positions || null,
+      });
+    });
+  }
+
+  /**
+   * 从主地图存档恢复 — 加载所有主地图实体
+   */
+  _reloadMainMapFromState(gameState) {
+    const sessionId = gameState.session_id;
+
+    // ★ 同步恢复主角位置
+    if (gameState._player_position && this.player) {
+      const { col, row } = gameState._player_position;
+      const { x: px, y: py } = COORD.toPixel(col, row);
+      this.player.x = px * MAP_SCALE;
+      this.player.y = py * MAP_SCALE;
+      this.player.setTexture(`${PROTAGONIST.prefix}_idle_down`);
+      this.player.setVisible(true);
+      this.player.setAlpha(1);
+      const br = PROTAGONIST.bodyRatio;
+      const bodyW = Math.floor(this.player.displayWidth * br.w);
+      const bodyH = Math.floor(this.player.displayHeight * br.h);
+      this.player.body.setSize(bodyW, bodyH);
+      this.player.body.setOffset(bodyW * br.offsetX, this.player.displayHeight * br.offsetY);
+    }
+
+    // 刷新剧情 NPC
     if (gameState.npcs) {
       this.time.delayedCall(100, () => this.refreshNPCsFromState(gameState));
     }
 
-    // 4. 重新加载普通 NPC + 完成后恢复位置
+    // 加载普通 NPC + 完成后恢复位置
     this._townNpcLoadPromise = this.loadTownNPCs();
     this.time.delayedCall(300, () => this.refreshSceneItems());
 
@@ -411,21 +541,6 @@ export class GameScene extends Phaser.Scene {
     }).catch(() => {
       this._restoreTownNPCAndPlayerPositions(gameState);
     });
-
-    // 7. 应用阶段色调
-    if (gameState.stage_params) {
-      this.time.delayedCall(300, () => this.applyStageTone(gameState.stage_params));
-    }
-
-    // 8. 结局状态处理
-    if (gameState.game_ended && gameState.ending) {
-      this.time.delayedCall(500, () => {
-        this.events.emit('ending:restore', gameState.ending);
-      });
-    }
-
-    // 解锁输入（如果之前被锁定）
-    this.events.emit('input:lock', false);
   }
 
   // ==================== 场景物品系统 ====================
@@ -555,22 +670,23 @@ export class GameScene extends Phaser.Scene {
 
   /**
    * 收集当前所有 NPC 和主角的实时瓦片坐标
-   * @returns {{ storyNpcs: Array, townNpcs: Array, player: Object }}
+   * @returns {{ storyNpcs: Array, townNpcs: Array, player: Object, subSceneId: string|null }}
    */
   collectPositions() {
+    const effectiveScale = this.subSceneManager.getEffectiveScale();
     const storyNpcs = this.npcs.map(npc => {
-      const tile = COORD.toTile(npc.x / MAP_SCALE, npc.y / MAP_SCALE);
+      const tile = COORD.toTile(npc.x / effectiveScale, npc.y / effectiveScale);
       return { npc_id: npc.getData('npcId'), position: { col: tile.col, row: tile.row } };
     });
     const townNpcs = this.townNpcs.map(npc => {
-      const tile = COORD.toTile(npc.x / MAP_SCALE, npc.y / MAP_SCALE);
+      const tile = COORD.toTile(npc.x / effectiveScale, npc.y / effectiveScale);
       return { npc_id: npc.getData('npcId'), position: { col: tile.col, row: tile.row } };
     });
     const playerTile = this.player
-      ? COORD.toTile(this.player.x / MAP_SCALE, this.player.y / MAP_SCALE)
+      ? COORD.toTile(this.player.x / effectiveScale, this.player.y / effectiveScale)
       : { col: 44, row: 28 };
 
-    return { storyNpcs, townNpcs, player: playerTile };
+    return { storyNpcs, townNpcs, player: playerTile, subSceneId: this.subSceneManager.currentSubSceneId };
   }
 
   /** 从存档 state 恢复普通 NPC 和主角位置 */
@@ -627,6 +743,12 @@ export class GameScene extends Phaser.Scene {
 
   /** 更新所有 NPC 漫游行为（每帧调用，覆盖故事NPC + 普通NPC） */
   _updateTownNPCs(dt) {
+    const effectiveScale = this.subSceneManager.getEffectiveScale();
+    const mapBounds = this._mapBounds;
+    const mapW = mapBounds ? mapBounds.w : MAP_COLS * TILE * MAP_SCALE;
+    const mapH = mapBounds ? mapBounds.h : MAP_ROWS * TILE * MAP_SCALE;
+    const margin = TILE * effectiveScale;
+
     // 辅助函数：驱动单个 NPC 的 wander AI
     const _driveNPC = (npc) => {
       const wander = npc.getData('wanderState');
@@ -643,13 +765,11 @@ export class GameScene extends Phaser.Scene {
           }
           if (wander.idleTimer >= wander.idleDuration) {
             const angle = Math.random() * Math.PI * 2;
-            const dist = (3 + Math.random() * (wander.wanderRange - 3)) * TILE * MAP_SCALE;
+            const dist = (3 + Math.random() * (wander.wanderRange - 3)) * margin;
             wander.targetX = npc.x + Math.cos(angle) * dist;
             wander.targetY = npc.y + Math.sin(angle) * dist;
-            const mapW = MAP_COLS * TILE * MAP_SCALE;
-            const mapH = MAP_ROWS * TILE * MAP_SCALE;
-            wander.targetX = Phaser.Math.Clamp(wander.targetX, TILE * MAP_SCALE, mapW - TILE * MAP_SCALE);
-            wander.targetY = Phaser.Math.Clamp(wander.targetY, TILE * MAP_SCALE, mapH - TILE * MAP_SCALE);
+            wander.targetX = Phaser.Math.Clamp(wander.targetX, margin, mapW - margin);
+            wander.targetY = Phaser.Math.Clamp(wander.targetY, margin, mapH - margin);
             wander.state = 'wandering';
             wander.wanderTimer = 0;
             wander.wanderDuration = wander.wanderRange * 40 + Math.random() * 60;
@@ -696,7 +816,7 @@ export class GameScene extends Phaser.Scene {
     for (let i = 0; i < this.townNpcs.length; i++) {
       _driveNPC(this.townNpcs[i]);
       const bubble = this.townNpcBubbles[i];
-      if (bubble) bubble.setPosition(this.townNpcs[i].x, this.townNpcs[i].y - 18 * MAP_SCALE);
+      if (bubble) bubble.setPosition(this.townNpcs[i].x, this.townNpcs[i].y - 18 * effectiveScale);
     }
   }
 
@@ -882,7 +1002,8 @@ export class GameScene extends Phaser.Scene {
   /** 检查网格碰撞 - 支持 2x2 覆盖检测 */
   _checkCollisionAt(worldX, worldY) {
     if (!this._collisionMap || Object.keys(this._collisionMap).length === 0) return false;
-    const gridPx = TILE * MAP_SCALE;
+    const effectiveScale = this.subSceneManager.getEffectiveScale();
+    const gridPx = TILE * effectiveScale;
     const col = Math.floor(worldX / gridPx);
     const row = Math.floor(worldY / gridPx);
     for (let dc = 0; dc <= 1; dc++) {
@@ -896,13 +1017,21 @@ export class GameScene extends Phaser.Scene {
   /** 保存碰撞配置和 NPC 位置到 localStorage */
   _saveToLocalStorage() {
     const npcPositions = {};
+    const effectiveScale = this.subSceneManager.getEffectiveScale();
     for (const npc of this.npcs) {
-      const tile = COORD.toTile(npc.x / MAP_SCALE, npc.y / MAP_SCALE);
+      const tile = COORD.toTile(npc.x / effectiveScale, npc.y / effectiveScale);
       npcPositions[npc.getData('npcId')] = { col: tile.col, row: tile.row };
     }
     try {
-      localStorage.setItem('editor_collision_map', JSON.stringify(this._collisionMap));
-      localStorage.setItem('editor_npc_positions', JSON.stringify(npcPositions));
+      // 区分主地图和子场景的碰撞数据 key
+      const collisionKey = this.subSceneManager.isInSubScene()
+        ? `editor_collision_map_${this.subSceneManager.currentSubSceneId}`
+        : 'editor_collision_map';
+      const npcKey = this.subSceneManager.isInSubScene()
+        ? `editor_npc_positions_${this.subSceneManager.currentSubSceneId}`
+        : 'editor_npc_positions';
+      localStorage.setItem(collisionKey, JSON.stringify(this._collisionMap));
+      localStorage.setItem(npcKey, JSON.stringify(npcPositions));
     } catch (e) {
       console.warn('[Editor] localStorage 保存失败:', e);
     }
@@ -912,8 +1041,9 @@ export class GameScene extends Phaser.Scene {
   _saveCollisionConfig() {
     this._saveToLocalStorage();
     const npcPositions = {};
+    const effectiveScale = this.subSceneManager.getEffectiveScale();
     for (const npc of this.npcs) {
-      const tile = COORD.toTile(npc.x / MAP_SCALE, npc.y / MAP_SCALE);
+      const tile = COORD.toTile(npc.x / effectiveScale, npc.y / effectiveScale);
       npcPositions[npc.getData('npcId')] = { name: npc.getData('name'), col: tile.col, row: tile.row };
     }
     console.log('═══════════════════════════════════');
@@ -1085,8 +1215,9 @@ export class GameScene extends Phaser.Scene {
 
   _showNPCActionButtons(npc) {
     const cam = this.cameras.main;
+    const effectiveScale = this.subSceneManager.getEffectiveScale();
     const relX = npc.x - cam.scrollX;
-    const relY = npc.y - cam.scrollY - 50 * MAP_SCALE;
+    const relY = npc.y - cam.scrollY - 50 * effectiveScale;
     for (const { obj, dx, dy } of this._npcBtnParts) {
       obj.setPosition(relX + dx, relY + dy).setVisible(true);
     }
@@ -1096,8 +1227,9 @@ export class GameScene extends Phaser.Scene {
 
   _updateNPCActionPosition(npc) {
     const cam = this.cameras.main;
+    const effectiveScale = this.subSceneManager.getEffectiveScale();
     const relX = npc.x - cam.scrollX;
-    const relY = npc.y - cam.scrollY - 52 * MAP_SCALE;
+    const relY = npc.y - cam.scrollY - 52 * effectiveScale;
     this.npcActionContainer.setPosition(relX, relY);
   }
 
@@ -1179,7 +1311,7 @@ export class GameScene extends Phaser.Scene {
   _showControlsHint() {
     const { width, height } = this.cameras.main;
     const hint = this.add.text(width / 2, height - 50,
-      '[WASD/方向键] 移动  |  [E] 碰撞编辑器(编辑器内WASD滚动视角)  |  [R] 硬重置', {
+      '[WASD/方向键] 移动  |  [F] 拾取/进出建筑  |  [E] 碰撞编辑器  |  [R] 硬重置', {
         fontFamily: '"Microsoft YaHei","Consolas",sans-serif',
         fontSize: '13px', color: '#aabbcc',
         backgroundColor: '#0a0a15dd',
@@ -1258,9 +1390,15 @@ export class GameScene extends Phaser.Scene {
     // 物品接近检测
     this._updateItemProximity();
 
-    // F 键拾取
+    // 子场景入口/出口接近检测
+    this.subSceneManager.updateProximityHints();
+
+    // F 键拾取 / 进入离开子场景
     if (!this.inputLocked && Phaser.Input.Keyboard.JustDown(this.wasd.F)) {
-      if (this.currentNearbyItem) this.pickupItem(this.currentNearbyItem);
+      // 优先处理子场景交互
+      if (!this.subSceneManager.handleFKeyInteraction()) {
+        if (this.currentNearbyItem) this.pickupItem(this.currentNearbyItem);
+      }
     }
 
     // 摄像机跟随
@@ -1302,6 +1440,16 @@ export class GameScene extends Phaser.Scene {
       finalVY = 0;
     }
 
+    // 地图边界限制（主地图和子场景通用）
+    if (this._mapBounds) {
+      const effectiveScale = this.subSceneManager.getEffectiveScale();
+      const margin = 16 * effectiveScale;
+      const newX = this.player.x + finalVX * (this.game.loop.delta / 1000);
+      const newY = this.player.y + finalVY * (this.game.loop.delta / 1000);
+      if (newX < margin || newX > this._mapBounds.w - margin) finalVX = 0;
+      if (newY < margin || newY > this._mapBounds.h - margin) finalVY = 0;
+    }
+
     this.player.setVelocity(finalVX, finalVY);
   }
 
@@ -1321,10 +1469,11 @@ export class GameScene extends Phaser.Scene {
     }
 
     // 普通 NPC
+    const effectiveScale = this.subSceneManager.getEffectiveScale();
     for (let i = 0; i < this.townNpcs.length; i++) {
       const npc = this.townNpcs[i];
       const bubble = this.townNpcBubbles[i];
-      if (bubble) bubble.setPosition(npc.x, npc.y - 18 * MAP_SCALE);
+      if (bubble) bubble.setPosition(npc.x, npc.y - 18 * effectiveScale);
 
       const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, npc.x, npc.y);
       if (dist < minDist) minDist = dist;
