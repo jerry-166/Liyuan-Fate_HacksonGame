@@ -53,13 +53,35 @@ class Database:
             "ALTER TABLE npc_states ADD COLUMN position_col INTEGER DEFAULT 0",
             "ALTER TABLE npc_states ADD COLUMN position_row INTEGER DEFAULT 0",
             "ALTER TABLE npc_states ADD COLUMN scene TEXT NOT NULL DEFAULT ''",
+            # v3: saves 表（新表，用 schema.sql 中的 CREATE TABLE IF NOT EXISTS 创建，
+            # 这里添加一条无害的 SELECT 确保旧库迁移时 coverage）
         ]
+        # 确保 saves 表和目录存在（处理旧库升级场景）
         with self._conn() as conn:
             for sql in migrations:
                 try:
                     conn.execute(sql)
                 except sqlite3.OperationalError:
                     pass
+            # v3: 确保 saves 表已创建（已有 schema.sql 的 IF NOT EXISTS 兜底）
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS saves (
+                    save_id   TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    slot_id   INTEGER NOT NULL,
+                    label     TEXT NOT NULL DEFAULT '',
+                    stage     INTEGER NOT NULL DEFAULT 1,
+                    chapter_id TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (session_id) REFERENCES sessions(session_id),
+                    UNIQUE(session_id, slot_id)
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_saves_session ON saves(session_id)")
+        # 确保存档目录存在
+        saves_dir = os.path.join(os.path.dirname(self.db_path), "saves")
+        os.makedirs(saves_dir, exist_ok=True)
 
     # ─── Session CRUD ───────────────────────────────────
 
@@ -514,6 +536,78 @@ class Database:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    # ─── v3: Saves CRUD ─────────────────────────────────
+
+    def create_save(self, save_id: str, session_id: str, slot_id: int,
+                    label: str = "", stage: int = 1,
+                    chapter_id: Optional[str] = None) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO saves (save_id, session_id, slot_id, label, "
+                "stage, chapter_id, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                (save_id, session_id, slot_id, label, stage, chapter_id),
+            )
+
+    def list_saves(self, session_id: str) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT save_id, session_id, slot_id, label, stage, chapter_id, "
+                "created_at, updated_at FROM saves "
+                "WHERE session_id = ? ORDER BY slot_id ASC",
+                (session_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_save(self, save_id: str) -> Optional[dict]:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM saves WHERE save_id = ?", (save_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def delete_save(self, save_id: str) -> bool:
+        with self._conn() as conn:
+            cur = conn.execute("DELETE FROM saves WHERE save_id = ?", (save_id,))
+            return cur.rowcount > 0
+
+    def delete_saves_by_session(self, session_id: str) -> int:
+        with self._conn() as conn:
+            cur = conn.execute(
+                "DELETE FROM saves WHERE session_id = ?", (session_id,)
+            )
+            return cur.rowcount
+
+    # ─── v3: Save Snapshot File I/O ─────────────────────
+
+    def write_save_snapshot(self, session_id: str, save_id: str,
+                             snapshot: dict) -> str:
+        saves_dir = os.path.join(os.path.dirname(self.db_path), "saves")
+        session_dir = os.path.join(saves_dir, session_id)
+        os.makedirs(session_dir, exist_ok=True)
+        filepath = os.path.join(session_dir, f"{save_id}.json")
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(snapshot, f, ensure_ascii=False, indent=2)
+        return filepath
+
+    def read_save_snapshot(self, session_id: str, save_id: str) -> Optional[dict]:
+        saves_dir = os.path.join(os.path.dirname(self.db_path), "saves")
+        filepath = os.path.join(saves_dir, session_id, f"{save_id}.json")
+        if not os.path.exists(filepath):
+            return None
+        with open(filepath, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def delete_save_snapshot(self, session_id: str, save_id: str) -> bool:
+        saves_dir = os.path.join(os.path.dirname(self.db_path), "saves")
+        filepath = os.path.join(saves_dir, session_id, f"{save_id}.json")
+        if os.path.exists(filepath):
+            os.remove(filepath)
+            return True
+        return False
+
     # ─── TTL 淘汰 ──────────────────────────────────────
 
     def delete_expired_sessions(self, ttl_seconds: float) -> list[str]:
@@ -528,7 +622,7 @@ class Database:
                 placeholders = ",".join("?" * len(ids))
                 for table in ["dialogues", "events", "npc_states", "relationship_log",
                               "player_choices", "stage_history", "narrative_items",
-                              "task_instances", "chapter_progress", "sessions"]:
+                              "task_instances", "chapter_progress", "sessions", "saves"]:
                     conn.execute(
                         f"DELETE FROM {table} WHERE session_id IN ({placeholders})", ids
                     )

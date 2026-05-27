@@ -29,6 +29,38 @@ import {
 
 const TILE = GAME.TILE_SIZE;
 
+/**
+ * 从 localStorage 合并仅前端持有的位置数据到后端 state（后端 API 不含 _town_npc_positions / _player_position）
+ * @param {string} sessionId
+ * @param {object} gameState - 后端返回的 state（会被原地修改）
+ */
+function _mergeLocalPositionState(sessionId, gameState) {
+  if (!gameState || !sessionId) return;
+  try {
+    const saved = localStorage.getItem(`game_state_${sessionId}`);
+    if (!saved) return;
+    const local = JSON.parse(saved);
+
+    // 合并普通 NPC 位置
+    if (local._town_npc_positions && Array.isArray(local._town_npc_positions)) {
+      gameState._town_npc_positions = local._town_npc_positions;
+    }
+    // 合并主角位置
+    if (local._player_position) {
+      gameState._player_position = local._player_position;
+    }
+    // 合并故事 NPC 位置（localStorage 中的可能比后端 DB 更新）
+    if (local.npcs && Array.isArray(local.npcs) && gameState.npcs && Array.isArray(gameState.npcs)) {
+      for (const localNpc of local.npcs) {
+        if (localNpc.position && localNpc.position.col !== undefined) {
+          const serverNpc = gameState.npcs.find(n => n.id === localNpc.id);
+          if (serverNpc) serverNpc.position = localNpc.position;
+        }
+      }
+    }
+  } catch (_) { /* 静默失败，localStorage 损坏不影响主流程 */ }
+}
+
 export class GameScene extends Phaser.Scene {
   constructor() {
     super({ key: 'GameScene' });
@@ -149,6 +181,7 @@ export class GameScene extends Phaser.Scene {
       this.refreshNPCsFromState(state);
       this.refreshSceneItems();
     });
+    this.events.on('state:reload', this._reloadFromState, this);
     this.events.on('stage:change', (newStage) => {
       this.applyStageTone(newStage);
     });
@@ -271,8 +304,20 @@ export class GameScene extends Phaser.Scene {
         gameState = JSON.parse(saved);
       }
 
+      // ★ 从 localStorage 合并仅前端持有的位置数据（后端 API 不含这些字段）
+      _mergeLocalPositionState(sessionId, gameState);
+
       _hideLoadingHint(this._loadingHint);
       console.log('[GameScene] 恢复存档, session:', sessionId, 'stage:', gameState.current_stage);
+      // ★ 诊断日志：检查存档中是否包含位置数据
+      if (gameState.npcs && Array.isArray(gameState.npcs)) {
+        const firstNpc = gameState.npcs[0];
+        console.log('[GameScene] restoreGame: npcs[0].position =', firstNpc?.position, 'firstNpc.id =', firstNpc?.id, 'total npcs:', gameState.npcs.length);
+      } else {
+        console.warn('[GameScene] restoreGame: gameState.npcs is missing or not array');
+      }
+      console.log('[GameScene] restoreGame: _town_npc_positions =', gameState._town_npc_positions?.length || 0, 'items');
+      console.log('[GameScene] restoreGame: _player_position =', gameState._player_position);
 
       localStorage.setItem('__active_session__', sessionId);
       this.currentStage = gameState.current_stage || 1;
@@ -291,11 +336,14 @@ export class GameScene extends Phaser.Scene {
       if (gameState.npcs) {
         this.time.delayedCall(300, () => this.refreshNPCsFromState(gameState));
       }
-      this.time.delayedCall(500, () => this.loadTownNPCs());
-      this.time.delayedCall(600, () => this.refreshSceneItems());
+      // 先加载普通 NPC，完成后恢复位置（避免异步时序导致位置未生效）
+      this._townNpcLoadPromise = this.loadTownNPCs();
+      this.time.delayedCall(500, () => this.refreshSceneItems());
 
-      // ★ 恢复普通 NPC 位置和主角位置（延迟确保 loadTownNPCs 完成）
-      this.time.delayedCall(700, () => {
+      // ★ 等待 loadTownNPCs 完成后恢复普通 NPC 和主角位置
+      this._townNpcLoadPromise.then(() => {
+        this._restoreTownNPCAndPlayerPositions(gameState);
+      }).catch(() => {
         this._restoreTownNPCAndPlayerPositions(gameState);
       });
 
@@ -315,6 +363,69 @@ export class GameScene extends Phaser.Scene {
       console.warn('[GameScene] 恢复存档失败，开始新游戏:', e);
       this.initGame();
     }
+  }
+
+  /**
+   * 就地重新加载存档状态 — 不重启场景，无缝刷新所有游戏实体。
+   * 由 SaveManager.onLoad() 通过 state:reload 事件触发。
+   */
+  _reloadFromState(gameState) {
+    const sessionId = gameState.session_id;
+    if (!sessionId) return;
+
+    console.log('[GameScene] reloadFromState: stage=', gameState.current_stage, 'npcs=', gameState.npcs?.length);
+
+    // ★ 从 localStorage 合并位置数据（后端 state 不含 _town_npc_positions / _player_position）
+    _mergeLocalPositionState(sessionId, gameState);
+
+    // 1. 更新本地阶段 + 缓存
+    this.currentStage = gameState.current_stage || 1;
+    localStorage.setItem('__active_session__', sessionId);
+    // 异步导入 saveGameState 避免循环依赖
+    import('../api/client.js').then(({ saveGameState }) => {
+      saveGameState(sessionId, gameState);
+    });
+
+    // 2. 通知 UIScene 更新 session/阶段/背包/章节
+    let chapterId = null, chapterName = null;
+    if (gameState.current_chapter) {
+      chapterId = gameState.current_chapter.chapter_id;
+      chapterName = gameState.current_chapter.chapter_name;
+    }
+    this.events.emit('game:init', {
+      sessionId, stage: this.currentStage, chapterId, chapterName,
+      inventory: gameState.inventory || [],
+    });
+
+    // 3. 刷新剧情 NPC（位置 + 语气词）
+    if (gameState.npcs) {
+      this.time.delayedCall(100, () => this.refreshNPCsFromState(gameState));
+    }
+
+    // 4. 重新加载普通 NPC + 完成后恢复位置
+    this._townNpcLoadPromise = this.loadTownNPCs();
+    this.time.delayedCall(300, () => this.refreshSceneItems());
+
+    this._townNpcLoadPromise.then(() => {
+      this._restoreTownNPCAndPlayerPositions(gameState);
+    }).catch(() => {
+      this._restoreTownNPCAndPlayerPositions(gameState);
+    });
+
+    // 7. 应用阶段色调
+    if (gameState.stage_params) {
+      this.time.delayedCall(300, () => this.applyStageTone(gameState.stage_params));
+    }
+
+    // 8. 结局状态处理
+    if (gameState.game_ended && gameState.ending) {
+      this.time.delayedCall(500, () => {
+        this.events.emit('ending:restore', gameState.ending);
+      });
+    }
+
+    // 解锁输入（如果之前被锁定）
+    this.events.emit('input:lock', false);
   }
 
   // ==================== 场景物品系统 ====================

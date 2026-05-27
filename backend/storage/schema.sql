@@ -155,3 +155,20 @@ CREATE TABLE IF NOT EXISTS chapter_progress (
     completed_at TEXT,
     PRIMARY KEY(session_id, chapter_id)
 );
+
+-- ═══ v3 存档表 ═══
+
+-- 存档表（Session 1:N Save）
+CREATE TABLE IF NOT EXISTS saves (
+    save_id   TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    slot_id   INTEGER NOT NULL,
+    label     TEXT NOT NULL DEFAULT '',
+    stage     INTEGER NOT NULL DEFAULT 1,
+    chapter_id TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES sessions(session_id),
+    UNIQUE(session_id, slot_id)
+);
+CREATE INDEX IF NOT EXISTS idx_saves_session ON saves(session_id);

@@ -458,10 +458,28 @@ export async function reportNPCPosition(sessionId, npcId, position) {
 
 /** 批量上报 NPC 位置 */
 export async function batchReportNPCPositions(sessionId, positions) {
+  console.log(`[API] batchReportNPCPositions called: session=${sessionId}, count=${positions.length}, USE_MOCK=${USE_MOCK}`, positions);
   if (USE_MOCK) {
+    // Mock 模式：将位置写入 localStorage game_state，确保下次 getGameState 能读到
+    const saved = localStorage.getItem(`game_state_${sessionId}`);
+    if (saved) {
+      try {
+        const state = JSON.parse(saved);
+        if (state.npcs && Array.isArray(state.npcs)) {
+          for (const pos of positions) {
+            const npc = state.npcs.find(n => n.id === pos.npc_id);
+            if (npc) npc.position = pos.position;
+          }
+          localStorage.setItem(`game_state_${sessionId}`, JSON.stringify(state));
+        }
+      } catch (_) {}
+    }
+    console.log('[API] batchReportNPCPositions mock done');
     return { success: true, updated_count: positions.length, errors: null };
   }
-  const res = await fetch(`${BASE}/game/${sessionId}/npc/positions/batch`, {
+  const url = `${BASE}/game/${sessionId}/npc/positions/batch`;
+  console.log('[API] batchReportNPCPositions calling backend:', url);
+  const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ positions }),
@@ -586,73 +604,124 @@ export async function getEvents(sessionId) {
   return res.json();
 }
 
-// ==================== 存档槽位管理（本地 localStorage）====================
+// ==================== v3 存档管理 API（后端持久化）====================
 
-const SAVE_SLOTS_KEY = '__save_slots__';
 const MAX_SLOTS = 6;
 
-/** 获取所有存档槽位 */
-export function getSaveSlots() {
-  try {
-    const raw = localStorage.getItem(SAVE_SLOTS_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
+// Mock 模式下用内存模拟后端存档
+const _mockSaves = {};
+
+/** 获取 session 下所有存档槽位 */
+export async function getSaves(sessionId) {
+  if (USE_MOCK) {
+    const saves = _mockSaves[sessionId] || [];
+    return { saves, total: saves.length };
   }
+  const res = await fetch(`${BASE}/game/${sessionId}/saves`);
+  if (!res.ok) throw new Error(await _extractApiError(res));
+  return res.json();
 }
 
-/** 保存到存档槽位 */
-export function saveToSlot(sessionId, gameState, slotId = null) {
-  const slots = getSaveSlots();
-  const timestamp = Date.now();
-  const stage = gameState?.current_stage || 1;
-  const label = `阶段${stage} · ${new Date(timestamp).toLocaleString('zh-CN')}`;
+/** 保存存档快照（兼容旧 saveToSlot 签名） */
+export async function createSave(sessionId, gameState, slotId = null,
+                                  playerPos = null, townNpcPos = null) {
+  if (USE_MOCK) {
+    const timestamp = Date.now();
+    const stage = gameState?.current_stage || 1;
+    const saveId = `sv_mock_${timestamp.toString(36)}`;
+    const label = `阶段${stage} · ${new Date(timestamp).toLocaleString('zh-CN')}`;
+    const saves = _mockSaves[sessionId] || [];
 
-  if (slotId !== null) {
-    const idx = slots.findIndex(s => s.id === slotId);
-    if (idx >= 0) {
-      slots[idx] = { id: slotId, sessionId, timestamp, stage, label };
-    } else {
-      slots.push({ id: slotId, sessionId, timestamp, stage, label });
+    let assignedSlot = slotId || saves.length + 1;
+    if (saves.length >= MAX_SLOTS) {
+      const oldest = saves.reduce((a, b) => a.created_at < b.created_at ? a : b);
+      assignedSlot = oldest.slot_id;
+      saves.splice(saves.findIndex(s => s.save_id === oldest.save_id), 1);
     }
-  } else {
-    const usedIds = new Set(slots.map(s => s.id));
-    let newId = 1;
-    while (usedIds.has(newId) && newId <= MAX_SLOTS) newId++;
-    if (newId > MAX_SLOTS) {
-      slots.sort((a, b) => a.timestamp - b.timestamp);
-      slots[0] = { id: slots[0].id, sessionId, timestamp, stage, label };
-    } else {
-      slots.push({ id: newId, sessionId, timestamp, stage, label });
-    }
+
+    const save = {
+      save_id: saveId, session_id: sessionId, slot_id: assignedSlot,
+      label, stage, chapter_id: gameState?.current_chapter?.chapter_id || null,
+      created_at: new Date(timestamp).toISOString(),
+    };
+    saves.push(save);
+    _mockSaves[sessionId] = saves;
+
+    // 同时写 localStorage 做降级
+    saveGameState(sessionId, { ...gameState, _save_id: saveId, _slot_id: assignedSlot, _save_label: label });
+    localStorage.setItem('__active_session__', sessionId);
+    return save;
   }
+  const body = {
+    slot_id: slotId,
+    player_position: playerPos,
+    town_npc_positions: townNpcPos,
+  };
+  const res = await fetch(`${BASE}/game/${sessionId}/saves`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(await _extractApiError(res));
+  const result = await res.json();
 
-  slots.sort((a, b) => b.timestamp - a.timestamp);
-  localStorage.setItem(SAVE_SLOTS_KEY, JSON.stringify(slots));
-  saveGameState(sessionId, gameState);
+  // 本地缓存一份做降级
+  saveGameState(sessionId, { ...gameState, _save_id: result.save_id, _slot_id: result.slot_id, _save_label: result.label });
   localStorage.setItem('__active_session__', sessionId);
-  return slots;
+  return result;
 }
 
-/** 从存档槽位加载 */
-export function loadFromSlot(slotId) {
-  const slots = getSaveSlots();
-  const slot = slots.find(s => s.id === slotId);
-  if (!slot) return null;
-
-  const saved = localStorage.getItem(`game_state_${slot.sessionId}`);
-  if (!saved) return null;
-
-  try {
-    return JSON.parse(saved);
-  } catch {
-    return null;
+/** 加载存档并返回完整游戏状态（兼容旧 loadFromSlot 签名） */
+export async function loadSave(sessionId, saveId) {
+  if (USE_MOCK) {
+    const saved = localStorage.getItem(`game_state_${sessionId}`);
+    if (!saved) return null;
+    try { return JSON.parse(saved); } catch { return null; }
   }
+  const res = await fetch(`${BASE}/game/${sessionId}/saves/${saveId}/load`, {
+    method: 'POST',
+  });
+  if (!res.ok) throw new Error(await _extractApiError(res));
+  return res.json();
 }
 
-/** 删除存档槽位 */
+/** 删除存档 */
+export async function deleteSave(sessionId, saveId) {
+  if (USE_MOCK) {
+    const saves = _mockSaves[sessionId] || [];
+    _mockSaves[sessionId] = saves.filter(s => s.save_id !== saveId);
+    return { success: true };
+  }
+  const res = await fetch(`${BASE}/game/${sessionId}/saves/${saveId}`, {
+    method: 'DELETE',
+  });
+  if (!res.ok) throw new Error(await _extractApiError(res));
+  return res.json();
+}
+
+// ===== 兼容旧接口（代理到新 API）=====
+
+/** @deprecated 使用 getSaves(sessionId) 替代 */
+export function getSaveSlots() {
+  // 同步兼容：返回空数组，调用方应改用异步版
+  console.warn('[client] getSaveSlots() is deprecated, use getSaves(sessionId) instead');
+  return [];
+}
+
+/** @deprecated 使用 createSave() 替代 */
+export function saveToSlot(sessionId, gameState, slotId = null) {
+  console.warn('[client] saveToSlot() is deprecated, use createSave() instead');
+  return createSave(sessionId, gameState, slotId);
+}
+
+/** @deprecated 使用 loadSave() 替代 */
+export function loadFromSlot(slotId) {
+  console.warn('[client] loadFromSlot() is deprecated, use loadSave() instead');
+  return null;
+}
+
+/** @deprecated 使用 deleteSave() 替代 */
 export function deleteSlot(slotId) {
-  const slots = getSaveSlots().filter(s => s.id !== slotId);
-  localStorage.setItem(SAVE_SLOTS_KEY, JSON.stringify(slots));
-  return slots;
+  console.warn('[client] deleteSlot() is deprecated, use deleteSave() instead');
+  return [];
 }

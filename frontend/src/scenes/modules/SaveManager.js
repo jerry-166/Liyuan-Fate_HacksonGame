@@ -4,7 +4,7 @@
  * @module scenes/modules/SaveManager
  */
 
-import { getGameState, saveToSlot, getSaveSlots, loadFromSlot, deleteSlot, batchReportNPCPositions } from '../../api/client.js';
+import { getGameState, getSaves, createSave, loadSave, deleteSave, batchReportNPCPositions } from '../../api/client.js';
 
 const MAX_SLOTS_DISPLAY = 6;
 
@@ -173,99 +173,326 @@ export class SaveManager {
   /** 切换暂停菜单 */
   togglePause() {
     const ui = this.ui;
+    // ★ 如果存档面板正在显示，ESC 只关闭存档面板并恢复暂停菜单
+    if (ui.saveSlotsVisible) {
+      this._closeSlots();
+      return;
+    }
     ui.pauseMenuVisible = !ui.pauseMenuVisible;
     ui.pauseContainer.setVisible(ui.pauseMenuVisible);
     ui.saveSlotsVisible = false;
-    if (ui.saveSlotContainer) ui.saveSlotContainer.setVisible(false);
+    // ★ 清理残留引用（防止全屏交互遮罩持续阻塞输入）
+    if (ui.saveSlotContainer) {
+      ui.saveSlotContainer.destroy();
+      ui.saveSlotContainer = null;
+    }
     const gs = ui.scene.get('GameScene');
     gs.events.emit('input:lock', ui.pauseMenuVisible);
   }
 
   /** 显示存档/加载面板 */
-  showSlots(mode) {
+  async showSlots(mode) {
     const ui = this.ui;
     ui.saveMode = mode;
     ui.saveSlotsVisible = true;
-    this._renderSlots();
+    ui.pauseContainer.setVisible(false); // ★ 隐藏暂停菜单，避免标题重叠
+    await this._renderSlots();
   }
 
-  _renderSlots() {
+  /** 关闭存档面板并恢复暂停菜单 */
+  _closeSlots() {
+    const ui = this.ui;
+    ui.saveSlotsVisible = false;
+    if (ui.saveSlotContainer) {
+      ui.saveSlotContainer.destroy();
+      ui.saveSlotContainer = null;
+    }
+    ui.pauseContainer.setVisible(true);
+  }
+
+  async _renderSlots() {
     const ui = this.ui;
     if (ui.saveSlotContainer) ui.saveSlotContainer.destroy();
     const { width, height } = ui.cameras.main;
-    ui.saveSlotContainer = ui.add.container(0, 0).setDepth(701);
-
     const cx = width / 2;
-    const titleText = ui.saveMode === 'save' ? '—— 保存存档 ——' : '—— 加载存档 ——';
+    const cy = height / 2;
 
-    ui.saveSlotContainer.add(ui.add.text(cx, height / 2 - 165, titleText, {
-      fontFamily: '"KaiTi","SimSun",serif', fontSize: '16px', color: '#d4b896',
+    // ═══ 主容器（初始透明，后面淡入）═══
+    ui.saveSlotContainer = ui.add.container(0, 0).setDepth(701).setAlpha(0);
+
+    // ═══ 全屏遮罩（遮挡暂停菜单，点击外部可关闭）═══
+    const backdrop = ui.add.graphics();
+    backdrop.fillStyle(0x0a0a12, 0.82);
+    backdrop.fillRect(0, 0, width, height);
+    backdrop.setInteractive(new Phaser.Geom.Rectangle(0, 0, width, height), Phaser.Geom.Rectangle.Contains);
+    backdrop.on('pointerdown', (_p, _x, _y, event) => {
+      // 阻止事件穿透到下层
+      if (event) event.stopPropagation();
+    });
+    ui.saveSlotContainer.add(backdrop);
+
+    // ═══ 面板常量 ═══
+    const panelW = 480;
+    const panelH = 430;
+    const px = cx - panelW / 2;
+    const py = cy - panelH / 2;
+
+    // ═══ 面板背景 + 双层边框 ═══
+    const panelBg = ui.add.graphics();
+    // 外层阴影
+    panelBg.fillStyle(0x000000, 0.3);
+    panelBg.fillRoundedRect(px + 4, py + 4, panelW, panelH, 10);
+    // 主背景
+    panelBg.fillStyle(0x16141c, 0.96);
+    panelBg.fillRoundedRect(px, py, panelW, panelH, 10);
+    // 外层暖金边框
+    panelBg.lineStyle(2, 0x7a6545, 0.9);
+    panelBg.strokeRoundedRect(px, py, panelW, panelH, 10);
+    // 内层暗金边框
+    panelBg.lineStyle(1, 0x3d3528, 1);
+    panelBg.strokeRoundedRect(px + 4, py + 4, panelW - 8, panelH - 8, 8);
+    ui.saveSlotContainer.add(panelBg);
+
+    // ═══ 标题 ═══
+    const isSave = ui.saveMode === 'save';
+    const titleStr = isSave ? '📜 保存进度' : '📖 读取进度';
+    ui.saveSlotContainer.add(ui.add.text(cx, py + 36, titleStr, {
+      fontFamily: '"KaiTi","SimSun",serif', fontSize: '22px', color: '#d4b896',
     }).setOrigin(0.5));
 
-    const slots = getSaveSlots();
+    // ═══ 装饰线 ═══
+    const decoLine = ui.add.graphics();
+    decoLine.lineStyle(1, 0x6b5a3a, 0.5);
+    decoLine.lineBetween(cx - 110, py + 60, cx + 110, py + 60);
+    ui.saveSlotContainer.add(decoLine);
+    ui.saveSlotContainer.add(ui.add.text(cx, py + 60, '◈', {
+      fontSize: '10px', color: '#6b5a3a',
+    }).setOrigin(0.5));
 
-    if (slots.length === 0) {
-      ui.saveSlotContainer.add(ui.add.text(cx, height / 2 - 80,
-        ui.saveMode === 'save' ? '点击空槽位保存' : '没有可用存档', {
-          fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '13px', color: '#666655',
-        }).setOrigin(0.5));
+    // ═══ 右上角关闭按钮 ═══
+    const closeBtn = ui.add.text(px + panelW - 20, py + 20, '✕', {
+      fontFamily: '"Microsoft YaHei",sans-serif', fontSize: '18px', color: '#887766',
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    closeBtn.on('pointerdown', () => this._closeSlots());
+    closeBtn.on('pointerover', () => closeBtn.setColor('#c4a882'));
+    closeBtn.on('pointerout', () => closeBtn.setColor('#887766'));
+    ui.saveSlotContainer.add(closeBtn);
+
+    // ═══ 从后端获取存档 ═══
+    let savesList = [];
+    try {
+      const data = await getSaves(ui.sessionId);
+      savesList = data.saves || [];
+    } catch (e) {
+      console.warn('[SaveManager] 获取存档列表失败:', e);
     }
 
-    const maxShow = ui.saveMode === 'save' ? MAX_SLOTS_DISPLAY : slots.length;
-    for (let i = 0; i < maxShow; i++) {
-      const slotY = height / 2 - 120 + i * 45;
-      const slotId = ui.saveMode === 'save' ? (i + 1) : slots[i]?.id;
-      const slot = ui.saveMode === 'save' ? slots.find(s => s.id === i + 1) : slots[i];
+    // ═══ 槽位区域常量 ═══
+    const slotH = 50;
+    const slotGap = 6;
+    const slotW = panelW - 64;
+    const slotX = cx - slotW / 2;
+    const listTop = py + 82;
+
+    // 空状态提示
+    if (savesList.length === 0 && !isSave) {
+      ui.saveSlotContainer.add(ui.add.text(cx, cy - 20, '暂无存档', {
+        fontFamily: '"KaiTi","SimSun",serif', fontSize: '16px', color: '#554433',
+      }).setOrigin(0.5));
+    }
+
+    // ═══ 渲染 6 个槽位 ═══
+    const slotEntries = []; // 用于 stagger 动画
+    for (let i = 0; i < MAX_SLOTS_DISPLAY; i++) {
+      const slot = savesList.find(s => s.slot_id === i + 1);
       const hasSlot = !!slot;
+      const sy = listTop + i * (slotH + slotGap);
 
-      const labelBg = ui.add.graphics();
-      labelBg.fillStyle(hasSlot ? 0x2a2824 : 0x1a1a25, 0.9);
-      labelBg.fillRoundedRect(cx - 180, slotY, 360, 36, 4);
-      labelBg.lineStyle(1, hasSlot ? 0xc4a882 : 0x443322, hasSlot ? 0.5 : 0.2);
-      labelBg.strokeRoundedRect(cx - 180, slotY, 360, 36, 4);
-      ui.saveSlotContainer.add(labelBg);
+      // ── 槽位背景 ──
+      const slotBg = ui.add.graphics();
+      if (hasSlot) {
+        slotBg.fillStyle(0x1e1c18, 0.95);
+        slotBg.fillRoundedRect(slotX, sy, slotW, slotH, 6);
+        slotBg.lineStyle(1.5, 0x6b5a3a, 0.7);
+        slotBg.strokeRoundedRect(slotX, sy, slotW, slotH, 6);
+      } else {
+        slotBg.fillStyle(0x16141a, 0.7);
+        slotBg.fillRoundedRect(slotX, sy, slotW, slotH, 6);
+        slotBg.lineStyle(1, 0x2a2824, 0.5);
+        slotBg.strokeRoundedRect(slotX, sy, slotW, slotH, 6);
+      }
+      ui.saveSlotContainer.add(slotBg);
 
-      const labelText = hasSlot ? `槽位${slot.id} — ${slot.label}` : `槽位 ${i + 1} — 空`;
-      ui.saveSlotContainer.add(ui.add.text(cx - 165, slotY + 18, labelText, {
-        fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '12px', color: hasSlot ? '#c0b898' : '#555544',
-      }).setOrigin(0, 0.5));
+      // ── 左侧槽位编号（圆角小方块）──
+      const numBg = ui.add.graphics();
+      numBg.fillStyle(hasSlot ? 0x3d3528 : 0x1e1c1a, 0.9);
+      numBg.fillRoundedRect(slotX + 8, sy + 10, 30, 30, 4);
+      if (hasSlot) {
+        numBg.lineStyle(1, 0x8b7355, 0.5);
+        numBg.strokeRoundedRect(slotX + 8, sy + 10, 30, 30, 4);
+      }
+      ui.saveSlotContainer.add(numBg);
 
-      if (ui.saveMode === 'save') {
-        const btn = ui.add.text(cx + 150, slotY + 18, hasSlot ? '覆盖' : '保存', {
-          fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '12px', color: '#d4b896',
-          backgroundColor: '#2a2824', padding: { x: 8, y: 3 },
-        }).setOrigin(1, 0.5).setInteractive({ useHandCursor: true });
-        btn.on('pointerdown', () => ui.onSaveGame(i + 1));
-        btn.on('pointerover', () => btn.setColor('#e8dcc8'));
-        btn.on('pointerout', () => btn.setColor('#d4b896'));
-        ui.saveSlotContainer.add(btn);
+      const numText = ui.add.text(slotX + 23, sy + 25, String(i + 1).padStart(2, '0'), {
+        fontFamily: '"KaiTi","SimSun",serif', fontSize: '14px',
+        color: hasSlot ? '#c4a882' : '#554433',
+      }).setOrigin(0.5);
+      ui.saveSlotContainer.add(numText);
+
+      // ── 中间文字信息 ──
+      if (hasSlot) {
+        // 主标签（阶段+章节）
+        const labelText = ui.add.text(slotX + 50, sy + 14, slot.label || `阶段${slot.stage}`, {
+          fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '13px', color: '#d4c8a8',
+        });
+        ui.saveSlotContainer.add(labelText);
+
+        // 时间戳
+        const timeStr = slot.updated_at
+          ? slot.updated_at.slice(5, 16).replace('T', ' ')
+          : '';
+        ui.saveSlotContainer.add(ui.add.text(slotX + 50, sy + 32, timeStr, {
+          fontFamily: 'monospace', fontSize: '11px', color: '#665544',
+        }));
+      } else {
+        ui.saveSlotContainer.add(ui.add.text(slotX + 50, sy + 25, '虚位以待', {
+          fontFamily: '"KaiTi","SimSun",serif', fontSize: '13px', color: '#3a3530',
+        }).setOrigin(0, 0.5));
+      }
+
+      // ── 右侧操作按钮 ──
+      if (isSave) {
+        // 保存/覆盖按钮
+        const btnW = 56, btnH = 28;
+        const btnX = slotX + slotW - btnW - 12;
+        const btnY = sy + (slotH - btnH) / 2;
+
+        const btnBg = ui.add.graphics();
+        const drawBtn = (hover) => {
+          btnBg.clear();
+          const bgc = hover ? 0x4a3f2a : (hasSlot ? 0x3a3528 : 0x2a2520);
+          btnBg.fillStyle(bgc, 0.95);
+          btnBg.fillRoundedRect(btnX, btnY, btnW, btnH, 4);
+          btnBg.lineStyle(1, hover ? 0xc4a882 : 0x6b5a3a, hover ? 0.9 : 0.6);
+          btnBg.strokeRoundedRect(btnX, btnY, btnW, btnH, 4);
+        };
+        drawBtn(false);
+        ui.saveSlotContainer.add(btnBg);
+
+        const btnLabel = ui.add.text(btnX + btnW / 2, btnY + btnH / 2, hasSlot ? '覆盖' : '保存', {
+          fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '12px', color: '#c4a882',
+        }).setOrigin(0.5);
+        ui.saveSlotContainer.add(btnLabel);
+
+        const hitZone = ui.add.zone(btnX + btnW / 2, btnY + btnH / 2, btnW, btnH)
+          .setInteractive({ useHandCursor: true });
+        hitZone.on('pointerover', () => drawBtn(true));
+        hitZone.on('pointerout', () => drawBtn(false));
+        hitZone.on('pointerdown', () => ui.onSaveGame(i + 1));
+        ui.saveSlotContainer.add(hitZone);
+
+        // 记录用于动画
+        slotEntries.push({ bg: slotBg, num: numBg, label: numText });
       } else if (hasSlot) {
-        const loadBtn = ui.add.text(cx + 145, slotY + 18, '读取', {
-          fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '12px', color: '#d4b896',
-          backgroundColor: '#2a2824', padding: { x: 8, y: 3 },
-        }).setOrigin(1, 0.5).setInteractive({ useHandCursor: true });
-        loadBtn.on('pointerdown', () => ui.onLoadGame(slot.id));
+        // 读取按钮
+        const loadW = 50, loadH = 28;
+        const loadX = slotX + slotW - loadW - 12;
+        const loadY = sy + (slotH - loadH) / 2;
 
-        const delBtn = ui.add.text(cx + 90, slotY + 18, '删除', {
+        const loadBg = ui.add.graphics();
+        const drawLoad = (hover) => {
+          loadBg.clear();
+          loadBg.fillStyle(hover ? 0x4a3f2a : 0x3a3528, 0.95);
+          loadBg.fillRoundedRect(loadX, loadY, loadW, loadH, 4);
+          loadBg.lineStyle(1, hover ? 0xc4a882 : 0x6b5a3a, hover ? 0.9 : 0.6);
+          loadBg.strokeRoundedRect(loadX, loadY, loadW, loadH, 4);
+        };
+        drawLoad(false);
+        ui.saveSlotContainer.add(loadBg);
+
+        const loadLabel = ui.add.text(loadX + loadW / 2, loadY + loadH / 2, '读取', {
+          fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '12px', color: '#c4a882',
+        }).setOrigin(0.5);
+        ui.saveSlotContainer.add(loadLabel);
+
+        const loadZone = ui.add.zone(loadX + loadW / 2, loadY + loadH / 2, loadW, loadH)
+          .setInteractive({ useHandCursor: true });
+        loadZone.on('pointerover', () => drawLoad(true));
+        loadZone.on('pointerout', () => drawLoad(false));
+        loadZone.on('pointerdown', () => ui.onLoadGame(slot.save_id));
+        ui.saveSlotContainer.add(loadZone);
+
+        // 删除按钮（小一点，暗红色）
+        const delW = 40, delH = 24;
+        const delX = loadX - delW - 8;
+        const delY = sy + (slotH - delH) / 2;
+
+        const delBg = ui.add.graphics();
+        const drawDel = (hover) => {
+          delBg.clear();
+          delBg.fillStyle(hover ? 0x4a2828 : 0x2a1a1a, 0.9);
+          delBg.fillRoundedRect(delX, delY, delW, delH, 3);
+          delBg.lineStyle(1, hover ? 0xaa6666 : 0x664444, hover ? 0.8 : 0.4);
+          delBg.strokeRoundedRect(delX, delY, delW, delH, 3);
+        };
+        drawDel(false);
+        ui.saveSlotContainer.add(delBg);
+
+        const delLabel = ui.add.text(delX + delW / 2, delY + delH / 2, '删', {
           fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '11px', color: '#886666',
-          backgroundColor: '#2a2824', padding: { x: 6, y: 3 },
-        }).setOrigin(1, 0.5).setInteractive({ useHandCursor: true });
-        delBtn.on('pointerdown', () => { deleteSlot(slot.id); this._renderSlots(); });
+        }).setOrigin(0.5);
+        ui.saveSlotContainer.add(delLabel);
 
-        ui.saveSlotContainer.add([loadBtn, delBtn]);
+        const delZone = ui.add.zone(delX + delW / 2, delY + delH / 2, delW, delH)
+          .setInteractive({ useHandCursor: true });
+        delZone.on('pointerover', () => drawDel(true));
+        delZone.on('pointerout', () => drawDel(false));
+        delZone.on('pointerdown', async () => {
+          try { await deleteSave(ui.sessionId, slot.save_id); } catch (e) {}
+          await this._renderSlots();
+        });
+        ui.saveSlotContainer.add(delZone);
+
+        slotEntries.push({ bg: slotBg, num: numBg, label: numText });
+      } else {
+        slotEntries.push({ bg: slotBg, num: numBg, label: numText });
       }
     }
 
-    const backBtn = ui.add.text(cx, height / 2 + 155, '[← 返回]', {
-      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '13px', color: '#887766',
+    // ═══ 底部返回按钮 ═══
+    const backY = py + panelH - 36;
+    const backBtnBg = ui.add.graphics();
+    const drawBack = (hover) => {
+      backBtnBg.clear();
+      backBtnBg.fillStyle(hover ? 0x3a3528 : 0x000000, 0);
+      backBtnBg.fillRoundedRect(cx - 50, backY - 14, 100, 28, 4);
+    };
+    drawBack(false);
+    ui.saveSlotContainer.add(backBtnBg);
+
+    const backBtn = ui.add.text(cx, backY, '◀  返 回', {
+      fontFamily: '"KaiTi","SimSun",serif', fontSize: '14px', color: '#887766',
+      letterSpacing: 2,
     }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-    backBtn.on('pointerdown', () => {
-      ui.saveSlotsVisible = false;
-      if (ui.saveSlotContainer) ui.saveSlotContainer.setVisible(false);
-    });
-    backBtn.on('pointerover', () => backBtn.setColor('#c4a882'));
-    backBtn.on('pointerout', () => backBtn.setColor('#887766'));
+    backBtn.on('pointerdown', () => this._closeSlots());
+    backBtn.on('pointerover', () => { backBtn.setColor('#c4a882'); drawBack(true); });
+    backBtn.on('pointerout', () => { backBtn.setColor('#887766'); drawBack(false); });
     ui.saveSlotContainer.add(backBtn);
+
+    // ═══ 底部提示 ═══
+    ui.saveSlotContainer.add(ui.add.text(cx, py + panelH - 14, isSave
+      ? '点击「保存」将当前进度写入槽位  ·  覆盖会替换已有存档'
+      : '点击「读取」恢复该进度  ·  点击「删」永久删除',
+      { fontFamily: '"Microsoft YaHei",sans-serif', fontSize: '10px', color: '#554433' }
+    ).setOrigin(0.5));
+
+    // ═══ 淡入动画 ═══
+    ui.tweens.add({
+      targets: ui.saveSlotContainer,
+      alpha: 1,
+      duration: 200,
+      ease: 'Sine.easeOut',
+    });
   }
 
   /** 保存存档 */
@@ -275,49 +502,84 @@ export class SaveManager {
     try {
       // ★ 收集当前所有 NPC 和主角的实时位置
       const gameScene = ui.scene.get('GameScene');
+      let positions = null;
+      let playerPos = null, townNpcPos = null;
       if (gameScene && gameScene.collectPositions) {
-        const positions = gameScene.collectPositions();
-        // 异步上报剧情 NPC 位置到后端（不阻塞存档）
+        positions = gameScene.collectPositions();
+        console.log('[SaveManager] collectPositions:', positions);
+        // 异步上报剧情 NPC 位置到后端
         if (positions.storyNpcs.length > 0) {
-          batchReportNPCPositions(ui.sessionId, positions.storyNpcs).catch(() => {});
+          batchReportNPCPositions(ui.sessionId, positions.storyNpcs).catch(e =>
+            console.warn('[SaveManager] batchReportNPCPositions failed:', e));
         }
+        playerPos = positions.player;
+        townNpcPos = positions.townNpcs;
+      } else {
+        console.warn('[SaveManager] collectPositions not available on GameScene');
       }
 
       const state = await getGameState(ui.sessionId);
       state._saved_stage = ui.currentStage;
 
-      // ★ 附加普通 NPC 和主角位置到存档状态
-      if (gameScene && gameScene.collectPositions) {
-        const positions = gameScene.collectPositions();
+      // ★ 直接更新 state 中的位置数据
+      if (positions) {
+        if (state.npcs && Array.isArray(state.npcs)) {
+          for (const pos of positions.storyNpcs) {
+            const npc = state.npcs.find(n => n.id === pos.npc_id);
+            if (npc) npc.position = pos.position;
+          }
+        }
         state._town_npc_positions = positions.townNpcs;
         state._player_position = positions.player;
       }
 
-      saveToSlot(ui.sessionId, state, slotId);
+      // 调用后端存档 API
+      await createSave(ui.sessionId, state, slotId, playerPos, townNpcPos);
       this._showToast('存档成功!');
-      this._renderSlots();
+      await this._renderSlots();
     } catch (e) {
+      console.error('[SaveManager] 存档失败:', e);
       this._showToast('存档失败');
     }
   }
 
-  /** 加载存档 */
-  onLoad(slotId) {
+  /** 加载存档 — 就地刷新 GameScene，无需重启场景 */
+  async onLoad(saveId) {
     const ui = this.ui;
-    const state = loadFromSlot(slotId);
-    if (!state) { this._showToast('存档损坏'); return; }
+    try {
+      const state = await loadSave(ui.sessionId, saveId);
+      if (!state) { this._showToast('存档损坏'); return; }
 
-    ui.pauseContainer.setVisible(false);
-    ui.pauseMenuVisible = false;
-    ui.saveSlotsVisible = false;
-    if (ui.saveSlotContainer) ui.saveSlotContainer.setVisible(false);
+      // ★ 必须销毁存档面板（含全屏遮罩），否则 depth=701 的交互层持续阻塞所有输入
+      if (ui.saveSlotContainer) {
+        ui.saveSlotContainer.destroy();
+        ui.saveSlotContainer = null;
+      }
+      ui.saveSlotsVisible = false;
 
-    if (ui.dialogActive) ui.closeDialog();
-    ui.scene.stop('GameScene');
-    ui.scene.stop('UIScene');
-    ui.time.delayedCall(200, () => {
-      ui.scene.start('GameScene', { savedSessionId: slotId });
-    });
+      // 关闭暂停菜单
+      ui.pauseMenuVisible = false;
+      ui.pauseContainer.setVisible(false);
+
+      if (ui.dialogActive) ui.closeDialog();
+
+      // ★ 就地刷新：通过 GameScene 的 state:reload 事件完整恢复所有游戏状态
+      const gs = ui.scene.get('GameScene');
+      if (gs) {
+        gs.events.emit('state:reload', state);
+        this._showToast('存档已加载!');
+      } else {
+        // 降级：GameScene 不在运行中时重启场景（例如从某处错误状态恢复）
+        ui.scene.stop('GameScene');
+        ui.scene.stop('UIScene');
+        ui.time.delayedCall(200, () => {
+          ui.scene.start('GameScene', { savedSessionId: ui.sessionId });
+        });
+      }
+    } catch (e) {
+      console.error('[SaveManager] 加载存档失败:', e);
+      this._showToast('加载失败');
+    }
   }
 
   _showToast(msg) {

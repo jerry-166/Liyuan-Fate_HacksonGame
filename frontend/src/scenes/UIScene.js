@@ -336,18 +336,28 @@ export class UIScene extends Phaser.Scene {
 
         if (this.sessionId) {
           // ★ 收集当前所有 NPC 和主角的实时位置
+          let positions = null;
           if (gs && gs.collectPositions) {
-            const positions = gs.collectPositions();
+            positions = gs.collectPositions();
+            console.log('[UIScene] chapterComplete collectPositions:', positions);
             if (positions.storyNpcs.length > 0) {
-              batchReportNPCPositions(this.sessionId, positions.storyNpcs).catch(() => {});
+              batchReportNPCPositions(this.sessionId, positions.storyNpcs).catch(e =>
+                console.warn('[UIScene] chapterComplete batchReport failed:', e));
             }
+          } else {
+            console.warn('[UIScene] chapterComplete: collectPositions not available');
           }
 
           const state = await getGameState(this.sessionId);
 
-          // ★ 附加普通 NPC 和主角位置到自动存档
-          if (gs && gs.collectPositions) {
-            const positions = gs.collectPositions();
+          // ★ 直接更新 state 中的位置数据
+          if (positions) {
+            if (state.npcs && Array.isArray(state.npcs)) {
+              for (const pos of positions.storyNpcs) {
+                const npc = state.npcs.find(n => n.id === pos.npc_id);
+                if (npc) npc.position = pos.position;
+              }
+            }
             state._town_npc_positions = positions.townNpcs;
             state._player_position = positions.player;
           }
@@ -388,15 +398,15 @@ export class UIScene extends Phaser.Scene {
     await this.saveManager.onSave(slotId);
   }
 
-  onLoadGame(slotId) {
-    this.saveManager.onLoad(slotId);
+  async onLoadGame(saveId) {
+    await this.saveManager.onLoad(saveId);
   }
 
   showSaveLoadPanel(mode) {
     this.saveManager.showSlots(mode);
   }
 
-  onReturnToMenu() {
+  async onReturnToMenu() {
     this.pauseContainer.setVisible(false);
     this.pauseMenuVisible = false;
     if (this.saveSlotContainer) this.saveSlotContainer.destroy();
@@ -405,6 +415,31 @@ export class UIScene extends Phaser.Scene {
     const gs = this.scene.get('GameScene');
     gs.events.emit('input:lock', false);
     if (this.sessionId) localStorage.setItem('__active_session__', this.sessionId);
+
+    // ★ 返回主菜单前保存当前 NPC/主角位置，确保下次加载能恢复
+    if (this.sessionId && gs && gs.collectPositions) {
+      try {
+        const positions = gs.collectPositions();
+        console.log('[UIScene] returnToMenu collectPositions:', positions);
+        // 上报故事NPC位置到后端
+        if (positions.storyNpcs.length > 0) {
+          batchReportNPCPositions(this.sessionId, positions.storyNpcs).catch(e =>
+            console.warn('[UIScene] returnToMenu batchReport failed:', e));
+        }
+
+        const state = await getGameState(this.sessionId);
+        // 直接更新 state 中的位置数据
+        if (state.npcs && Array.isArray(state.npcs)) {
+          for (const pos of positions.storyNpcs) {
+            const npc = state.npcs.find(n => n.id === pos.npc_id);
+            if (npc) npc.position = pos.position;
+          }
+        }
+        state._town_npc_positions = positions.townNpcs;
+        state._player_position = positions.player;
+        saveGameState(this.sessionId, state);
+      } catch (_) {}
+    }
 
     this.scene.stop('GameScene');
     this.scene.stop('UIScene');

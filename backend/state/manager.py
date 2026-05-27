@@ -259,6 +259,85 @@ class SessionManager:
             self._sessions.pop(session_id, None)
         return ok
 
+    # ─── v3 存档快照 ───────────────────────────────────
+
+    def save_snapshot(self, session: GameSession, save_id: str,
+                       label: str, slot_id: int,
+                       player_position: Optional[dict] = None,
+                       town_npc_positions: Optional[list] = None) -> int:
+        """将完整 GameSession 序列化写入存档文件 + 元数据写入 DB。"""
+        import datetime
+
+        # 构建完整游戏状态快照
+        snapshot = {
+            "save_id": save_id,
+            "session_id": session.session_id,
+            "saved_at": datetime.datetime.now().isoformat(),
+            "game_state": {
+                "session_id": session.session_id,
+                "player_name": session.player_name,
+                "script_id": session.script_id,
+                "current_stage": session.current_stage,
+                "current_chapter_id": session.current_chapter_id,
+                "completed_chapters": session.completed_chapters,
+                "npcs": {
+                    npc_id: {
+                        "id": npc.id,
+                        "name": npc.name,
+                        "role": npc.role,
+                        "scene": npc.scene,
+                        "position": npc.position,
+                        "sprite_key": npc.sprite_key,
+                        "relationship": npc.relationship,
+                        "is_available": npc.is_available,
+                        "current_greeting": npc.current_greeting,
+                        "dialogue_round_count": npc.dialogue_round_count,
+                    }
+                    for npc_id, npc in session.npcs.items()
+                },
+                "events_triggered": sorted(session.events_triggered),
+                "game_ended": session.game_ended,
+                "ending_type": session.ending_type,
+                "ending_data": session.ending_data,
+                "inventory": [item.to_dict() for item in session.inventory],
+                "active_item": session.active_item,
+                "current_task": session.current_task.to_dict() if session.current_task else None,
+                "_player_position": player_position,
+                "_town_npc_positions": town_npc_positions,
+            }
+        }
+
+        # 写入文件
+        self._db.write_save_snapshot(session.session_id, save_id, snapshot)
+
+        # 写入 DB 元数据
+        self._db.create_save(
+            save_id=save_id,
+            session_id=session.session_id,
+            slot_id=slot_id,
+            label=label,
+            stage=session.current_stage,
+            chapter_id=session.current_chapter_id,
+        )
+        return slot_id
+
+    def load_snapshot(self, session_id: str, save_id: str) -> Optional[dict]:
+        """从存档文件读取完整游戏状态快照。"""
+        snapshot = self._db.read_save_snapshot(session_id, save_id)
+        if not snapshot:
+            return None
+        return snapshot.get("game_state")
+
+    def delete_save(self, session_id: str, save_id: str) -> bool:
+        """删除存档（DB 元数据 + 文件）。"""
+        ok_db = self._db.delete_save(save_id)
+        ok_file = self._db.delete_save_snapshot(session_id, save_id)
+        return ok_db or ok_file
+
+    def list_saves(self, session_id: str) -> list[dict]:
+        """列出 session 下所有存档元数据。"""
+        return self._db.list_saves(session_id)
+
     def _evict_expired(self) -> None:
         now = time.time()
         expired = [sid for sid, s in self._sessions.items()
