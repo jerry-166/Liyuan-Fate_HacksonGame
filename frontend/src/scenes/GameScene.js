@@ -750,11 +750,13 @@ export class GameScene extends Phaser.Scene {
 
   /** 更新所有 NPC 漫游行为（每帧调用，覆盖故事NPC + 普通NPC） */
   _updateTownNPCs(dt) {
+    const self = this;
     const effectiveScale = this.subSceneManager.getEffectiveScale();
     const mapBounds = this._mapBounds;
     const mapW = mapBounds ? mapBounds.w : MAP_COLS * TILE * MAP_SCALE;
     const mapH = mapBounds ? mapBounds.h : MAP_ROWS * TILE * MAP_SCALE;
     const margin = TILE * effectiveScale;
+    const npcCheckDist = TILE * effectiveScale * 0.6; // NPC 碰撞检测距离
 
     // 辅助函数：驱动单个 NPC 的 wander AI
     const _driveNPC = (npc) => {
@@ -771,15 +773,29 @@ export class GameScene extends Phaser.Scene {
             if (cfg) npc.setTexture(`${cfg.prefix}_idle_${dir}`);
           }
           if (wander.idleTimer >= wander.idleDuration) {
-            const angle = Math.random() * Math.PI * 2;
-            const dist = (3 + Math.random() * (wander.wanderRange - 3)) * margin;
-            wander.targetX = npc.x + Math.cos(angle) * dist;
-            wander.targetY = npc.y + Math.sin(angle) * dist;
-            wander.targetX = Phaser.Math.Clamp(wander.targetX, margin, mapW - margin);
-            wander.targetY = Phaser.Math.Clamp(wander.targetY, margin, mapH - margin);
-            wander.state = 'wandering';
-            wander.wanderTimer = 0;
-            wander.wanderDuration = wander.wanderRange * 40 + Math.random() * 60;
+            // 尝试多次获取有效目标，避开碰撞区域
+            let foundTarget = false;
+            for (let attempt = 0; attempt < 8; attempt++) {
+              const angle = Math.random() * Math.PI * 2;
+              const dist = (3 + Math.random() * (wander.wanderRange - 3)) * margin;
+              const tx = Phaser.Math.Clamp(npc.x + Math.cos(angle) * dist, margin, mapW - margin);
+              const ty = Phaser.Math.Clamp(npc.y + Math.sin(angle) * dist, margin, mapH - margin);
+              if (!self._checkCollisionAt(tx, ty)) {
+                wander.targetX = tx;
+                wander.targetY = ty;
+                foundTarget = true;
+                break;
+              }
+            }
+            if (foundTarget) {
+              wander.state = 'wandering';
+              wander.wanderTimer = 0;
+              wander.wanderDuration = wander.wanderRange * 40 + Math.random() * 60;
+            } else {
+              // 无有效目标，重新计时空闲
+              wander.idleTimer = 0;
+              wander.idleDuration = (2 + Math.random() * 3) * 60;
+            }
           }
           break;
         case 'wandering':
@@ -787,7 +803,8 @@ export class GameScene extends Phaser.Scene {
           const dx = wander.targetX - npc.x;
           const dy = wander.targetY - npc.y;
           const distToTarget = Math.sqrt(dx * dx + dy * dy);
-          if (distToTarget < 5) {
+          // 超时或到达目标 → 进入空闲
+          if (distToTarget < 5 || wander.wanderTimer > wander.wanderDuration) {
             wander.state = 'idle';
             wander.idleTimer = 0;
             wander.idleDuration = (3 + Math.random() * 5) * 60;
@@ -795,10 +812,35 @@ export class GameScene extends Phaser.Scene {
             if (cfg) npc.setTexture(`${cfg.prefix}_idle_down`);
           } else {
             const moveSpeed = wander.speed * (dt / 16.667);
-            const vx = (dx / distToTarget) * moveSpeed;
-            const vy = (dy / distToTarget) * moveSpeed;
-            npc.x += vx;
-            npc.y += vy;
+            const rawVX = (dx / distToTarget) * moveSpeed;
+            const rawVY = (dy / distToTarget) * moveSpeed;
+
+            // 逐轴检测碰撞后再移动
+            let vx = rawVX, vy = rawVY;
+            if (vx !== 0) {
+              const probeX = npc.x + (vx > 0 ? npcCheckDist : -npcCheckDist);
+              if (self._checkCollisionAt(probeX, npc.y)) vx = 0;
+            }
+            if (vy !== 0) {
+              const probeY = npc.y + (vy > 0 ? npcCheckDist : -npcCheckDist);
+              if (self._checkCollisionAt(npc.x, probeY)) vy = 0;
+            }
+
+            // 如果完全被卡住，短暂发呆后重置
+            if (vx === 0 && vy === 0) {
+              wander.stuckTimer = (wander.stuckTimer || 0) + 1;
+              if (wander.stuckTimer > 90) {
+                wander.state = 'idle';
+                wander.idleTimer = 0;
+                wander.idleDuration = (2 + Math.random() * 3) * 60;
+                wander.stuckTimer = 0;
+              }
+            } else {
+              wander.stuckTimer = 0;
+              npc.x += vx;
+              npc.y += vy;
+            }
+
             const cfg = npc.getData('spriteCfg');
             if (cfg) {
               let facing = 'down';
