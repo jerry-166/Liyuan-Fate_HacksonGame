@@ -50,23 +50,10 @@ chapters:
       体验到第一次"身体共鸣"的异样感。
       小华和老周对玩家产生初步印象（投票通过）。
     sub_task_templates:
-      - mode: explore
-        title: "找到老戏院"
-        description: "在小镇上找到戏台的位置并进入"
-        target_scene: "stage_ruin"
       - mode: dialogue
-        title: "与戏班的人打照面"
+        title: "与小华对话"
         target_npc_id: "npc_xiaohua"
-        description: "在戏台内遇到小华，进行第一次对话"
-      - mode: dialogue
-        title: "遇到沉默的老艺人"
-        target_npc_id: "npc_laozhou"
-        description: "在戏台后台遇到老周，他看着你的眼神很奇怪"
-      - mode: relation
-        title: "初步了解戏班现状"
-        target_npc_id: "npc_xiaohua"
-        relation_threshold: 10
-        description: "通过对话了解戏班的基本情况，让小华不再完全排斥你"
+        description: "在戏台内遇到小华，进行对话了解戏班情况"
 
   # ─── 第二章：探寻·疑云 ──────────────────────
   - id: ch_02
@@ -97,38 +84,14 @@ chapters:
       陈师傅、梅姨、老周、老李至少3人确认玩家已了解到关键信息。
     sub_task_templates:
       - mode: dialogue
-        title: "在茶馆遇到热情的老板娘"
+        title: "在茶馆与梅姨对话"
         target_npc_id: "npc_meiyi"
         description: "梅姨告诉你'戏班神童'的传闻"
-      - mode: dialogue
-        title: "与陈师傅深入交谈"
-        target_npc_id: "npc_chen"
-        description: "陈师傅开始回忆往事，但仍回避关键真相"
-      - mode: explore
-        title: "进入父亲旧居"
-        target_scene: "father_house"
-        description: "找到父亲留下的老屋，里面藏着他珍藏的旧物"
-      - mode: acquire_item
-        title: "收集父亲的旧物"
-        required_item_id: "item_child_costume"
-        description: "在旧居中发现孩童戏服、手抄剧本、童年照片等关键旧物"
-      - mode: dialogue
-        title: "去码头找老船夫"
-        target_npc_id: "npc_laoli"
-        description: "老李透露三十年前有人抱着昏迷的孩子坐船离开"
-      - mode: dialogue
-        title: "逼问老周真相"
-        target_npc_id: "npc_laozhou"
-        description: "老周暗示你是当年的'小神童'，但仍不敢直说"
       - mode: show_item
-        title: "向NPC展示旧物"
+        title: "把孩童戏服给陈师傅看"
         target_npc_id: "npc_chen"
         required_item_id: "item_child_costume"
-        description: "把找到的孩童戏服拿给陈师傅看，观察他的反应"
-      - mode: explore
-        title: "去祠堂查阅族谱"
-        target_scene: "temple"
-        description: "在祠堂找到柳家族谱，发现你的名字被划掉了"
+        description: "找到孩童戏服后拿给陈师傅看，观察他的反应"
 
   # ─── 第三章：忆归·真相 ──────────────────────
   - id: ch_03
@@ -151,26 +114,14 @@ chapters:
       至少陈师傅和老周两人确认玩家已恢复记忆并接受了真相。
     sub_task_templates:
       - mode: show_item
-        title: "触摸孩童戏服"
+        title: "把孩童戏服给陈师傅看"
         target_npc_id: "npc_chen"
         required_item_id: "item_child_costume"
-        description: "带着孩童戏服找到陈师傅，触发记忆觉醒的关键时刻"
+        description: "带着孩童戏服找到陈师傅，触发记忆觉醒"
       - mode: dialogue
-        title: "陈师傅说出全部真相"
+        title: "陈师傅说出真相"
         target_npc_id: "npc_chen"
         description: "陈师傅终于告诉你：你是戏班的小传人，父亲为你放弃了一切"
-      - mode: dialogue
-        title: "老周确认你的身份"
-        target_npc_id: "npc_laozhou"
-        description: "老周激动地确认：你就是当年的'小神童'"
-      - mode: explore
-        title: "站上老戏台"
-        target_scene: "stage_ruin"
-        description: "走到戏台中央，身体的记忆与舞台共鸣（记忆闪回）"
-      - mode: deliver
-        title: "告知梅姨真相"
-        target_npc_id: "npc_meiyi"
-        description: "把你记起一切的事告诉梅姨，她终于可以畅所欲言了"
 
   # ─── 第四章：目睹·凋零 ──────────────────────
   - id: ch_04
@@ -192,21 +143,13 @@ chapters:
       所有NPC对玩家表达对戏班未来的担忧和无奈。
     sub_task_templates:
       - mode: dialogue
-        title: "以'传人'身份与陈师傅谈戏班的现状"
+        title: "与陈师傅谈戏班现状"
         target_npc_id: "npc_chen"
         description: "陈师傅讲述三十年来戏班一步步衰落的过程"
       - mode: dialogue
         title: "了解小华的困境"
         target_npc_id: "npc_xiaohua"
         description: "小华吐露他想离开但又舍不得的矛盾心理"
-      - mode: dialogue
-        title: "听老周讲述凋零的细节"
-        target_npc_id: "npc_laozhou"
-        description: "老周一件件列举：哪些人走了、哪些东西坏了、哪些戏失传了"
-      - mode: dialogue
-        title: "梅姨眼中的小镇变化"
-        target_npc_id: "npc_meiyi"
-        description: "梅姨感慨：以前茶馆天天满座来看戏的人，现在连茶都卖不动了"
 
   # ─── 第五章：承戏·重振 ──────────────────────
   - id: ch_05
@@ -232,20 +175,8 @@ chapters:
         title: "告诉陈师傅你的决定"
         target_npc_id: "npc_chen"
         description: "你决定留下来继承戏班。陈师傅泪流满面，交出父亲的京胡"
-      - mode: dialogue
-        title: "邀请小华一起重振戏班"
-        target_npc_id: "npc_xiaohua"
-        description: "小华激动地说：'我第一个跟你干！'"
-      - mode: dialogue
-        title: "告知所有人你的决定"
-        target_npc_id: "npc_meiyi"
-        description: "梅姨激动地说要给全镇人发消息：梨园班要重新开张了"
-      - mode: dialogue
-        title: "告诉老周好消息"
-        target_npc_id: "npc_laozhou"
-        description: "老周老泪纵横：'等了三十年……值了。'"
-      - mode: deliver
-        title: "最终抉择"
+      - mode: show_item
+        title: "穿上孩童戏服"
         target_npc_id: "npc_chen"
         required_item_id: "item_child_costume"
         description: "穿上孩童戏服，站上焕然一新的戏台——薪火相传"

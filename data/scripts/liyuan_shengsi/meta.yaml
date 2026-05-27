@@ -24,7 +24,7 @@ npcs:
     role: "老琴师"
     persona_file: "chen_shifu.yaml"
     scene: "teahouse"
-    position: {col: 43, row: 16}
+    position: {col: 38, row: 14}
     sprite_key: "npc_chen_idle"
     relationship_default: 20
   - id: "npc_xiaohua"
@@ -32,7 +32,7 @@ npcs:
     role: "年轻学徒"
     persona_file: "xiaohua.yaml"
     scene: "stage"
-    position: {col: 11, row: 10}
+    position: {col: 15, row: 12}
     sprite_key: "npc_xiaohua_idle"
     relationship_default: 0
   - id: "npc_laozhou"
@@ -40,7 +40,7 @@ npcs:
     role: "老艺人"
     persona_file: "lao_zhou.yaml"
     scene: "stage"
-    position: {col: 9, row: 7}
+    position: {col: 10, row: 8}
     sprite_key: "npc_laozhou_idle"
     relationship_default: 10
   - id: "npc_meiyi"
@@ -48,7 +48,7 @@ npcs:
     role: "茶馆老板娘"
     persona_file: "mei_yi.yaml"
     scene: "teahouse"
-    position: {col: 43, row: 18}
+    position: {col: 40, row: 16}
     sprite_key: "npc_meiyi_idle"
     relationship_default: 15
   - id: "npc_laoli"
@@ -56,8 +56,47 @@ npcs:
     role: "船夫"
     persona_file: "lao_li.yaml"
     scene: "dock"
-    position: {col: 65, row: 19}
+    position: {col: 60, row: 22}
     sprite_key: "npc_laoli_idle"
     relationship_default: 10
+
+town_npcs:
+  - id: "town_001"
+    name: "卖菜大婶"
+    sprite: "vendor_f"
+    position: {col: 30, row: 28}
+    scene: "town"
+    role: "菜贩"
+    greeting: "新鲜的青菜嘞——刚从地里摘的！"
+    movement:
+      enabled: true
+      speed: 35
+      idle_range: [3, 8]
+      wander_range: [5, 15]
+  - id: "town_002"
+    name: "河边洗衣妇"
+    sprite: "washer_f"
+    position: {col: 50, row: 32}
+    scene: "town"
+    role: "浣衣妇"
+    greeting: "这河水啊，比早年清亮多了……"
+    movement:
+      enabled: true
+      speed: 28
+      idle_range: [4, 10]
+      wander_range: [6, 18]
+      zone: {col: 46, row: 28, cols: 12, rows: 8}
+  - id: "town_003"
+    name: "茶馆跑堂"
+    sprite: "waiter_m"
+    position: {col: 35, row: 22}
+    scene: "town"
+    role: "跑堂"
+    greeting: "客官里边请！新到的龙井，香着呢——"
+    movement:
+      enabled: true
+      speed: 40
+      idle_range: [2, 5]
+      wander_range: [4, 10]
 
 prompt_overrides: {}
