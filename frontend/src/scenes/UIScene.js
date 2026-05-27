@@ -24,6 +24,7 @@ import {
 import { DialogueManager } from './modules/DialogueManager.js';
 import { InventoryPanel } from './modules/InventoryPanel.js';
 import { HistoryPanel } from './modules/HistoryPanel.js';
+import { getTownNPCDialogue } from './modules/TownNPCDialogue.js';
 import { SaveManager } from './modules/SaveManager.js';
 import { EndingScreen } from './modules/EndingScreen.js';
 import { StageTransition } from './modules/StageTransition.js';
@@ -229,7 +230,7 @@ export class UIScene extends Phaser.Scene {
 
   // =========================== 对话系统（委托给 DialogueManager）===========================
 
-  async _onDialogueStart({ npcId, name }) {
+  async _onDialogueStart({ npcId, name, isTownNPC, role }) {
     if (this.dialogActive || this.isStreaming) return;
     this.dialogActive = true;
     this.isStreaming = true;
@@ -245,6 +246,13 @@ export class UIScene extends Phaser.Scene {
     this.dialogText.setText('');
     this.dialogHint.setText('对话生成中……');
     this.dialogue.clearOptions();
+
+    // 城镇 NPC：使用本地随机话术库，不调用后端 API
+    if (isTownNPC) {
+      await this._handleTownNPCDialogue(name, role);
+      return;
+    }
+
     this.dialogue.startCursorBlink();
 
     try {
@@ -255,6 +263,32 @@ export class UIScene extends Phaser.Scene {
       this.dialogText.setText(`【${err.message || '网络开小差了，请重试'}】`);
       this.dialogHint.setText('[F] 关闭');
     }
+  }
+
+  /** 处理城镇 NPC 的本地对话（纯文本展示，无选项/输入框） */
+  async _handleTownNPCDialogue(npcName, role) {
+    const { dialogue } = getTownNPCDialogue(npcName, role);
+
+    // 模拟短暂的"生成中"效果
+    await new Promise(resolve => setTimeout(resolve, 300 + Math.random() * 400));
+
+    this.isStreaming = false;
+    this.dialogue.stopCursorBlink();
+    this.dialogue.hideFreeInput();
+    this.addToHistory(npcName, dialogue);
+
+    // 直接展示纯文本，不进入分页/选项流程
+    this.dialogText.setText(dialogue);
+    this.dialogHint.setText('[F] 关闭');
+    this.pageHint.setText('');
+    this.dialogPages = [dialogue];
+    this.dialogCurrentPage = 0;
+    this.pendingOptions = null;
+    this.pendingChapterChange = null;
+    this.pendingEnding = false;
+
+    // 启用点击关闭（点对话框文本区域即可关闭）
+    this.dialogClickZone.setInteractive({ useHandCursor: true });
   }
 
   /** 分页结束 → 显示选项 */

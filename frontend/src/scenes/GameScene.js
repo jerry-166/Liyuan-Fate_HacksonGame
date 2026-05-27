@@ -528,6 +528,7 @@ export class GameScene extends Phaser.Scene {
     sprite.setData('greeting', townNpc.greeting || '');
     sprite.setData('spriteCfg', cfg);
     sprite.setData('isTownNPC', true);
+    sprite.setData('role', townNpc.role || null);
     sprite.setImmovable(true);
     sprite.body.pushable = false;
     sprite.setDepth(4).setVisible(true);
@@ -1129,6 +1130,8 @@ export class GameScene extends Phaser.Scene {
       npcId: npc.getData('npcId'),
       name: npc.getData('name'),
       position: { col: tilePos.col, row: tilePos.row },
+      isTownNPC: npc.getData('isTownNPC') || false,
+      role: npc.getData('role') || null,
     });
   }
 
