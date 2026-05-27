@@ -1,6 +1,6 @@
 # 《梨园生死》API 设计文档
 
-> **版本**: v2.0 | **最后更新**: 2026-05-25 | **设计原则**: 章节驱动、AI 任务规划、多 NPC 共识推进
+> **版本**: v3.0 | **最后更新**: 2026-05-27 | **设计原则**: 章节驱动、AI 任务规划、多 NPC 共识推进、Session-Save 双层存档
 
 ---
 
@@ -43,7 +43,7 @@ POST /api/game/{id}/chapter/start ← 前端调用，触发章节初始化
 | **AI 任务规划** | 每章开始时 LLM 根据剧本定义生成具体子任务 |
 | **NPC 共识投票** | 章节完成需多 NPC 投票确认 |
 
-### 1.4 API 总览（v2 共 24 个接口）
+### 1.4 API 总览（v3 共 29 个接口）
 
 | 模块 | 方法 | 路径 | 说明 |
 |------|------|------|------|
@@ -54,8 +54,8 @@ POST /api/game/{id}/chapter/start ← 前端调用，触发章节初始化
 | 游戏 | POST | `/api/game/{id}/evaluate` | 生成结局评价 |
 | 游戏 | GET | `/api/game/{id}/relationships` | 关系值历史 |
 | 游戏 | GET | `/api/game/{id}/events` | 事件时间线 |
-| 游戏 | DELETE | `/api/game/{id}` | 删除存档 |
-| 游戏 | GET | `/api/sessions` | 存档列表 |
+| 游戏 | DELETE | `/api/game/{id}` | 删除会话（软删除） |
+| 游戏 | GET | `/api/sessions` | 会话列表 |
 | 游戏 | POST | `/api/game/{id}/npc/position` | 上报 NPC 新位置 |
 | 游戏 | POST | `/api/game/{id}/npc/positions/batch` | 批量同步 NPC 位置 |
 | 游戏 | POST | `/api/game/{id}/npc/spawn` | 运行时生成临时 NPC |
@@ -72,6 +72,10 @@ POST /api/game/{id}/chapter/start ← 前端调用，触发章节初始化
 | 编剧 | POST | `/api/scripts/{id}/town-npcs` | 批量创建/覆盖普通 NPC |
 | 编剧 | DELETE | `/api/scripts/{id}/town-npcs/{nid}` | 删除普通 NPC |
 | 编剧 | PUT | `/api/scripts/{id}/town-npcs/{nid}` | 更新普通 NPC 配置 |
+| 存档 | POST | `/api/game/{id}/saves` | **新建存档快照** |
+| 存档 | GET | `/api/game/{id}/saves` | **列出 session 下所有存档** |
+| 存档 | POST | `/api/game/{id}/saves/{sid}/load` | **从存档恢复游戏状态** |
+| 存档 | DELETE | `/api/game/{id}/saves/{sid}` | **删除指定存档** |
 
 ---
 
@@ -128,6 +132,7 @@ Content-Type: application/json; charset=utf-8
 | `ITEM_NOT_FOUND` | 物品不存在或不在背包中 |
 | `INVALID_PARAM` | 请求参数不合法 |
 | `LLM_ERROR` | LLM 调用失败 |
+| `SAVE_NOT_FOUND` | 存档快照不存在 |
 | `INTERNAL_ERROR` | 服务器内部错误 |
 
 ### 2.3 Session 管理
@@ -705,6 +710,105 @@ Content-Type: application/json; charset=utf-8
 { "success": true, "message": "已删除会话: sess_a1b2c3d4" }
 ```
 
+### 3.13a 新建存档 — `POST /api/game/{session_id}/saves` 🔥v3
+
+**职责**: 在指定 session 下创建完整游戏状态快照存档。每个 session 最多 6 个槽位，满时自动覆盖最旧的。
+
+**Request**
+
+```json
+{
+  "slot_id": 1,
+  "label": "阶段2 · 闻声·异样 · 05-27 14:30",
+  "player_position": { "col": 48, "row": 24 },
+  "town_npc_positions": [
+    { "npc_id": "town_001", "position": { "col": 30, "row": 40 } }
+  ]
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `slot_id` | int | 否 | 指定槽位 1-6，不传则自动分配 |
+| `label` | string | 否 | 存档标签（自动生成时含阶段+章节+时间） |
+| `player_position` | object | 否 | 主角当前瓦片坐标 `{col, row}` |
+| `town_npc_positions` | array | 否 | 城镇 NPC 位置快照 |
+
+**Response** `201 Created`
+
+```json
+{
+  "save_id": "sv_a1b2c3d4",
+  "session_id": "sess_xxx",
+  "slot_id": 1,
+  "label": "阶段2 · 闻声·异样 · 05-27 14:30",
+  "stage": 2,
+  "chapter_id": "ch_01",
+  "message": "存档成功"
+}
+```
+
+### 3.13b 列出存档 — `GET /api/game/{session_id}/saves` 🔥v3
+
+**职责**: 列出 session 下所有存档的元数据（不含完整状态）。
+
+**Response** `200 OK`
+
+```json
+{
+  "saves": [
+    {
+      "save_id": "sv_a1b2c3d4",
+      "session_id": "sess_xxx",
+      "slot_id": 1,
+      "label": "阶段2 · 闻声·异样 · 05-27 14:30",
+      "stage": 2,
+      "chapter_id": "ch_01",
+      "created_at": "2026-05-27 14:30:00",
+      "updated_at": "2026-05-27 14:30:00"
+    }
+  ],
+  "total": 1
+}
+```
+
+### 3.13c 加载存档 — `POST /api/game/{session_id}/saves/{save_id}/load` 🔥v3
+
+**职责**: 从存档快照恢复完整游戏状态。将快照写入当前 session 内存 + DB，返回完整游戏状态给前端。
+
+**Response** `200 OK`
+
+返回 `GET /api/game/{id}` 同等格式的完整游戏状态，额外包含：
+
+```json
+{
+  "session_id": "sess_xxx",
+  "player_name": "玩家",
+  "current_stage": 2,
+  "npcs": [ ... ],
+  "inventory": [ ... ],
+  "current_chapter": { ... },
+  "completed_chapters": [ ... ],
+  "events_triggered": [ ... ],
+  "game_ended": false,
+  "_player_position": { "col": 10, "row": 20 },
+  "_town_npc_positions": [ ... ],
+  "loaded_from_save": "sv_a1b2c3d4"
+}
+```
+
+> **注意**: `loaded_from_save` 标识此次状态来自存档恢复。`_player_position` 和 `_town_npc_positions` 为前端专用的位置快照。
+
+### 3.13d 删除存档 — `DELETE /api/game/{session_id}/saves/{save_id}` 🔥v3
+
+**职责**: 删除指定存档（DB 元数据 + JSON 文件）。
+
+**Response** `200 OK`
+
+```json
+{ "success": true, "message": "已删除存档: sv_a1b2c3d4" }
+```
+
 ### 3.14 对话历史 — `GET /api/game/{session_id}/dialogues`
 
 **Request**
@@ -1078,7 +1182,7 @@ GET /api/game/sess_a1b2c3d4/relationships?npc_id=npc_chen
 
 | 维度 | v2.0（本文档范围） | 后续版本 |
 |------|-------------------|----------|
-| API 数量 | **24 个** | 扩展至 26+ 个 |
+| API 数量 | **29 个** | 扩展至 30+ 个 |
 | 章节系统 | 6 章线性推进 | 分支章节 + 多结局 |
 | 任务规划 | LLM 逐章规划 | 动态任务调整 + 失败回退 |
 | NPC 共识 | 投票机制 | NPC 主动行为 + 反目 |

@@ -1,6 +1,6 @@
 # API 接口清单（单一真相源）
 
-> 所有文档引用本文件获取完整的 API 接口列表。共 **24 个接口**。
+> 所有文档引用本文件获取完整的 API 接口列表。共 **29 个接口**（v3 新增存档管理 4 个）。
 
 ## 游戏会话
 
@@ -55,5 +55,15 @@
 | 22 | `GET` | `/api/scripts/{id}/town-npcs` | 查询普通 NPC 列表 | JSON |
 | 23 | `POST` | `/api/scripts/{id}/town-npcs` | 批量创建/覆盖普通 NPC | JSON |
 | 24 | `DELETE` | `/api/scripts/{id}/town-npcs/{nid}` | 删除普通 NPC | JSON |
+| 25 | `PUT` | `/api/scripts/{id}/town-npcs/{nid}` | 更新普通 NPC 配置 | JSON |
+
+## 存档管理（v3 新增）
+
+| # | 方法 | 路径 | 职责 | 响应方式 |
+|---|------|------|------|----------|
+| 26 | `POST` | `/api/game/{id}/saves` | 创建存档快照（含完整状态+位置） | JSON |
+| 27 | `GET` | `/api/game/{id}/saves` | 列出 session 下所有存档 | JSON |
+| 28 | `POST` | `/api/game/{id}/saves/{sid}/load` | 从存档恢复完整游戏状态 | JSON |
+| 29 | `DELETE` | `/api/game/{id}/saves/{sid}` | 删除指定存档（元数据+文件） | JSON |
 
 > 各接口的详细请求/响应格式见 [后端/API设计文档.md](../后端/API设计文档.md)。

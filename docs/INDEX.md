@@ -42,7 +42,7 @@
 | [_shared/阶段系统.md](./_shared/阶段系统.md) | 阶段枚举、参数表、切换引擎架构 |
 | [_shared/关系值系统.md](./_shared/关系值系统.md) | 关系值范围表、Clamp 机制 |
 | [_shared/数据模型.md](./_shared/数据模型.md) | GameSession、NPCState 数据类 |
-| [_shared/API接口清单.md](./_shared/API接口清单.md) | 15 个接口总览表 |
+| [_shared/API接口清单.md](./_shared/API接口清单.md) | 24 个接口总览表 |
 | [_shared/SSE通信格式.md](./_shared/SSE通信格式.md) | 对话接口的 SSE 事件格式 |
 
 ---
