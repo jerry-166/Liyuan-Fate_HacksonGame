@@ -20,19 +20,19 @@ export class HistoryPanel {
     const padX = 48, padTop = 70, padBottom = 60;
     ui._historyArea = { x: padX, y: padTop, w: width - padX * 2, h: height - padTop - padBottom };
 
-    ui.historyPanel = ui.add.container(0, 0).setDepth(400).setVisible(false);
+    ui._historyPanelUI = ui.add.container(0, 0).setDepth(400).setVisible(false);
 
     const bg = ui.add.graphics();
     bg.fillStyle(0x0a0a12, 0.93);
     bg.fillRect(0, 0, width, height);
-    ui.historyPanel.add(bg);
+    ui._historyPanelUI.add(bg);
 
-    ui.historyPanel.add(ui.add.text(width / 2, 20, '—— 记忆回响 ——', {
+    ui._historyPanelUI.add(ui.add.text(width / 2, 20, '—— 记忆回响 ——', {
       fontFamily: '"KaiTi","SimSun",serif', fontSize: '26px', color: '#d4b896',
     }).setOrigin(0.5, 0));
 
     ui.historyContent = ui.add.container(0, padTop);
-    ui.historyPanel.add(ui.historyContent);
+    ui._historyPanelUI.add(ui.historyContent);
 
     const ha = ui._historyArea;
     const histMaskGfx = ui.add.graphics();
@@ -40,7 +40,7 @@ export class HistoryPanel {
     histMaskGfx.setVisible(false);
     ui.historyContent.setMask(histMaskGfx.createGeometryMask());
 
-    ui.historyPanel.add(ui.add.text(width / 2, height - 30, '[H] 或 [F] 关闭  |  滚轮滚动', {
+    ui._historyPanelUI.add(ui.add.text(width / 2, height - 30, '[H] 或 [F] 关闭  |  滚轮滚动', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '16px', color: '#666655',
     }).setOrigin(0.5, 0));
 
@@ -66,16 +66,16 @@ export class HistoryPanel {
     const wasVisible = ui.historyPanelVisible;
     const savedScrollY = ui.historyScrollY || 0;
 
-    if (ui.historyPanel) {
-      ui.historyPanel.destroy();
-      ui.historyPanel = null;
+    if (ui._historyPanelUI) {
+      ui._historyPanelUI.destroy();
+      ui._historyPanelUI = null;
     }
 
     this.createPanel();
 
     if (wasVisible) {
       ui.historyPanelVisible = true;
-      ui.historyPanel.setVisible(true);
+      ui._historyPanelUI.setVisible(true);
       this.refreshContent();
       ui.historyScrollY = savedScrollY;
       const ha = ui._historyArea;
@@ -90,13 +90,13 @@ export class HistoryPanel {
 
     if (ui.historyPanelVisible) {
       this.refreshContent();
-      ui.historyPanel.setVisible(true);
+      ui._historyPanelUI.setVisible(true);
       ui.dialogClickZone.disableInteractive();
       if (ui.freeInput) { ui.freeInput.blur(); ui.freeInput.style.display = 'none'; }
       const gs = ui.scene.get('GameScene');
       if (gs) gs.events.emit('input:lock', true);
     } else {
-      ui.historyPanel.setVisible(false);
+      ui._historyPanelUI.setVisible(false);
       if (ui.dialogActive && !ui.isStreaming && ui.dialogPages.length > 1 &&
         ui.dialogCurrentPage < ui.dialogPages.length - 1) {
         ui.dialogClickZone.setInteractive({ useHandCursor: true });

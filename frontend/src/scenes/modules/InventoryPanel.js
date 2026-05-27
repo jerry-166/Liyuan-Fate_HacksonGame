@@ -274,12 +274,13 @@ export class InventoryPanel {
       return;
     }
     ui.bpDetailName.setText(item.name || item.narrative_name || '未知物品');
-    ui.bpDetailDesc.setText(item.description || '暂无描述');
+    ui.bpDetailDesc.setText(item.base_description || item.description || item.narrative_desc || '暂无描述');
 
     let tags = '';
     if (item.is_key) tags += '⭐ 关键道具';
     if (item.related_npcs && item.related_npcs.length > 0) {
-      tags += (tags ? '    ' : '') + '👤 关联人物: ' + item.related_npcs.join('、');
+      const npcNames = item.related_npcs.map(id => ui._resolveNpcName(id));
+      tags += (tags ? '    ' : '') + '👤 关联人物: ' + npcNames.join('、');
     }
     ui.bpDetailTags.setText(tags);
   }

@@ -19,6 +19,7 @@ import { COLORS, STAGE_TONES, CHAPTER_MAP } from '../config.js';
 import {
   startDialogueStream, exitDialogue, startChapter,
   getGameState, saveGameState, getDialogues, batchReportNPCPositions,
+  getItems,
 } from '../api/client.js';
 import { DialogueManager } from './modules/DialogueManager.js';
 import { InventoryPanel } from './modules/InventoryPanel.js';
@@ -173,10 +174,21 @@ export class UIScene extends Phaser.Scene {
 
   // =========================== 背包面板（委托给 InventoryPanel）===========================
 
-  toggleBackpackPanel() {
+  async toggleBackpackPanel() {
     if (this.dialogActive || this.pauseMenuVisible || this.historyPanelVisible) return;
     this.backpackPanelVisible = !this.backpackPanelVisible;
     if (this.backpackPanelVisible) {
+      // 从后端拉取最新背包数据
+      if (this.sessionId) {
+        try {
+          const data = await getItems(this.sessionId);
+          if (data && data.inventory) {
+            this.inventory = data.inventory;
+          }
+        } catch (err) {
+          console.warn('[UIScene] 获取背包数据失败，使用本地缓存:', err.message);
+        }
+      }
       this.inventoryPanel.refreshContent();
       this.backpackPanel.setVisible(true);
       this.backpackCursorIndex = Math.min(this.backpackCursorIndex, Math.max(0, this.inventory.length - 1));

@@ -200,7 +200,9 @@ export const MOCK_INVENTORY = [
 
 export const MOCK_SCENE_ITEMS = [
   { item_id: 'item_child_costume', name: '孩童戏服',
-    location: { scene: 'father_house', position: { col: 20, row: 12 } }, acquire_method: 'click' },
+    narrative_desc: '一件小号的戏曲戏服，红底金线绣传统纹样，约五六岁孩童尺寸。颜色已经褪暗，但叠得很整齐——像是有人经常打开来看，又小心翼翼地折好放回去。衣领内侧用墨笔写了一个小小的「柳」字。',
+    location: { scene: 'father_house', position: { col: 20, row: 12 } }, acquire_method: 'click',
+    related_npcs: ['npc_chen'] },
 ];
 
 // ========== Mock 会话列表 ==========
