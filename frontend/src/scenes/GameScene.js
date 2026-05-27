@@ -43,25 +43,23 @@ function _mergeLocalPositionState(sessionId, gameState) {
     if (!saved) return;
     const local = JSON.parse(saved);
 
-    // 合并普通 NPC 位置
-    if (local._town_npc_positions && Array.isArray(local._town_npc_positions)) {
+    // ★ 仅补全缺失字段，不覆盖后端/快照已返回的值
+    if (!gameState._town_npc_positions && local._town_npc_positions && Array.isArray(local._town_npc_positions)) {
       gameState._town_npc_positions = local._town_npc_positions;
     }
-    // 合并主角位置
-    if (local._player_position) {
+    if (!gameState._player_position && local._player_position) {
       gameState._player_position = local._player_position;
     }
-    // 合并子场景标识与位置（用于 restoreGame 时恢复子场景状态）
-    if (local._sub_scene_id) {
+    if (!gameState._sub_scene_id && local._sub_scene_id) {
       gameState._sub_scene_id = local._sub_scene_id;
     }
-    if (local._sub_scene_player_position) {
+    if (!gameState._sub_scene_player_position && local._sub_scene_player_position) {
       gameState._sub_scene_player_position = local._sub_scene_player_position;
     }
-    if (local._sub_scene_story_npc_positions) {
+    if (!gameState._sub_scene_story_npc_positions && local._sub_scene_story_npc_positions) {
       gameState._sub_scene_story_npc_positions = local._sub_scene_story_npc_positions;
     }
-    if (local._sub_scene_town_npc_positions) {
+    if (!gameState._sub_scene_town_npc_positions && local._sub_scene_town_npc_positions) {
       gameState._sub_scene_town_npc_positions = local._sub_scene_town_npc_positions;
     }
     // 合并故事 NPC 位置（localStorage 中的可能比后端 DB 更新）
@@ -388,6 +386,9 @@ export class GameScene extends Phaser.Scene {
         return;
       }
 
+      // ★ 主地图路径：同步恢复主角位置（不等 NPC 异步加载完成）
+      this._restorePlayerFromState(gameState);
+
       if (gameState.npcs) {
         this.time.delayedCall(300, () => this.refreshNPCsFromState(gameState));
       }
@@ -506,26 +507,32 @@ export class GameScene extends Phaser.Scene {
   }
 
   /**
+   * 同步恢复主角位置和可见性（主地图坐标，MAP_SCALE）
+   * 用于 restoreGame 和 _reloadMainMapFromState 共享
+   */
+  _restorePlayerFromState(gameState) {
+    if (!gameState._player_position || !this.player) return;
+    const { col, row } = gameState._player_position;
+    const { x: px, y: py } = COORD.toPixel(col, row);
+    this.player.x = px * MAP_SCALE;
+    this.player.y = py * MAP_SCALE;
+    this.player.setTexture(`${PROTAGONIST.prefix}_idle_down`);
+    this.player.setVisible(true);
+    this.player.setAlpha(1);
+    this.player.setDepth(10);
+    const br = PROTAGONIST.bodyRatio;
+    const bodyW = Math.floor(this.player.displayWidth * br.w);
+    const bodyH = Math.floor(this.player.displayHeight * br.h);
+    this.player.body.setSize(bodyW, bodyH);
+    this.player.body.setOffset(bodyW * br.offsetX, this.player.displayHeight * br.offsetY);
+  }
+
+  /**
    * 从主地图存档恢复 — 加载所有主地图实体
    */
   _reloadMainMapFromState(gameState) {
-    const sessionId = gameState.session_id;
-
     // ★ 同步恢复主角位置
-    if (gameState._player_position && this.player) {
-      const { col, row } = gameState._player_position;
-      const { x: px, y: py } = COORD.toPixel(col, row);
-      this.player.x = px * MAP_SCALE;
-      this.player.y = py * MAP_SCALE;
-      this.player.setTexture(`${PROTAGONIST.prefix}_idle_down`);
-      this.player.setVisible(true);
-      this.player.setAlpha(1);
-      const br = PROTAGONIST.bodyRatio;
-      const bodyW = Math.floor(this.player.displayWidth * br.w);
-      const bodyH = Math.floor(this.player.displayHeight * br.h);
-      this.player.body.setSize(bodyW, bodyH);
-      this.player.body.setOffset(bodyW * br.offsetX, this.player.displayHeight * br.offsetY);
-    }
+    this._restorePlayerFromState(gameState);
 
     // 刷新剧情 NPC
     if (gameState.npcs) {
