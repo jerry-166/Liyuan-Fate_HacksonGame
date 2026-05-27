@@ -208,6 +208,9 @@ export class GameScene extends Phaser.Scene {
     this.currentStage = 1;
     this.currentNearbyItem = null;
 
+    // 碰撞数据 — 在 createCollisionLayer 之前初始化，避免覆盖 localStorage 加载结果
+    this._collisionMap = {};
+
     this.drawTileMap();
 
     // ★ 直接从地图图片取实际渲染尺寸作为边界（最准确）
@@ -261,8 +264,10 @@ export class GameScene extends Phaser.Scene {
     this._editMode = false;
     this._editGridGraphics = null;       // 网格 + 碰撞显示层
     this._editHUD = null;               // 编辑器 UI 提示
-    this._collisionMap = {};            // 碰撞数据 { "col_row": true }
     this._draggedNPC = null;            // 正在拖拽的 NPC
+    this._isBrushPainting = false;      // 是否在画笔拖拽中
+    this._brushMode = null;             // 'paint' | 'erase'
+    this._lastBrushTile = null;         // 上一帧的画笔瓦片（防重复）
 
     // 编辑器快捷键
     this.editKeys = {
@@ -276,7 +281,7 @@ export class GameScene extends Phaser.Scene {
     this.time.delayedCall(200, () => this._initEditor());
 
     // NPC 交互按钮（靠近 NPC 时显示）
-    this.npcActionContainer = this.add.container(0, 0).setDepth(102).setVisible(false).setScrollFactor(0);
+    this._npcBtnParts = [];
     this._createNPCActionButtons();
 
     // 事件监听
@@ -588,10 +593,26 @@ export class GameScene extends Phaser.Scene {
       return null;
     }
 
-    const defaultPos = npcId === 'npc_chen' ? { col: 43, row: 16 } : { col: 11, row: 10 };
-    const col = stateNpc.position ? stateNpc.position.col : defaultPos.col;
-    const row = stateNpc.position ? stateNpc.position.row : defaultPos.row;
-    const { x: posX, y: posY } = COORD.toPixel(col || defaultPos.col, row || defaultPos.row);
+    // ★ 优先使用 localStorage 中编辑器保存的固定坐标（全局持久化）
+    let col, row;
+    try {
+      const saved = localStorage.getItem('editor_npc_positions');
+      if (saved) {
+        const savedPos = JSON.parse(saved);
+        if (savedPos && savedPos[npcId]) {
+          col = savedPos[npcId].col;
+          row = savedPos[npcId].row;
+          console.log(`[GameScene] NPC ${npcId} 从固定坐标加载: (${col}, ${row})`);
+        }
+      }
+    } catch (e) { /* 忽略 */ }
+    // 回退：服务器位置 → 默认位置
+    if (col === undefined) {
+      const defaultPos = npcId === 'npc_chen' ? { col: 43, row: 16 } : { col: 11, row: 10 };
+      col = (stateNpc.position ? stateNpc.position.col : defaultPos.col);
+      row = (stateNpc.position ? stateNpc.position.row : defaultPos.row);
+    }
+    const { x: posX, y: posY } = COORD.toPixel(col, row);
 
     const startKey = `${cfg.prefix}_idle_down`;
     const sprite = this.physics.add.sprite(posX * MAP_SCALE, posY * MAP_SCALE, startKey);
@@ -719,42 +740,74 @@ export class GameScene extends Phaser.Scene {
   _toggleEditMode() {
     this._editMode = !this._editMode;
     if (this._editMode) {
+      // 进入编辑模式：停用玩家移动（身体保持启用，保持物理重叠/碰撞不丢失）
+      this.player.setVelocity(0, 0);
+      this._editCamFreeScroll = true;
+
       this._editHUD.setVisible(true);
       this._editHUD.setPosition(this.cameras.main.width / 2, 40);
       this._refreshEditHUD();
       this._drawCollisionGrid();
-      console.log('[Editor] ✅ 已进入编辑模式 — 点击设置碰撞, 拖拽NPC移动位置');
+      console.log('[Editor] 已进入编辑模式 — WASD滚动视角 | 左键:切换碰撞 | 拖拽:NPC');
     } else {
+      // 退出编辑模式：自动保存 + 恢复玩家物理
+      this._saveToLocalStorage();
+      console.log('[Editor] 碰撞和NPC位置已自动保存');
+
+      // 如果正在拖拽 NPC，吸附到最近格子中心再清除引用
+      if (this._draggedNPC) {
+        const tile = COORD.toTile(this._draggedNPC.x / MAP_SCALE, this._draggedNPC.y / MAP_SCALE);
+        const { x: cx, y: cy } = COORD.toPixelCenter(tile.col, tile.row);
+        this._draggedNPC.x = cx * MAP_SCALE;
+        this._draggedNPC.y = cy * MAP_SCALE;
+        const idx = this.npcs.indexOf(this._draggedNPC);
+        if (idx >= 0 && this.npcBubbles[idx]) {
+          this.npcBubbles[idx].setPosition(this._draggedNPC.x, this._draggedNPC.y - 22);
+        }
+        this._draggedNPC = null;
+      }
+
+      // ★ 不再操作 body.enable（避免破坏物理重叠），身体始终保持启用状态
+      this._editCamFreeScroll = false;
+
+      // 防御：退出编辑后强制解锁输入（避免 UIScene 残留的锁状态）
+      this.inputLocked = false;
+
       this._editHUD.setVisible(false);
-      this._draggedNPC = null;
       if (this._editGridGraphics) this._editGridGraphics.clear();
-      console.log('[Editor] ❌ 已退出编辑模式');
+      console.log('[Editor] 已退出编辑模式 | inputLocked:', this.inputLocked);
     }
   }
 
   /** 刷新 HUD 显示 */
   _refreshEditHUD() {
     const count = Object.keys(this._collisionMap).length;
-    const mode = this._draggedNPC ? '🔵 拖拽NPC中...' : '🟢 左键:切换碰撞 | 拖拽:NPC | S:保存 | C:清除全部';
-    this._editHUDText.setText(`[碰撞编辑模式]\n${mode}\n当前碰撞格数: ${count}`);
+    const mode = this._draggedNPC
+      ? '拖拽NPC中...'
+      : this._isBrushPainting
+        ? (this._brushMode === 'erase' ? '🧹 擦除中(拖动)' : '🖌️ 涂画中(拖动)')
+        : 'WASD:滚动 | 左键:单击/拖动画笔 | S:保存 | C:清除';
+    this._editHUDText.setText(`[碰撞编辑模式]  碰撞格: ${count}\n${mode}`);
   }
 
-  /** 绘制网格和碰撞区域 */
+  /** 绘制网格和碰撞区域（使用地图图片实际渲染尺寸） */
   _drawCollisionGrid() {
     const g = this._editGridGraphics;
     if (!g) return;
     g.clear();
 
     const gridPx = TILE * MAP_SCALE;   // 每格像素大小
-    const mapW = MAP_COLS * gridPx;
-    const mapH = MAP_ROWS * gridPx;
+    const mapW = this._mapBounds ? this._mapBounds.w : MAP_COLS * gridPx;
+    const mapH = this._mapBounds ? this._mapBounds.h : MAP_ROWS * gridPx;
+    const cols = Math.ceil(mapW / gridPx);
+    const rows = Math.ceil(mapH / gridPx);
 
-    // 1. 绘制浅色网格线
+    // 1. 绘制浅色网格线（覆盖整个地图图片区域）
     g.lineStyle(1, 0xffffff, 0.12);
-    for (let c = 0; c <= MAP_COLS; c++) {
+    for (let c = 0; c <= cols; c++) {
       g.moveTo(c * gridPx, 0); g.lineTo(c * gridPx, mapH);
     }
-    for (let r = 0; r <= MAP_ROWS; r++) {
+    for (let r = 0; r <= rows; r++) {
       g.moveTo(0, r * gridPx); g.lineTo(mapW, r * gridPx);
     }
 
@@ -778,22 +831,21 @@ export class GameScene extends Phaser.Scene {
       g.fillCircle(cx, cy, gridPx * 0.4);
       g.lineStyle(2, 0x00ffff, 0.9);
       g.strokeCircle(cx, cy, gridPx * 0.4);
-
-      // NPC 名字标签
-      const name = npc.getData('name') || '?';
-      // 用 graphics 无法直接画文字，这里只画标记圆
     }
   }
 
-  /** 获取鼠标指向的瓦片坐标 */
+  /** 获取鼠标指向的瓦片坐标（使用地图图片实际尺寸作为边界） */
   _getPointerTile(ptr) {
     const cam = this.cameras.main;
     const worldX = ptr.x + cam.scrollX;
     const worldY = ptr.y + cam.scrollY;
     const gridPx = TILE * MAP_SCALE;
+    // 用地图图片实际渲染尺寸计算最大 col/row
+    const maxCol = Math.floor(this._mapBounds.w / gridPx) - 1;
+    const maxRow = Math.floor(this._mapBounds.h / gridPx) - 1;
     return {
-      col: Math.floor(worldX / gridPx),
-      row: Math.floor(worldY / gridPx),
+      col: Phaser.Math.Clamp(Math.floor(worldX / gridPx), 0, maxCol),
+      row: Phaser.Math.Clamp(Math.floor(worldY / gridPx), 0, maxRow),
     };
   }
 
@@ -803,7 +855,7 @@ export class GameScene extends Phaser.Scene {
 
     const tile = this._getPointerTile(ptr);
 
-    // 检查是否点中 NPC（优先检测拖拽）
+    // 1) 检查是否点中 NPC（优先检测拖拽）
     for (const npc of this.npcs) {
       const dist = Phaser.Math.Distance.Between(
         ptr.x + this.cameras.main.scrollX,
@@ -812,26 +864,30 @@ export class GameScene extends Phaser.Scene {
       );
       if (dist < 32) {
         this._draggedNPC = npc;
-        this._refreshEditHUD();
         console.log(`[Editor] 开始拖拽 NPC: ${npc.getData('name')}`);
         return;
       }
     }
 
-    // 否则切换碰撞状态
-    if (tile.col >= 0 && tile.col < MAP_COLS && tile.row >= 0 && tile.row < MAP_ROWS) {
-      const key = `${tile.col}_${tile.row}`;
-      if (this._collisionMap[key]) {
-        delete this._collisionMap[key];
-      } else {
-        this._collisionMap[key] = true;
-      }
-      this._drawCollisionGrid();
-      this._refreshEditHUD();
+    // 2) 未点中 NPC → 进入画笔拖拽模式
+    this._isBrushPainting = true;
+    this._lastBrushTile = null;
+
+    const key = `${tile.col}_${tile.row}`;
+    if (this._collisionMap[key]) {
+      // 当前格已有碰撞 → 擦除模式
+      this._brushMode = 'erase';
+      delete this._collisionMap[key];
+    } else {
+      // 当前格无碰撞 → 涂画模式
+      this._brushMode = 'paint';
+      this._collisionMap[key] = true;
     }
+    this._drawCollisionGrid();
+    this._refreshEditHUD();
   }
 
-  /** 鼠标移动（绘制预览） */
+  /** 鼠标移动（拖拽NPC 或 画笔涂画） */
   _onEditPointerMove(ptr) {
     if (!this._editMode) return;
 
@@ -850,60 +906,105 @@ export class GameScene extends Phaser.Scene {
         );
       }
       this._drawCollisionGrid();  // 重绘以更新 NPC 标记位置
+      return;
+    }
+
+    // 画笔拖拽：每进入一个新格子就应用当前模式
+    if (this._isBrushPainting) {
+      const tile = this._getPointerTile(ptr);
+
+      const key = `${tile.col}_${tile.row}`;
+
+      // 跳过同一格子（避免重复操作）
+      if (this._lastBrushTile && this._lastBrushTile === key) return;
+      this._lastBrushTile = key;
+
+      if (this._brushMode === 'paint') {
+        this._collisionMap[key] = true;
+      } else {
+        delete this._collisionMap[key];
+      }
+      this._drawCollisionGrid();
+      this._refreshEditHUD();
     }
   }
 
   /** 鼠标释放 */
   _onEditPointerUp(ptr) {
-    if (!this._editMode || !this._draggedNPC) return;
+    if (!this._editMode) return;
 
-    const tile = COORD.toTile(this._draggedNPC.x / MAP_SCALE, this._draggedNPC.y / MAP_SCALE);
-    console.log(`[Editor] NPC ${this._draggedNPC.getData('name')} 新位置: col=${tile.col}, row=${tile.row}`);
-
-    // 吸附到格子中心
-    const { x: cx, y: cy } = COORD.toPixelCenter(tile.col, tile.row);
-    this._draggedNPC.x = cx * MAP_SCALE;
-    this._draggedNPC.y = cy * MAP_SCALE;
-
-    const idx = this.npcs.indexOf(this._draggedNPC);
-    if (idx >= 0 && this.npcBubbles[idx]) {
-      this.npcBubbles[idx].setPosition(this._draggedNPC.x, this._draggedNPC.y - 22);
+    // 结束画笔拖拽
+    if (this._isBrushPainting) {
+      this._isBrushPainting = false;
+      this._brushMode = null;
+      this._lastBrushTile = null;
+      // 保存到 localStorage（确保刷新后不丢失）
+      this._saveToLocalStorage();
+      return;
     }
 
-    this._draggedNPC = null;
-    this._drawCollisionGrid();
-    this._refreshEditHUD();
+    // 结束 NPC 拖拽
+    if (this._draggedNPC) {
+      const tile = COORD.toTile(this._draggedNPC.x / MAP_SCALE, this._draggedNPC.y / MAP_SCALE);
+      console.log(`[Editor] NPC ${this._draggedNPC.getData('name')} 新位置: col=${tile.col}, row=${tile.row}`);
+
+      // 吸附到格子中心
+      const { x: cx, y: cy } = COORD.toPixelCenter(tile.col, tile.row);
+      this._draggedNPC.x = cx * MAP_SCALE;
+      this._draggedNPC.y = cy * MAP_SCALE;
+
+      const idx = this.npcs.indexOf(this._draggedNPC);
+      if (idx >= 0 && this.npcBubbles[idx]) {
+        this.npcBubbles[idx].setPosition(this._draggedNPC.x, this._draggedNPC.y - 22);
+      }
+
+      this._draggedNPC = null;
+      this._saveToLocalStorage();
+      this._drawCollisionGrid();
+      this._refreshEditHUD();
+      return;
+    }
   }
 
-  /** 保存碰撞配置到 localStorage + 控制台导出 JSON */
-  _saveCollisionConfig() {
-    // 收集 NPC 位置
+  /** 仅写 localStorage（退出编辑时静默保存） */
+  _saveToLocalStorage() {
     const npcPositions = {};
     for (const npc of this.npcs) {
       const tile = COORD.toTile(npc.x / MAP_SCALE, npc.y / MAP_SCALE);
       npcPositions[npc.getData('npcId')] = { col: tile.col, row: tile.row };
     }
+    try {
+      localStorage.setItem('editor_collision_map', JSON.stringify(this._collisionMap));
+      localStorage.setItem('editor_npc_positions', JSON.stringify(npcPositions));
+    } catch (e) {
+      console.warn('[Editor] localStorage 保存失败:', e);
+    }
+  }
 
-    const config = {
-      collision: this._collisionMap,
-      npcs: npcPositions,
-      timestamp: new Date().toISOString(),
-    };
+  /** 保存碰撞配置到 localStorage + 控制台导出 JSON（S 键手动触发） */
+  _saveCollisionConfig() {
+    this._saveToLocalStorage();
 
-    // 存 localStorage
-    localStorage.setItem('editor_collision_map', JSON.stringify(this._collisionMap));
-    localStorage.setItem('editor_npc_positions', JSON.stringify(npcPositions));
+    // 收集当前 NPC 位置信息
+    const npcPositions = {};
+    for (const npc of this.npcs) {
+      const tile = COORD.toTile(npc.x / MAP_SCALE, npc.y / MAP_SCALE);
+      npcPositions[npc.getData('npcId')] = {
+        name: npc.getData('name'),
+        col: tile.col, row: tile.row
+      };
+    }
 
     // 控制台输出可复制 JSON
     console.log('═══════════════════════════════════');
-    console.log('[Editor] 💾 配置已保存!');
+    console.log('[Editor] 配置已保存! 碰撞格数:', Object.keys(this._collisionMap).length);
     console.log('\n// 碰撞数据 (复制到代码中使用):');
     console.log(JSON.stringify(this._collisionMap, null, 2));
-    console.log('\n// NPC 位置:');
+    console.log('\n// NPC 位置 (复制到代码中使用):');
     console.log(JSON.stringify(npcPositions, null, 2));
     console.log('═══════════════════════════════════');
 
-    this.showToast(`✅ 已保存! 碰撞:${Object.keys(this._collisionMap).length}格`, 2500);
+    this.showToast(`已保存! 碰撞:${Object.keys(this._collisionMap).length}格 | NPC:${this.npcs.length}个`, 2500);
     this._refreshEditHUD();
   }
 
@@ -936,8 +1037,7 @@ export class GameScene extends Phaser.Scene {
   _showControlsHint() {
     const { width, height } = this.cameras.main;
     const hint = this.add.text(width / 2, height - 50, [
-      '🎮 [WASD/方向键] 移动  |  [E] 碰撞编辑器  |  [R] 硬重置(清缓存)  |  [C] 清除碰撞',
-      '提示: 按E进入编辑模式可设置碰撞区域和拖拽NPC位置',
+      '[WASD/方向键] 移动  |  [E] 碰撞编辑器(编辑器内WASD滚动视角)  |  [R] 硬重置',
     ].join('\n'), {
       fontFamily: '"Microsoft YaHei","Consolas",sans-serif',
       fontSize: '13px',
@@ -1021,50 +1121,63 @@ export class GameScene extends Phaser.Scene {
     const btnH = 32;
     const gap = 10;
     const totalW = btnW * 2 + gap;
+    this._npcBtnParts = []; // { obj, dx, dy }
 
-    // 半透明背景条
-    const bg = this.add.graphics();
+    const addPart = (obj, dx = 0, dy = 0, depth = 102) => {
+      obj.setDepth(depth).setScrollFactor(0).setVisible(false);
+      this._npcBtnParts.push({ obj, dx, dy });
+      return obj;
+    };
+
+    // 背景条（dx=dy=0，图形本身已在本地坐标中居中）
+    const bg = addPart(this.add.graphics());
     bg.fillStyle(0x1a1820, 0.92);
     bg.fillRoundedRect(-totalW / 2 - 8, -btnH / 2 - 6, totalW + 16, btnH + 12, 6);
     bg.lineStyle(1, 0xc4a882, 0.5);
     bg.strokeRoundedRect(-totalW / 2 - 8, -btnH / 2 - 6, totalW + 16, btnH + 12, 6);
-    this.npcActionContainer.add(bg);
 
-    // 左按钮：「进行对话」
-    const makeBtn = (label, offsetX, callback, color = '#d4b896') => {
-      const btnGfx = this.add.graphics();
+    const makeBtn = (label, centerX, callback, color = '#d4b896') => {
+      const btnGfx = addPart(this.add.graphics(), 0, 0, 103);
       const drawBtn = (hover) => {
         btnGfx.clear();
         btnGfx.fillStyle(hover ? 0x3a3830 : 0x2a2824, 1);
-        btnGfx.fillRoundedRect(offsetX - btnW / 2, -btnH / 2, btnW, btnH, 4);
+        btnGfx.fillRoundedRect(centerX - btnW / 2, -btnH / 2, btnW, btnH, 4);
         btnGfx.lineStyle(1, hover ? 0xd4b896 : 0x887766, 0.6);
-        btnGfx.strokeRoundedRect(offsetX - btnW / 2, -btnH / 2, btnW, btnH, 4);
+        btnGfx.strokeRoundedRect(centerX - btnW / 2, -btnH / 2, btnW, btnH, 4);
       };
       drawBtn(false);
 
-      const text = this.add.text(offsetX, 0, label, {
-        fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-        fontSize: '13px', color,
-      }).setOrigin(0.5);
+      // 文字和热区用 dx=centerX 来保持左右分布
+      addPart(
+        this.add.text(0, 0, label, {
+          fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+          fontSize: '13px', color,
+        }).setOrigin(0.5),
+        centerX, 0, 104
+      );
 
-      const zone = this.add.zone(offsetX, 0, btnW, btnH).setInteractive({ useHandCursor: true });
-      zone.on('pointerover', () => drawBtn(true));
-      zone.on('pointerout', () => drawBtn(false));
-      zone.on('pointerdown', callback);
-
-      this.npcActionContainer.add([btnGfx, text, zone]);
+      const hit = addPart(
+        this.add.rectangle(0, 0, btnW, btnH, 0x000000, 0.01)
+          .setInteractive({ useHandCursor: true }),
+        centerX, 0, 105
+      );
+      hit.on('pointerover', () => drawBtn(true));
+      hit.on('pointerout', () => drawBtn(false));
+      hit.on('pointerdown', callback);
     };
 
     const leftX = -btnW / 2 - gap / 2;
     const rightX = btnW / 2 + gap / 2;
 
     makeBtn('💬 进行对话', leftX, () => {
+      console.log('[交互按钮] 点击"进行对话"');
       if (this.currentNearbyNPC) {
         this.triggerDialogue(this.currentNearbyNPC);
       }
     });
 
     makeBtn('🎁 展示物品', rightX, () => {
+      console.log('[交互按钮] 点击"展示物品"');
       if (this.currentNearbyNPC) {
         const npcId = this.currentNearbyNPC.getData('npcId');
         const npcName = this.currentNearbyNPC.getData('name');
@@ -1074,16 +1187,22 @@ export class GameScene extends Phaser.Scene {
   }
 
   _showNPCActionButtons(npc) {
-    // 将世界坐标转换为屏幕坐标（scrollFactor=0 的容器用屏幕坐标）
     const cam = this.cameras.main;
     const relX = npc.x - cam.scrollX;
-    const relY = npc.y - cam.scrollY - 52 * MAP_SCALE;
-    this.npcActionContainer.setPosition(relX, relY);
-    this.npcActionContainer.setVisible(true);
+    const relY = npc.y - cam.scrollY - 50 * MAP_SCALE; // NPC 头顶上方，气泡之上
+    for (const { obj, dx, dy } of this._npcBtnParts) {
+      obj.setPosition(relX + dx, relY + dy).setVisible(true);
+    }
+    if (!this._lastBtnLog || Date.now() - this._lastBtnLog > 2000) {
+      this._lastBtnLog = Date.now();
+      console.log('[交互按钮] 显示按钮', { npcName: npc.getData('name'), relX, relY });
+    }
   }
 
   _hideNPCActionButtons() {
-    this.npcActionContainer.setVisible(false);
+    for (const { obj } of this._npcBtnParts) {
+      obj.setVisible(false);
+    }
   }
 
   // ==================== NPC ====================
@@ -1144,6 +1263,11 @@ export class GameScene extends Phaser.Scene {
     this.physics.add.overlap(this.player, this.npcs, (_player, npc) => {
       this.currentNearbyNPC = npc;
     });
+    console.log('[NPC创建] 已创建', this.npcs.length, '个NPC:', this.npcs.map(n => ({
+      name: n.getData('name'), id: n.getData('npcId'),
+      pos: `(${Math.round(n.x)},${Math.round(n.y)})`,
+      body: n.body ? `enabled=${n.body.enable}, size=(${n.body.width},${n.body.height})` : 'NO_BODY'
+    })));
   }
 
   // ==================== 更新循环 ====================
@@ -1229,10 +1353,9 @@ export class GameScene extends Phaser.Scene {
       this._saveCollisionConfig();
     }
     if (this._editMode) {
-      // 编辑模式下暂停正常游戏逻辑
+      // 编辑模式下：WASD 自由滚动摄像机（不移动角色）
       this.player.setVelocity(0, 0);
-      // 编辑模式仍需更新相机（可以移动视角）
-      this._updateCameraOnly();
+      this._updateEditorCamera();
       return;
     }
 
@@ -1290,6 +1413,7 @@ export class GameScene extends Phaser.Scene {
 
     // NPC 气泡跟随 + 接近检测 + 交互按钮
     this.currentNearbyNPC = null;
+    let minDist = Infinity;
     for (let i = 0; i < this.npcs.length; i++) {
       const npc = this.npcs[i];
       const bubble = this.npcBubbles[i];
@@ -1299,15 +1423,30 @@ export class GameScene extends Phaser.Scene {
       const dist = Phaser.Math.Distance.Between(
         this.player.x, this.player.y, npc.x, npc.y
       );
+      if (dist < minDist) minDist = dist;
       if (dist < 64) {
         this.currentNearbyNPC = npc;
       }
     }
 
+    // [DEBUG] 每秒打印一次接近检测状态
+    if (!this._npcDebugCounter) this._npcDebugCounter = 0;
+    this._npcDebugCounter++;
+    if (this._npcDebugCounter % 60 === 0) {
+      console.log('[NPC检测]', {
+        npcCount: this.npcs.length,
+        nearbyNPC: this.currentNearbyNPC ? this.currentNearbyNPC.getData('name') : null,
+        minDist: Math.round(minDist),
+        inputLocked: this.inputLocked,
+        playerPos: `(${Math.round(this.player.x)},${Math.round(this.player.y)})`,
+        npcPositions: this.npcs.map(n => `${n.getData('name')}(${Math.round(n.x)},${Math.round(n.y)})`),
+      });
+    }
+
     if (this.currentNearbyNPC) {
-      this._hideNPCActionButtons(); // 先隐藏，下一帧定位后再显示
+      this._hideNPCActionButtons();
       this.interactHint.setVisible(false);
-      // 在NPC上方显示交互按钮（延后一帧确保位置正确）
+      // 在NPC上方显示交互按钮
       if (!this.inputLocked) {
         this._showNPCActionButtons(this.currentNearbyNPC);
       } else {
@@ -1334,8 +1473,12 @@ export class GameScene extends Phaser.Scene {
         }
       }
     }
+    if (!this.currentNearbyItem && !this.currentNearbyNPC) {
+      this.interactHint.setVisible(false);
+    }
 
-    // F 键交互（仅物品拾取；NPC 用按钮交互）
+
+    // F 键交互（仅物品拾取，NPC 交互用按钮）
     if (!this.inputLocked && Phaser.Input.Keyboard.JustDown(this.wasd.F)) {
       if (this.currentNearbyItem) {
         this.pickupItem(this.currentNearbyItem);
@@ -1379,6 +1522,31 @@ export class GameScene extends Phaser.Scene {
       cam.scrollX = Phaser.Math.Clamp(cam.scrollX, 0, Math.max(0, mapW - cam.width));
       cam.scrollY = Phaser.Math.Clamp(cam.scrollY, 0, Math.max(0, mapH - cam.height));
     }
+  }
+
+  /**
+   * 编辑模式下的自由摄像机滚动（WASD/方向键移动视角，不移动角色）
+   */
+  _updateEditorCamera() {
+    if (!this._mapBounds) return;
+    const cam = this.cameras.main;
+    const { w: mapW, h: mapH } = this._mapBounds;
+
+    // 滚动速度
+    const scrollSpeed = 10;
+
+    let dx = 0, dy = 0;
+    if (this.wasd.A.isDown || this.cursors.left.isDown) dx = -scrollSpeed;
+    else if (this.wasd.D.isDown || this.cursors.right.isDown) dx = scrollSpeed;
+
+    if (this.wasd.W.isDown || this.cursors.up.isDown) dy = -scrollSpeed;
+    else if (this.wasd.S.isDown || this.cursors.down.isDown) dy = scrollSpeed;
+
+    cam.scrollX += dx;
+    cam.scrollY += dy;
+    // clamp 到地图范围
+    cam.scrollX = Phaser.Math.Clamp(cam.scrollX, 0, Math.max(0, mapW - cam.width));
+    cam.scrollY = Phaser.Math.Clamp(cam.scrollY, 0, Math.max(0, mapH - cam.height));
   }
 
   triggerDialogue(npc) {
