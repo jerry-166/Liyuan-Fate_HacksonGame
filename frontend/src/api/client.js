@@ -703,6 +703,51 @@ export async function deleteSave(sessionId, saveId) {
   return res.json();
 }
 
+// ===== 编辑器配置（场景模板，独立于游戏存档）=====
+
+/**
+ * 保存编辑器配置到后端文件系统（碰撞/NPC初始位置/场景入口/物品位置/出生点）
+ * 这些是创建新存档时的初始模板数据，与游戏存档完全分离。
+ * @param {Object} data - { "_main": { collisionMap, npcPositions, itemPositions, playerSpawn, entryZones }, "stage": {...}, ... }
+ * @param {string} [scriptId='liyuan_shengsi'] - 剧本ID
+ */
+export async function saveEditorConfig(data, scriptId = 'liyuan_shengsi') {
+  if (USE_MOCK) {
+    localStorage.setItem('__editor_config__', JSON.stringify(data));
+    console.log('[client] Mock: 编辑器配置已保存到 localStorage');
+    return { status: 'ok', scenes: Object.keys(data) };
+  }
+  const res = await fetch(`${BASE}/editor/config`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ script_id: scriptId, data }),
+  });
+  if (!res.ok) throw new Error(await _extractApiError(res));
+  return res.json();
+}
+
+/**
+ * 从后端文件系统加载编辑器配置
+ * @param {string} [scriptId='liyuan_shengsi'] - 剧本ID
+ * @returns {Object|null} 编辑器配置数据
+ */
+export async function loadEditorConfig(scriptId = 'liyuan_shengsi') {
+  if (USE_MOCK) {
+    try {
+      const saved = localStorage.getItem('__editor_config__');
+      if (saved) {
+        console.log('[client] Mock: 从 localStorage 加载编辑器配置');
+        return JSON.parse(saved);
+      }
+    } catch { /* ignore */ }
+    return null;
+  }
+  const res = await fetch(`${BASE}/editor/config?script_id=${encodeURIComponent(scriptId)}`);
+  if (!res.ok) throw new Error(await _extractApiError(res));
+  const result = await res.json();
+  return result.data || null;
+}
+
 // ===== 兼容旧接口（代理到新 API）=====
 
 /** @deprecated 使用 getSaves(sessionId) 替代 */

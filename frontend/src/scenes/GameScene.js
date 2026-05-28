@@ -26,7 +26,7 @@ import {
   PROTAGONIST, NPC_SPRITES, FALLBACK_NPC_SPRITE, DIRS,
   showToast as _showToast, showLoadingHint as _showLoadingHint, hideLoadingHint as _hideLoadingHint,
 } from './modules/GameUIHelpers.js';
-import { SUBSCENES } from './modules/SubSceneConfig.js';
+import { SUBSCENES, SUB_MAP_SCALE } from './modules/SubSceneConfig.js';
 import { SubSceneManager } from './modules/SubSceneManager.js';
 
 const TILE = GAME.TILE_SIZE;
@@ -133,6 +133,10 @@ export class GameScene extends Phaser.Scene {
     // 子场景管理器
     this.subSceneManager = new SubSceneManager(this);
 
+    // 从后端文件系统加载编辑器配置（如果localStorage中没有数据）
+    // 必须等配置加载完再创建 NPC，否则首次打开时NPC位置会回退到硬编码默认值
+    this._editorConfigPromise = this._loadEditorFromBackend();
+
     this.drawTileMap();
 
     // 以图片实际渲染尺寸作为边界
@@ -142,7 +146,14 @@ export class GameScene extends Phaser.Scene {
 
     this.createCollisionLayer();
     this.createPlayer();
-    this.createNPCs();
+
+    // 等编辑器配置就绪后再创建 NPC，确保使用正确的出生点
+    this._editorConfigPromise.then((restored) => {
+      if (restored) {
+        console.log('[Editor] 配置已恢复，创建 NPC 使用编辑器出生点');
+      }
+      this.createNPCs();
+    });
 
     this.cameras.main.removeBounds();
 
@@ -156,14 +167,14 @@ export class GameScene extends Phaser.Scene {
       F: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F),
     };
 
-    // F键交互提示文字
+    // F键交互提示文字（跟随世界坐标，出现在目标头上方）
     this.interactHint = this.add.text(0, 0, '', {
       fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
       fontSize: '17px', color: '#d4c4a0',
       backgroundColor: '#2a2824ee',
       padding: { x: 10, y: 5 },
       border: 1, borderRadius: 4,
-    }).setOrigin(0.5).setDepth(100).setVisible(false).setScrollFactor(0);
+    }).setOrigin(0.5).setDepth(100).setVisible(false);
 
     // 碰撞编辑器
     this._editor = new CollisionEditor(this);
@@ -171,10 +182,32 @@ export class GameScene extends Phaser.Scene {
     // 编辑器快捷键
     this.editKeys = {
       E: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E),
-      S: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
+      K: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.K),   // 保存（避免与WASD的S冲突）
+      B: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.B),   // 设置出生点
       C: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C),
       R: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R),
+      I: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.I),
+      X: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.X),
+      Z: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Z),
+      ENTER: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER),
+      ESC: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC),
+      ONE: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ONE),
+      TWO: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.TWO),
+      THREE: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.THREE),
+      FOUR: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.FOUR),
+      FIVE: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.FIVE),
+      SIX: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SIX),
+      SEVEN: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SEVEN),
+      EIGHT: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.EIGHT),
+      NINE: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.NINE),
+      ZERO: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ZERO),
     };
+
+    // 加载入口区域数据（供 SubSceneManager 使用，即使不在编辑模式也需加载）
+    this.time.delayedCall(100, () => {
+      this._editor.loadEntryZones();
+      this.subSceneManager._reloadEntryZones();
+    });
 
     // 延迟初始化编辑器
     this.time.delayedCall(200, () => this._editor.init());
@@ -272,8 +305,27 @@ export class GameScene extends Phaser.Scene {
 
       localStorage.setItem('__active_session__', gameState.session_id);
       saveGameState(gameState.session_id, gameState);
+      // ★ 新游戏：清除旧的子场景入口位置备份，避免残留数据干扰
+      localStorage.removeItem('subscene_entry_position');
+      localStorage.removeItem('subscene_entry_building');
 
       if (gameState.npcs) {
+        // ★ 注入编辑器 NPC 位置到 state，refreshNPCsFromState 会直接使用这些位置
+        try {
+          const subId = this.subSceneManager.currentSubSceneId;
+          const npcKey = subId
+            ? `editor_npc_positions_${subId}`
+            : 'editor_npc_positions';
+          const saved = localStorage.getItem(npcKey);
+          if (saved) {
+            const editorPositions = JSON.parse(saved);
+            gameState.npcs.forEach(npc => {
+              if (editorPositions[npc.id] && editorPositions[npc.id].col !== undefined) {
+                npc.position = { ...editorPositions[npc.id] };
+              }
+            });
+          }
+        } catch (_) { /* ignore */ }
         this.time.delayedCall(300, () => this.refreshNPCsFromState(gameState));
       }
       this.time.delayedCall(500, () => this.loadTownNPCs());
@@ -562,52 +614,79 @@ export class GameScene extends Phaser.Scene {
 
   // ==================== 场景物品系统 ====================
 
-  /** 从后端刷新场景物品 */
-  async refreshSceneItems() {
-    const sessionId = localStorage.getItem('__active_session__');
-    if (!sessionId) return;
+  /** 从 localStorage 加载编辑器配置的场景物品（支持主/子场景区分） */
+  refreshSceneItems(subSceneId = null) {
+    // 清空现有物品
+    this.sceneItems.forEach(sp => { this.tweens.killTweensOf(sp); sp.destroy(); });
+    this.sceneItems = [];
+    this.currentNearbyItem = null;
+
+    // 获取背包中已有的物品 ID 集合，已收集的物品不再在场景中渲染
+    let ownedItemIds = new Set();
+    try {
+      const ui = this.scene.get('UIScene');
+      if (ui && ui.inventory) {
+        ui.inventory.forEach(i => {
+          const id = i.id || i.item_id;
+          if (id) ownedItemIds.add(id);
+        });
+      }
+    } catch (_) { /* ignore */ }
 
     try {
-      const { getItems } = await import('../api/client.js');
-      const data = await getItems(sessionId);
+      const itemKey = subSceneId
+        ? `editor_item_positions_${subSceneId}`
+        : 'editor_item_positions';
+      const saved = localStorage.getItem(itemKey);
+      if (!saved) return;
+      const items = JSON.parse(saved);
+      if (!Array.isArray(items)) return;
 
-      this.sceneItems.forEach(sp => sp.destroy());
-      this.sceneItems = [];
-      this.currentNearbyItem = null;
+      // 子场景使用子场景缩放 + 居中偏移（含动态 displayScale）
+      const scale = subSceneId
+        ? SUB_MAP_SCALE * ((SUBSCENES[subSceneId]?.displayScale) || 1.0)
+        : MAP_SCALE;
+      const off = subSceneId ? (this.subSceneManager._subSceneOffset || { x: 0, y: 0 }) : { x: 0, y: 0 };
 
-      const sceneItems = data.scene_items || [];
-      sceneItems.forEach(item => {
-        if (!item.location || !item.location.position) return;
-        const { col, row } = item.location.position;
-        this._createSceneItemSprite(item, col, row);
+      let skipped = 0;
+      items.forEach(item => {
+        if (item.col == null || item.row == null) return;
+        // ★ 已收集的物品不再渲染
+        if (item.item_id && ownedItemIds.has(item.item_id)) {
+          skipped++;
+          return;
+        }
+        this._createSceneItemSprite(item, scale, off);
       });
-      console.log(`[GameScene] 场景物品已刷新: ${this.sceneItems.length} 个`);
+      console.log(`[GameScene] 编辑器物品已加载: ${this.sceneItems.length} 个` + (skipped ? ` (跳过${skipped}个已收集)` : ''));
     } catch (e) {
-      console.warn('[GameScene] 刷新场景物品失败:', e);
+      console.warn('[GameScene] 加载编辑器物品失败:', e);
     }
   }
 
-  /** 创建单个场景物品精灵 */
-  _createSceneItemSprite(itemData, col, row) {
-    const pos = COORD.toPixel(col, row);
-    const px = pos.x * MAP_SCALE;
-    const py = pos.y * MAP_SCALE;
+  /** 创建单个场景物品精灵（支持主/子场景缩放和偏移） */
+  _createSceneItemSprite(itemData, scale = MAP_SCALE, offset = { x: 0, y: 0 }) {
+    const pos = COORD.toPixel(itemData.col, itemData.row);
+    const px = offset.x + pos.x * scale;
+    const py = offset.y + pos.y * scale;
 
-    const sprite = this.add.text(px, py, '📦', {
-      fontSize: `${20 * MAP_SCALE}px`,
+    const sprite = this.add.text(px, py, itemData.emoji || '📦', {
+      fontSize: `${(itemData.size || 20) * scale}px`,
     }).setOrigin(0.5).setDepth(90);
 
-    sprite.setData('itemId', itemData.item_id);
-    sprite.setData('name', itemData.name);
+    sprite.setData('itemId', itemData.item_id || itemData.id || 'item_' + Math.random().toString(36).slice(2, 8));
+    sprite.setData('name', itemData.name || '未知物品');
+    sprite.setData('editorIdx', itemData._editorIdx ?? -1);
 
     this.tweens.add({
       targets: sprite,
-      y: py - 4 * MAP_SCALE,
+      y: py - 4 * scale,
       duration: 1200, yoyo: true, repeat: -1,
       ease: 'Sine.easeInOut',
     });
 
     this.sceneItems.push(sprite);
+    return sprite;
   }
 
   // ==================== 普通 NPC 系统 ====================
@@ -691,16 +770,17 @@ export class GameScene extends Phaser.Scene {
    */
   collectPositions() {
     const effectiveScale = this.subSceneManager.getEffectiveScale();
+    const off = this.subSceneManager._subSceneOffset || { x: 0, y: 0 };
     const storyNpcs = this.npcs.map(npc => {
-      const tile = COORD.toTile(npc.x / effectiveScale, npc.y / effectiveScale);
+      const tile = COORD.toTile((npc.x - off.x) / effectiveScale, (npc.y - off.y) / effectiveScale);
       return { npc_id: npc.getData('npcId'), position: { col: tile.col, row: tile.row } };
     });
     const townNpcs = this.townNpcs.map(npc => {
-      const tile = COORD.toTile(npc.x / effectiveScale, npc.y / effectiveScale);
+      const tile = COORD.toTile((npc.x - off.x) / effectiveScale, (npc.y - off.y) / effectiveScale);
       return { npc_id: npc.getData('npcId'), position: { col: tile.col, row: tile.row } };
     });
     const playerTile = this.player
-      ? COORD.toTile(this.player.x / effectiveScale, this.player.y / effectiveScale)
+      ? COORD.toTile((this.player.x - off.x) / effectiveScale, (this.player.y - off.y) / effectiveScale)
       : { col: 44, row: 28 };
 
     return { storyNpcs, townNpcs, player: playerTile, subSceneId: this.subSceneManager.currentSubSceneId };
@@ -762,9 +842,19 @@ export class GameScene extends Phaser.Scene {
   _updateTownNPCs(dt) {
     const self = this;
     const effectiveScale = this.subSceneManager.getEffectiveScale();
-    const mapBounds = this._mapBounds;
-    const mapW = mapBounds ? mapBounds.w : MAP_COLS * TILE * MAP_SCALE;
-    const mapH = mapBounds ? mapBounds.h : MAP_ROWS * TILE * MAP_SCALE;
+    // 子场景使用实际地图区域作为漫游边界
+    const subMap = this.subSceneManager._subMapArea;
+    let mapW, mapH, marginX = 0, marginY = 0;
+    if (subMap) {
+      mapW = subMap.w;
+      mapH = subMap.h;
+      marginX = subMap.x;
+      marginY = subMap.y;
+    } else {
+      const mapBounds = this._mapBounds;
+      mapW = mapBounds ? mapBounds.w : MAP_COLS * TILE * MAP_SCALE;
+      mapH = mapBounds ? mapBounds.h : MAP_ROWS * TILE * MAP_SCALE;
+    }
     const margin = TILE * effectiveScale;
     const npcCheckDist = TILE * effectiveScale * 0.6; // NPC 碰撞检测距离
 
@@ -788,8 +878,10 @@ export class GameScene extends Phaser.Scene {
             for (let attempt = 0; attempt < 8; attempt++) {
               const angle = Math.random() * Math.PI * 2;
               const dist = (3 + Math.random() * (wander.wanderRange - 3)) * margin;
-              const tx = Phaser.Math.Clamp(npc.x + Math.cos(angle) * dist, margin, mapW - margin);
-              const ty = Phaser.Math.Clamp(npc.y + Math.sin(angle) * dist, margin, mapH - margin);
+              const minX = marginX + margin, maxX = marginX + mapW - margin;
+              const minY = marginY + margin, maxY = marginY + mapH - margin;
+              const tx = Phaser.Math.Clamp(npc.x + Math.cos(angle) * dist, minX, maxX);
+              const ty = Phaser.Math.Clamp(npc.y + Math.sin(angle) * dist, minY, maxY);
               if (!self._checkCollisionAt(tx, ty)) {
                 wander.targetX = tx;
                 wander.targetY = ty;
@@ -903,9 +995,28 @@ export class GameScene extends Phaser.Scene {
         sprite.setData('greeting', stateNpc.current_greeting);
         sprite.setData('name', stateNpc.name);
         sprite.setVisible(stateNpc.is_available !== false);
-        // ★ 恢复 NPC 位置（从后端 stateNpc.position）
-        if (stateNpc.position && stateNpc.position.col !== undefined && stateNpc.position.row !== undefined) {
-          const { x: px, y: py } = COORD.toPixel(stateNpc.position.col, stateNpc.position.row);
+        // ★ 恢复 NPC 位置：编辑器位置优先于后端位置
+        //    章节推进或阶段切换时 UIScene 会发 state:refresh 携带后端原始位置，
+        //    必须用编辑器保存的位置覆盖，否则 NPC 会被拉回后端默认位置。
+        let useCol, useRow;
+        try {
+          const subId = this.subSceneManager.currentSubSceneId;
+          const npcKey = subId ? `editor_npc_positions_${subId}` : 'editor_npc_positions';
+          const saved = localStorage.getItem(npcKey);
+          if (saved) {
+            const editorPositions = JSON.parse(saved);
+            if (editorPositions[stateNpc.id] && editorPositions[stateNpc.id].col !== undefined) {
+              useCol = editorPositions[stateNpc.id].col;
+              useRow = editorPositions[stateNpc.id].row;
+            }
+          }
+        } catch (_) { /* ignore */ }
+        if (useCol === undefined && stateNpc.position && stateNpc.position.col !== undefined) {
+          useCol = stateNpc.position.col;
+          useRow = stateNpc.position.row;
+        }
+        if (useCol !== undefined) {
+          const { x: px, y: py } = COORD.toPixel(useCol, useRow);
           sprite.x = px * MAP_SCALE;
           sprite.y = py * MAP_SCALE;
           // 同步气泡位置
@@ -916,8 +1027,8 @@ export class GameScene extends Phaser.Scene {
           // 重置漫游原点
           const wander = sprite.getData('wanderState');
           if (wander) {
-            wander.originCol = stateNpc.position.col;
-            wander.originRow = stateNpc.position.row;
+            wander.originCol = useCol;
+            wander.originRow = useRow;
           }
         }
         const idx = this.npcs.indexOf(sprite);
@@ -939,7 +1050,10 @@ export class GameScene extends Phaser.Scene {
 
     let col, row;
     try {
-      const saved = localStorage.getItem('editor_npc_positions');
+      // ★ 用正确的 subId key 读编辑器位置
+      const subId = this.subSceneManager.currentSubSceneId;
+      const npcKey = subId ? `editor_npc_positions_${subId}` : 'editor_npc_positions';
+      const saved = localStorage.getItem(npcKey);
       if (saved) {
         const savedPos = JSON.parse(saved);
         if (savedPos && savedPos[npcId]) {
@@ -1058,13 +1172,16 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  /** 检查网格碰撞 - 支持 2x2 覆盖检测 */
+  /** 检查网格碰撞 - 支持 2x2 覆盖检测（子场景自动减去居中偏移） */
   _checkCollisionAt(worldX, worldY) {
     if (!this._collisionMap || Object.keys(this._collisionMap).length === 0) return false;
     const effectiveScale = this.subSceneManager.getEffectiveScale();
+    const off = this.subSceneManager._subSceneOffset;
+    const adjX = off ? worldX - off.x : worldX;
+    const adjY = off ? worldY - off.y : worldY;
     const gridPx = TILE * effectiveScale;
-    const col = Math.floor(worldX / gridPx);
-    const row = Math.floor(worldY / gridPx);
+    const col = Math.floor(adjX / gridPx);
+    const row = Math.floor(adjY / gridPx);
     for (let dc = 0; dc <= 1; dc++) {
       for (let dr = 0; dr <= 1; dr++) {
         if (this._collisionMap[`${col + dc}_${row + dr}`]) return true;
@@ -1073,53 +1190,211 @@ export class GameScene extends Phaser.Scene {
     return false;
   }
 
-  /** 保存碰撞配置和 NPC 位置到 localStorage */
+  /** 保存碰撞配置、NPC 位置和物品位置到 localStorage */
   _saveToLocalStorage() {
     const npcPositions = {};
     const effectiveScale = this.subSceneManager.getEffectiveScale();
+    const off = this.subSceneManager._subSceneOffset || { x: 0, y: 0 };
     for (const npc of this.npcs) {
-      const tile = COORD.toTile(npc.x / effectiveScale, npc.y / effectiveScale);
+      const tile = COORD.toTile((npc.x - off.x) / effectiveScale, (npc.y - off.y) / effectiveScale);
       npcPositions[npc.getData('npcId')] = { col: tile.col, row: tile.row };
     }
+    // 收集物品位置（按 editorIdx 排序保证顺序稳定）
+    const itemPositions = this.sceneItems
+      .map((sp, idx) => {
+        const tile = COORD.toTile((sp.x - off.x) / effectiveScale, (sp.y - off.y) / effectiveScale);
+        return {
+          _editorIdx: idx,
+          item_id: sp.getData('itemId'),
+          name: sp.getData('name'),
+          emoji: sp.text,
+          size: parseInt(sp.style.fontSize, 10) / effectiveScale,
+          col: tile.col,
+          row: tile.row,
+        };
+      })
+      .sort((a, b) => (a._editorIdx - b._editorIdx));
+    // 注意：出生点由 setPlayerSpawnPoint() 显式保存，这里不再自动覆盖，
+    // 避免退出编辑时用玩家当前位置覆写掉设计者手动指定的出生位置。
     try {
-      // 区分主地图和子场景的碰撞数据 key
-      const collisionKey = this.subSceneManager.isInSubScene()
-        ? `editor_collision_map_${this.subSceneManager.currentSubSceneId}`
+      // 区分主地图和子场景的碰撞 data key
+      const subId = this.subSceneManager.currentSubSceneId;
+      const collisionKey = subId
+        ? `editor_collision_map_${subId}`
         : 'editor_collision_map';
-      const npcKey = this.subSceneManager.isInSubScene()
-        ? `editor_npc_positions_${this.subSceneManager.currentSubSceneId}`
+      const npcKey = subId
+        ? `editor_npc_positions_${subId}`
         : 'editor_npc_positions';
+      const itemKey = subId
+        ? `editor_item_positions_${subId}`
+        : 'editor_item_positions';
       localStorage.setItem(collisionKey, JSON.stringify(this._collisionMap));
       localStorage.setItem(npcKey, JSON.stringify(npcPositions));
+      localStorage.setItem(itemKey, JSON.stringify(itemPositions));
+      // 入口区域由 CollisionEditor 自行管理保存
+      this._editor._saveEntryZones();
     } catch (e) {
       console.warn('[Editor] localStorage 保存失败:', e);
     }
   }
 
-  /** 保存碰撞配置 + 控制台输出 JSON */
+  /** 保存碰撞配置 + 控制台输出 JSON + 同步到后端文件 */
   _saveCollisionConfig() {
     this._saveToLocalStorage();
     const npcPositions = {};
     const effectiveScale = this.subSceneManager.getEffectiveScale();
+    const off = this.subSceneManager._subSceneOffset || { x: 0, y: 0 };
     for (const npc of this.npcs) {
-      const tile = COORD.toTile(npc.x / effectiveScale, npc.y / effectiveScale);
+      const tile = COORD.toTile((npc.x - off.x) / effectiveScale, (npc.y - off.y) / effectiveScale);
       npcPositions[npc.getData('npcId')] = { name: npc.getData('name'), col: tile.col, row: tile.row };
     }
     console.log('═══════════════════════════════════');
-    console.log('[Editor] 配置已保存! 碰撞格数:', Object.keys(this._collisionMap).length);
+    console.log('[Editor] 已保存为默认游戏设置! 碰撞格数:', Object.keys(this._collisionMap).length);
+    console.log('   新建存档时将使用此配置（碰撞/NPC/物品/入口/起始位置）');
     console.log('\n// 碰撞数据 (复制到代码中使用):');
     console.log(JSON.stringify(this._collisionMap, null, 2));
     console.log('\n// NPC 位置 (复制到代码中使用):');
     console.log(JSON.stringify(npcPositions, null, 2));
     console.log('═══════════════════════════════════');
-    _showToast(this, `已保存! 碰撞:${Object.keys(this._collisionMap).length}格 | NPC:${this.npcs.length}个`, 2500);
+    _showToast(this, `已保存为默认! 碰撞:${Object.keys(this._collisionMap).length}格 NPC:${this.npcs.length}个 物品:${this.sceneItems.length}个`, 2500);
     this._editor.refreshHUD();
+
+    // 同步到后端文件系统（独立于游戏存档）
+    this._syncEditorToBackend();
+  }
+
+  /** 收集所有 localStorage 中的编辑器配置数据，同步到后端文件 */
+  _syncEditorToBackend() {
+    import('../api/client.js').then(({ saveEditorConfig }) => {
+      const config = {};
+      // 收集所有 editor_ 前缀的 localStorage key
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (!key || !key.startsWith('editor_')) continue;
+        try {
+          config[key] = JSON.parse(localStorage.getItem(key));
+        } catch (_) {
+          config[key] = localStorage.getItem(key);
+        }
+      }
+      if (Object.keys(config).length === 0) {
+        console.log('[Editor] 无编辑器数据，跳过后端同步');
+        return;
+      }
+      saveEditorConfig(config).then(result => {
+        console.log('[Editor] 已同步到后端文件:', result.scenes || result.status);
+        _showToast(this, '已保存到后端文件系统', 1500);
+      }).catch(err => {
+        console.warn('[Editor] 同步到后端失败（localStorage 已保存）:', err.message);
+      });
+    });
+  }
+
+  /** 从后端文件加载编辑器配置，填充到 localStorage。返回 Promise<boolean>（是否恢复了数据） */
+  _loadEditorFromBackend() {
+    // localStorage 已有编辑器数据，无需等待
+    if (localStorage.getItem('editor_collision_map') !== null) {
+      console.log('[Editor] localStorage 已有编辑器数据，跳过加载');
+      return Promise.resolve(false);
+    }
+    return new Promise((resolve) => {
+      import('../api/client.js').then(({ loadEditorConfig }) => {
+        loadEditorConfig().then(config => {
+          if (!config || Object.keys(config).length === 0) {
+            console.log('[Editor] 后端无编辑器配置，将使用默认值');
+            resolve(false);
+            return;
+          }
+          let restored = 0;
+          for (const [key, value] of Object.entries(config)) {
+            if (!key.startsWith('editor_')) continue;
+            try {
+              localStorage.setItem(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
+              restored++;
+            } catch (e) { /* ignore */ }
+          }
+          if (restored > 0) {
+            console.log(`[Editor] 从后端恢复了 ${restored} 个编辑器配置项到 localStorage`);
+            // 重新加载碰撞数据（此时 createCollisionLayer 可能还没调用，无妨）
+            if (this._collisionMap) this.createCollisionLayer();
+            if (this._editor) {
+              this._editor.loadEntryZones();
+              this._editor.drawGrid();
+              this._editor.refreshHUD();
+            }
+          }
+          resolve(restored > 0);
+        }).catch(err => {
+          console.warn('[Editor] 从后端加载编辑器配置失败（将使用默认值）:', err.message);
+          resolve(false);
+        });
+      }).catch(err => {
+        console.warn('[Editor] 动态导入 client.js 失败:', err.message);
+        resolve(false);
+      });
+    });
+  }
+
+  /** 编辑器: 确认物品选择器中当前物品的放置 */
+  _editorConfirmItemPlace() {
+    const item = this._editor.confirmItemPlace();
+    if (!item) return;
+    const off = this.subSceneManager._subSceneOffset || { x: 0, y: 0 };
+    const scale = this.subSceneManager.getEffectiveScale();
+    this._createSceneItemSprite(item, scale, off);
+    this._saveToLocalStorage();
+    this._editor.drawGrid();
+    this._editor.refreshHUD();
+    _showToast(this, `已放置: ${item.name} [${item.col},${item.row}]`, 1500);
+  }
+
+  /** 编辑器: 删除当前拖拽中的或最近的物品 */
+  _editorDeleteItem() {
+    const ed = this._editor;
+    // 优先删除正在拖拽的物品
+    if (ed.draggedItem) {
+      const idx = this.sceneItems.indexOf(ed.draggedItem);
+      if (idx >= 0) this.sceneItems.splice(idx, 1);
+      this.tweens.killTweensOf(ed.draggedItem);
+      ed.draggedItem.destroy();
+      ed.draggedItem = null;
+      this._saveToLocalStorage();
+      ed.drawGrid();
+      ed.refreshHUD();
+      _showToast(this, '已删除物品', 1200);
+      return;
+    }
+    // 否则删除离摄像机中心最近的物品
+    const cam = this.cameras.main;
+    const cx = cam.scrollX + cam.width / 2;
+    const cy = cam.scrollY + cam.height / 2;
+    let nearest = null, nearestDist = Infinity;
+    for (const item of this.sceneItems) {
+      const d = Phaser.Math.Distance.Between(cx, cy, item.x, item.y);
+      if (d < nearestDist) { nearestDist = d; nearest = item; }
+    }
+    if (nearest && nearestDist < 200) {
+      const idx = this.sceneItems.indexOf(nearest);
+      if (idx >= 0) this.sceneItems.splice(idx, 1);
+      this.tweens.killTweensOf(nearest);
+      nearest.destroy();
+      this._saveToLocalStorage();
+      ed.drawGrid();
+      ed.refreshHUD();
+      _showToast(this, '已删除最近物品', 1200);
+    } else {
+      _showToast(this, '附近没有可删除的物品', 1200);
+    }
   }
 
   /** 清除所有碰撞 */
   _clearAllCollisions() {
     this._collisionMap = {};
-    localStorage.removeItem('editor_collision_map');
+    const subId = this.subSceneManager.currentSubSceneId;
+    const collisionKey = subId
+      ? `editor_collision_map_${subId}`
+      : 'editor_collision_map';
+    localStorage.removeItem(collisionKey);
     this._editor.drawGrid();
     this._editor.refreshHUD();
     _showToast(this, '已清除所有碰撞格', 1500);
@@ -1173,7 +1448,19 @@ export class GameScene extends Phaser.Scene {
   // ==================== 玩家 ====================
 
   createPlayer() {
-    const pos = COORD.toPixel(44, 28);
+    // 优先加载编辑器默认起始位置
+    let col = 44, row = 28;
+    try {
+      const saved = localStorage.getItem('editor_player_start_position');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.col != null && parsed.row != null) {
+          col = parsed.col; row = parsed.row;
+        }
+      }
+    } catch (_) { /* 使用默认位置 */ }
+
+    const pos = COORD.toPixel(col, row);
     const p = PROTAGONIST;
 
     this.player = this.physics.add.sprite(pos.x * MAP_SCALE, pos.y * MAP_SCALE, `${p.prefix}_idle_down`);
@@ -1370,7 +1657,7 @@ export class GameScene extends Phaser.Scene {
   _showControlsHint() {
     const { width, height } = this.cameras.main;
     const hint = this.add.text(width / 2, height - 50,
-      '[WASD/方向键] 移动  |  [F] 拾取/进出建筑  |  [E] 碰撞编辑器  |  [R] 硬重置', {
+      '[WASD/方向键] 移动  |  [F] 拾取/进出建筑  |  [E] 碰撞编辑器  |  [R] 硬重置  |  编辑模式:[B]出生点 [K]保存', {
         fontFamily: '"Microsoft YaHei","Consolas",sans-serif',
         fontSize: '13px', color: '#aabbcc',
         backgroundColor: '#0a0a15dd',
@@ -1416,16 +1703,106 @@ export class GameScene extends Phaser.Scene {
   _updateInner() {
     if (!this.player || !this.cursors) return;
 
-    // 编辑器快捷键
-    if (Phaser.Input.Keyboard.JustDown(this.editKeys.E)) {
+    // 编辑器快捷键 — 仅在非锁定状态下可用（对话/背包/历史面板打开时禁止）
+    if (Phaser.Input.Keyboard.JustDown(this.editKeys.E) && !this.inputLocked) {
       this._editor.toggle();
       return;
     }
-    if (Phaser.Input.Keyboard.JustDown(this.editKeys.C)) {
+    if (Phaser.Input.Keyboard.JustDown(this.editKeys.C) && this._editor.editMode) {
       this._clearAllCollisions();
     }
-    if (Phaser.Input.Keyboard.JustDown(this.editKeys.S) && this._editor.editMode) {
+    if (Phaser.Input.Keyboard.JustDown(this.editKeys.K) && this._editor.editMode) {
       this._saveCollisionConfig();
+    }
+
+    // 编辑器内切换出生点编辑模式 (B)
+    if (Phaser.Input.Keyboard.JustDown(this.editKeys.B) && this._editor.editMode && !this._editor.entryZoneMode && !this._editor.itemPickerOpen) {
+      this._editor.toggleSpawnEditMode();
+      this._editor.drawGrid();
+      return;
+    }
+
+    // 编辑器内 Esc 取消选择器
+    if (Phaser.Input.Keyboard.JustDown(this.editKeys.ESC) && this._editor.editMode) {
+      this._editor.cancelItemPicker();
+    }
+
+    // 编辑器内 Enter 确认物品选择
+    if (Phaser.Input.Keyboard.JustDown(this.editKeys.ENTER) && this._editor.editMode && this._editor.itemPickerOpen) {
+      this._editorConfirmItemPlace();
+    }
+
+    // 编辑器内数字键选择
+    if (this._editor.editMode) {
+      const numKeys = [
+        this.editKeys.ONE, this.editKeys.TWO, this.editKeys.THREE,
+        this.editKeys.FOUR, this.editKeys.FIVE, this.editKeys.SIX,
+        this.editKeys.SEVEN, this.editKeys.EIGHT, this.editKeys.NINE,
+        this.editKeys.ZERO,
+      ];
+      for (let i = 0; i < numKeys.length; i++) {
+        if (Phaser.Input.Keyboard.JustDown(numKeys[i])) {
+          const num = i === 9 ? 10 : i + 1; // 0键=10
+          if (this._editor.itemPickerOpen) {
+            this._editor.selectItemByNumber(num);
+          } else if (this._editor.entryZoneMode) {
+            this._editor.selectSubSceneByNumber(num);
+          }
+          break;
+        }
+      }
+    }
+
+    // 编辑器内放置物品 (I) — 打开物品选择器
+    if (Phaser.Input.Keyboard.JustDown(this.editKeys.I) && this._editor.editMode) {
+      this._editor.openItemPicker();
+    }
+
+    // 编辑器内入口区域模式 (Z)
+    if (Phaser.Input.Keyboard.JustDown(this.editKeys.Z) && this._editor.editMode) {
+      this._editor.toggleEntryZoneMode();
+    }
+
+    // 编辑器内删除 (X) — 优先删除入口/出口区域，否则删除物品
+    if (Phaser.Input.Keyboard.JustDown(this.editKeys.X) && this._editor.editMode) {
+      const ptr = this.input.activePointer;
+      const worldX = ptr.x + this.cameras.main.scrollX;
+      const worldY = ptr.y + this.cameras.main.scrollY;
+      // 子场景：检测是否鼠标在出口区域上
+      if (!this._editor._isMainMap) {
+        const subId = this.subSceneManager.currentSubSceneId;
+        if (subId && this._editor.exitZones[subId]) {
+          const ez = this._editor.exitZones[subId];
+          const { gridPx, offsetX, offsetY } = this._editor._getEditorScale();
+          const zx = offsetX + ez.col * gridPx;
+          const zy = offsetY + ez.row * gridPx;
+          const zw = ez.w * gridPx;
+          const zh = ez.h * gridPx;
+          if (worldX >= zx && worldX <= zx + zw && worldY >= zy && worldY <= zy + zh) {
+            this._editor._deleteExitZone();
+            this._editor.drawGrid();
+            this._editor.refreshHUD();
+            _showToast(this, '已删除出口区域', 1200);
+            return;
+          }
+        }
+      }
+      const hitZone = this._editor._getEntryZoneAtWorld(worldX, worldY);
+      if (hitZone) {
+        // 鼠标悬停在入口区域上 → 删除该入口区域
+        const idx = this._editor.entryZones.indexOf(hitZone);
+        if (idx >= 0) {
+          const removed = this._editor.entryZones.splice(idx, 1)[0];
+          console.log(`[Editor] X删除入口区域: ${removed.name}`);
+          this._editor._saveEntryZones();
+          this._editor._drawEntryZoneLabels();
+          this._editor.drawGrid();
+          this._editor.refreshHUD();
+          _showToast(this, `已删除入口: ${removed.name}`, 1200);
+        }
+      } else {
+        this._editorDeleteItem();
+      }
     }
 
     // 编辑模式
@@ -1452,11 +1829,22 @@ export class GameScene extends Phaser.Scene {
     // 子场景入口/出口接近检测
     this.subSceneManager.updateProximityHints();
 
-    // F 键拾取 / 进入离开子场景
+    // F 键交互
     if (!this.inputLocked && Phaser.Input.Keyboard.JustDown(this.wasd.F)) {
+      // 如果 NPC 按钮已显示，F 键关闭按钮
+      if (this.npcActionContainer.visible) {
+        this._hideNPCActionButtons();
+        this.interactHint.setVisible(true); // 恢复提示
+      }
       // 优先处理子场景交互
-      if (!this.subSceneManager.handleFKeyInteraction()) {
-        if (this.currentNearbyItem) this.pickupItem(this.currentNearbyItem);
+      else if (!this.subSceneManager.handleFKeyInteraction()) {
+        if (this.currentNearbyItem) {
+          this.pickupItem(this.currentNearbyItem);
+        } else if (this.currentNearbyNPC) {
+          // 弹出 NPC 交互按钮（对话 / 展示物品）
+          this._showNPCActionButtons(this.currentNearbyNPC);
+          this.interactHint.setVisible(false); // 隐藏提示，按钮已显示
+        }
       }
     }
 
@@ -1505,8 +1893,15 @@ export class GameScene extends Phaser.Scene {
       const margin = 16 * effectiveScale;
       const newX = this.player.x + finalVX * (this.game.loop.delta / 1000);
       const newY = this.player.y + finalVY * (this.game.loop.delta / 1000);
-      if (newX < margin || newX > this._mapBounds.w - margin) finalVX = 0;
-      if (newY < margin || newY > this._mapBounds.h - margin) finalVY = 0;
+      // 子场景：约束在地图区域内；主地图：约束在 _mapBounds 内
+      const subMap = this.subSceneManager._subMapArea;
+      if (subMap) {
+        if (newX < subMap.x + margin || newX > subMap.x + subMap.w - margin) finalVX = 0;
+        if (newY < subMap.y + margin || newY > subMap.y + subMap.h - margin) finalVY = 0;
+      } else {
+        if (newX < margin || newX > this._mapBounds.w - margin) finalVX = 0;
+        if (newY < margin || newY > this._mapBounds.h - margin) finalVY = 0;
+      }
     }
 
     this.player.setVelocity(finalVX, finalVY);
@@ -1539,14 +1934,20 @@ export class GameScene extends Phaser.Scene {
       if (dist < 64) this.currentNearbyNPC = npc;
     }
 
-    // NPC 交互按钮
+    // NPC 交互：提示文字出现在 NPC 头上；F键弹出选择按钮
     if (this.currentNearbyNPC && !this.inputLocked) {
-      this.interactHint.setVisible(false);
       if (!this.npcActionContainer.visible) {
-        this._showNPCActionButtons(this.currentNearbyNPC);
+        const npc = this.currentNearbyNPC;
+        this.interactHint.setText(`按 [F] 与 ${npc.getData('name')} 交互`);
+        this.interactHint.setPosition(npc.x, npc.y - 40);
+        this.interactHint.setVisible(true);
       }
-      this._updateNPCActionPosition(this.currentNearbyNPC);
+      // 按钮可见时更新位置跟随 NPC
+      if (this.npcActionContainer.visible) {
+        this._updateNPCActionPosition(this.currentNearbyNPC);
+      }
     } else {
+      // NPC 离开范围时关闭按钮
       if (this.npcActionContainer.visible) this._hideNPCActionButtons();
     }
   }
@@ -1555,7 +1956,7 @@ export class GameScene extends Phaser.Scene {
   _updateItemProximity() {
     this.currentNearbyItem = null;
     if (this.currentNearbyNPC) {
-      this.interactHint.setVisible(false);
+      // NPC 优先，不显示物品提示（保留NPC提示可见）
       return;
     }
 

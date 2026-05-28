@@ -43,6 +43,9 @@ export const SUBSCENES = {
     imagePath: '/assets/images/maps/stage_ruined.png',
     pixelW: 1536,
     pixelH: 1024,
+    bgColor: 0x1a1218,
+    /** 相对于 SUB_MAP_SCALE 的额外缩放，< 1 表示缩小 */
+    displayScale: 0.8,
     get tileCols() { return Math.ceil(this.pixelW / TILE); },
     get tileRows() { return Math.ceil(this.pixelH / TILE); },
     playerSpawn: { col: 48, row: 58 },
@@ -67,6 +70,8 @@ export const SUBSCENES = {
     imagePath: '/assets/images/maps/tea_house.png',
     pixelW: 1484,
     pixelH: 1060,
+    bgColor: 0x1a1810,
+    displayScale: 0.7,
     get tileCols() { return Math.ceil(this.pixelW / TILE); },
     get tileRows() { return Math.ceil(this.pixelH / TILE); },
     playerSpawn: { col: 46, row: 62 },
@@ -87,6 +92,8 @@ export const SUBSCENES = {
     imagePath: '/assets/images/maps/dock.png',
     pixelW: 1774,
     pixelH: 887,
+    bgColor: 0x101820,
+    displayScale: 0.7,
     get tileCols() { return Math.ceil(this.pixelW / TILE); },
     get tileRows() { return Math.ceil(this.pixelH / TILE); },
     playerSpawn: { col: 55, row: 50 },
@@ -107,6 +114,8 @@ export const SUBSCENES = {
     imagePath: '/assets/images/maps/ancestral_hall.png',
     pixelW: 1387,
     pixelH: 1134,
+    bgColor: 0x141210,
+    displayScale: 0.7,
     get tileCols() { return Math.ceil(this.pixelW / TILE); },
     get tileRows() { return Math.ceil(this.pixelH / TILE); },
     playerSpawn: { col: 43, row: 66 },
@@ -127,12 +136,14 @@ export const SUBSCENES = {
     imagePath: '/assets/images/maps/fathers_house.png',
     pixelW: 1387,
     pixelH: 1134,
+    bgColor: 0x161410,
+    displayScale: 0.55,
     get tileCols() { return Math.ceil(this.pixelW / TILE); },
     get tileRows() { return Math.ceil(this.pixelH / TILE); },
     playerSpawn: { col: 43, row: 66 },
     exitZone: { col: 39, row: 67, w: 8, h: 2 },
-    mainMapBuilding: { col: 18, row: 36, w: 9, h: 9 },
-    mainMapEntryZone: { col: 20, row: 45, w: 4, h: 1 },
+    mainMapBuilding: { col: 19, row: 38, w: 6, h: 6 },
+    mainMapEntryZone: { col: 21, row: 44, w: 4, h: 1 },
     hasStateSwitch: false,
     defaultCollision: null,
     npcPlaceholders: [],
@@ -145,6 +156,8 @@ export const SUBSCENES = {
     imagePath: '/assets/images/maps/graveyard.png',
     pixelW: 1448,
     pixelH: 1086,
+    bgColor: 0x121a14,
+    displayScale: 0.7,
     get tileCols() { return Math.ceil(this.pixelW / TILE); },
     get tileRows() { return Math.ceil(this.pixelH / TILE); },
     playerSpawn: { col: 45, row: 63 },
@@ -173,6 +186,30 @@ export const BUILDING_ENTRIES = Object.values(SUBSCENES).map(sc => ({
  * 入口检测距离（瓦片）— 玩家中心与入口区域的最大距离
  */
 export const ENTRY_DETECT_RANGE = 2;
+
+/**
+ * 编辑器可用物品列表 — 用于编辑模式下 I 键放置物品时的标签选择
+ * 数据来源于 data/scripts/liyuan_shengsi/items/story_items.yaml
+ */
+export const EDITOR_ITEMS = [
+  { item_id: 'item_urn',              name: '父亲的骨灰盒',       emoji: '⚱️', size: 20 },
+  { item_id: 'item_child_costume',    name: '孩童戏服',           emoji: '👘', size: 22 },
+  { item_id: 'item_father_script',    name: '父亲的手抄剧本',     emoji: '📜', size: 20 },
+  { item_id: 'item_childhood_photo',  name: '童年合影',           emoji: '📷', size: 20 },
+  { item_id: 'item_father_single_photo', name: '父亲旧照（单人）', emoji: '🖼️', size: 20 },
+  { item_id: 'item_genealogy',        name: '柳家族谱',           emoji: '📖', size: 20 },
+  { item_id: 'item_old_trunk',        name: '旧戏服木箱',         emoji: '🧳', size: 24 },
+  { item_id: 'item_old_jinghu',       name: '墙上的老琴',         emoji: '🎻', size: 20 },
+  { item_id: 'item_stage_group_photo', name: '茶馆墙上的戏班合影', emoji: '🖼️', size: 20 },
+  { item_id: 'item_temple_tablet',    name: '柳家祖先牌位',       emoji: '🪦', size: 20 },
+];
+
+/**
+ * 子场景列表 — 用于编辑器入口区域标签选择
+ */
+export const SUBSCENE_LIST = Object.values(SUBSCENES).map(sc => ({
+  id: sc.id, name: sc.name,
+}));
 
 /**
  * 为子场景生成边界碰撞数据
