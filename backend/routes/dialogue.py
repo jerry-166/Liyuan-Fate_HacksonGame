@@ -299,9 +299,11 @@ async def exit_dialogue(req: ExitDialogueRequest):
         manager.persist_session(session)
 
         from state.session import DialogueTurn
+        session.dialogue_turn_counter += 1
         npc.dialogue_history.append(DialogueTurn(
             role="npc", content=result.dialogue_text,
             npc_id=req.npc_id, stage=session.current_stage,
+            turn_index=session.dialogue_turn_counter,
         ))
         manager.persist_dialogue(session, req.npc_id, "npc", result.dialogue_text, options=[])
 

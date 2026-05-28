@@ -91,10 +91,12 @@ class NPCAgent:
 
         # 记录玩家消息
         if player_message:
+            session.dialogue_turn_counter += 1
             npc.dialogue_history.append(DialogueTurn(
                 role="player", content=player_message,
                 npc_id=npc_id, stage=session.current_stage,
                 chapter_id=session.current_chapter_id or "",
+                turn_index=session.dialogue_turn_counter,
             ))
             dialogue_id = manager.persist_dialogue(session, npc_id, "player", player_message)
             manager.persist_player_choice(
@@ -105,10 +107,12 @@ class NPCAgent:
 
         # 记录 NPC 回复
         reply_text = result.dialogue_text or full_text
+        session.dialogue_turn_counter += 1
         npc.dialogue_history.append(DialogueTurn(
             role="npc", content=reply_text,
             npc_id=npc_id, stage=session.current_stage,
             chapter_id=session.current_chapter_id or "",
+            turn_index=session.dialogue_turn_counter,
         ))
         npc_reply_id = manager.persist_dialogue(session, npc_id, "npc", reply_text, options=result.options)
         npc.last_options = result.options

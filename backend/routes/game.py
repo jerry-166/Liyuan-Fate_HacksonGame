@@ -80,6 +80,7 @@ async def get_game_state(session_id: str):
 
 @router.get("/game/{session_id}/dialogues")
 async def get_dialogues(session_id: str, npc_id: Optional[str] = None,
+                          save_id: Optional[str] = None,
                           page: int = 1, page_size: int = 20):
     manager = get_session_manager()
     session = manager.get(session_id)
@@ -90,8 +91,11 @@ async def get_dialogues(session_id: str, npc_id: Optional[str] = None,
         })
     page = max(1, page)
     page_size = max(1, min(100, page_size))
+    # 优先使用 session 的当前存档上下文，也允许显式传参覆盖
+    effective_save_id = save_id or session.current_save_id
     db = get_db()
-    return db.get_dialogue_history_paginated(session_id, npc_id=npc_id, page=page, page_size=page_size)
+    return db.get_dialogue_history_paginated(session_id, npc_id=npc_id, page=page,
+                                              page_size=page_size, save_id=effective_save_id)
 
 
 @router.post("/game/{session_id}/evaluate")

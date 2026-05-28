@@ -258,6 +258,7 @@ class DialogueTurn:
     npc_id: str = ""
     stage: int = 1
     chapter_id: str = ""
+    turn_index: int = 0
 
 
 @dataclass
@@ -291,6 +292,12 @@ class GameSession:
     # ─── v2 物品 ────────────────────────────────
     inventory: list[NarrativeItem] = field(default_factory=list)
     active_item: Optional[str] = None
+
+    # ─── 对话全局序号（用于跨 NPC 时间排序） ──────
+    dialogue_turn_counter: int = 0
+
+    # ─── 存档上下文 ─────────────────────────────
+    current_save_id: Optional[str] = None
 
     def get_current_chapter(self) -> Optional[dict]:
         """获取当前章节定义。"""
@@ -330,9 +337,9 @@ class GameSession:
             self.inventory.append(item)
 
     def to_api_response(self) -> dict:
-        """序列化为 API 响应格式。"""
+        """序列化为 API 响应格式（对话数据从 NPC 内存读取，确保存档隔离）。"""
         stage_params = self._get_stage_params()
-        npc_last_dialogues = self._get_npc_last_dialogues()
+        npc_last_dialogues = self._get_last_dialogue_from_memory()
         current_chapter = self.get_current_chapter()
 
         return {
@@ -366,18 +373,51 @@ class GameSession:
                 }
                 for npc in self.npcs.values()
             ],
+            "dialogue_history": self._collect_full_dialogue_history(),
+            "current_save_id": self.current_save_id,
             "events_triggered": sorted(self.events_triggered),
             "game_ended": self.game_ended,
             "ending": self.ending_data if self.game_ended else None,
             "inventory": [item.to_dict() for item in self.inventory if item.is_discovered],
         }
 
-    def _get_npc_last_dialogues(self) -> dict[str, dict]:
-        try:
-            from storage.database import get_db
-            return get_db().get_last_dialogue_per_npc(self.session_id)
-        except Exception:
-            return {}
+    def _get_last_dialogue_from_memory(self) -> dict[str, dict]:
+        """从 NPC 内存中获取每个 NPC 最后一条对话（替代 DB 查询，确保存档隔离）。"""
+        result = {}
+        for npc_id, npc in self.npcs.items():
+            history = npc.dialogue_history
+            if not history:
+                continue
+            # 找最后一条 NPC 发言
+            last_npc = None
+            for dt in reversed(history):
+                if dt.role == "npc":
+                    last_npc = dt
+                    break
+            if last_npc:
+                result[npc_id] = {
+                    "role": last_npc.role,
+                    "content": last_npc.content,
+                    "options": list(npc.last_options) if npc.last_options else [],
+                }
+        return result
+
+    def _collect_full_dialogue_history(self) -> list[dict]:
+        """收集所有 NPC 的完整对话历史，按 turn_index 全局时间排序后返回。"""
+        entries = []
+        for npc_id, npc in self.npcs.items():
+            for dt in npc.dialogue_history:
+                entries.append({
+                    "npc_id": npc_id,
+                    "npc_name": npc.name,
+                    "role": dt.role,
+                    "content": dt.content,
+                    "stage": dt.stage,
+                    "chapter_id": dt.chapter_id,
+                    "turn_index": dt.turn_index,
+                })
+        # 按 turn_index 排序，确保跨 NPC 的时间顺序正确
+        return sorted(entries, key=lambda e: e.get("turn_index", 0))
 
     def _get_stage_params(self) -> dict:
         from config import CHAPTER_TO_STAGE, STAGE_LEGACY_MAP

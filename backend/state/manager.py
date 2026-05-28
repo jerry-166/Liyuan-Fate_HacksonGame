@@ -167,7 +167,7 @@ class SessionManager:
         for evt in events:
             session.events_triggered.add(evt["event_id"])
 
-        # 恢复对话历史
+        # 恢复对话历史（DB 中可能没有 turn_index，使用 0 作为默认值）
         dialogues = self._db.get_dialogue_history(session_id, limit=10)
         for d in dialogues:
             npc_id = d["npc_id"]
@@ -177,6 +177,7 @@ class SessionManager:
                     role=d["role"], content=d["content"],
                     npc_id=npc_id, stage=d.get("stage", session.current_stage),
                     chapter_id=session.current_chapter_id or "",
+                    turn_index=0,
                 ))
 
         # v2: 恢复物品
@@ -208,7 +209,10 @@ class SessionManager:
         return session
 
     def persist_dialogue(self, session, npc_id, role, content, options=None) -> int:
-        return self._db.save_dialogue(session.session_id, npc_id, role, content, session.current_stage, options=options)
+        return self._db.save_dialogue(
+            session.session_id, npc_id, role, content, session.current_stage,
+            options=options, save_id=session.current_save_id,
+        )
 
     def persist_event(self, session, event_id, description="", triggered_by_npc=""):
         self._db.save_event(session.session_id, event_id, description, triggered_by_npc, session.current_stage)
@@ -293,9 +297,22 @@ class SessionManager:
                         "position": npc.position,
                         "sprite_key": npc.sprite_key,
                         "relationship": npc.relationship,
+                        "relationship_default": npc.relationship_default,
                         "is_available": npc.is_available,
                         "current_greeting": npc.current_greeting,
                         "dialogue_round_count": npc.dialogue_round_count,
+                        "dialogue_history": [
+                            {
+                                "role": dt.role,
+                                "content": dt.content,
+                                "npc_id": dt.npc_id,
+                                "stage": dt.stage,
+                                "chapter_id": dt.chapter_id,
+                                "turn_index": dt.turn_index,
+                            }
+                            for dt in npc.dialogue_history
+                        ],
+                        "last_options": npc.last_options,
                     }
                     for npc_id, npc in session.npcs.items()
                 },
@@ -306,6 +323,10 @@ class SessionManager:
                 "inventory": [item.to_dict() for item in session.inventory],
                 "active_item": session.active_item,
                 "current_task": session.current_task.to_dict() if session.current_task else None,
+                "stage_llm_consecutive": session.stage_llm_consecutive,
+                "persona_cache": session.persona_cache,
+                "dialogue_turn_counter": session.dialogue_turn_counter,
+                "current_save_id": session.current_save_id,
                 "_player_position": player_position,
                 "_town_npc_positions": town_npc_positions,
                 "_sub_scene_id": sub_scene_id,

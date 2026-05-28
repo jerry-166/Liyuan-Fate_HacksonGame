@@ -120,6 +120,8 @@ export class HistoryPanel {
     const maxW = ha.w - 10;
     let y = 0;
 
+    console.log('[HistoryPanel] refreshContent 开始渲染，总条数:', ui.dialogueHistory.length);
+
     if (ui.dialogueHistory.length === 0) {
       const empty = ui.add.text(width / 2, 20, '还没有任何对话记录', {
         fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '18px', color: '#666655',
@@ -138,18 +140,27 @@ export class HistoryPanel {
         y += 34;
       }
 
-      const npcLabel = ui.add.text(ha.x, y, `【${entry.npcName}】`, {
-        fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '18px', color: '#d4b896', fontStyle: 'bold',
-      });
-      ui.historyContent.add(npcLabel);
-      y += 26;
+      // ★ 跳过既没有 NPC 文本也没有玩家文本的空条目
+      if (!entry.npcText && !entry.playerText) {
+        console.log('[HistoryPanel] 跳过空条目 idx=', idx, 'npcName=', entry.npcName);
+        return;
+      }
 
-      const npcT = ui.add.text(ha.x, y, entry.npcText, {
-        fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '17px', color: '#c0b898',
-        wordWrap: { width: maxW, useAdvancedWrap: true }, lineSpacing: 5,
-      });
-      ui.historyContent.add(npcT);
-      y += npcT.height + 12;
+      // NPC 标签：仅在存在 NPC 文本时显示
+      if (entry.npcText) {
+        const npcLabel = ui.add.text(ha.x, y, `【${entry.npcName}】`, {
+          fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '18px', color: '#d4b896', fontStyle: 'bold',
+        });
+        ui.historyContent.add(npcLabel);
+        y += 26;
+
+        const npcT = ui.add.text(ha.x, y, entry.npcText, {
+          fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '17px', color: '#c0b898',
+          wordWrap: { width: maxW, useAdvancedWrap: true }, lineSpacing: 5,
+        });
+        ui.historyContent.add(npcT);
+        y += npcT.height + 12;
+      }
 
       if (entry.playerText) {
         const pl = ui.add.text(ha.x, y, `【你】${entry.playerText}`, {
@@ -164,5 +175,6 @@ export class HistoryPanel {
     ui.historyContentHeight = y;
     ui.historyScrollY = 0;
     ui.historyContent.setY(ha.y);
+    console.log('[HistoryPanel] refreshContent 渲染完成，内容高度:', y);
   }
 }

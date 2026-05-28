@@ -55,6 +55,7 @@ class Database:
             "ALTER TABLE npc_states ADD COLUMN scene TEXT NOT NULL DEFAULT ''",
             # v3: saves 表（新表，用 schema.sql 中的 CREATE TABLE IF NOT EXISTS 创建，
             # 这里添加一条无害的 SELECT 确保旧库迁移时 coverage）
+            "ALTER TABLE dialogues ADD COLUMN save_id TEXT",
         ]
         # 确保 saves 表和目录存在（处理旧库升级场景）
         with self._conn() as conn:
@@ -82,6 +83,13 @@ class Database:
         # 确保存档目录存在
         saves_dir = os.path.join(os.path.dirname(self.db_path), "saves")
         os.makedirs(saves_dir, exist_ok=True)
+
+        # v3: dialogues 表 save_id 索引（迁移后创建，确保旧库升级时也存在）
+        with self._conn() as conn:
+            try:
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_dialogues_save ON dialogues(session_id, save_id)")
+            except sqlite3.OperationalError:
+                pass
 
     # ─── Session CRUD ───────────────────────────────────
 
@@ -161,60 +169,75 @@ class Database:
     # ─── Dialogue CRUD ──────────────────────────────────
 
     def save_dialogue(self, session_id: str, npc_id: str, role: str, content: str,
-                      stage: int, options: Optional[list[str]] = None) -> int:
+                      stage: int, options: Optional[list[str]] = None,
+                      save_id: Optional[str] = None) -> int:
         options_json = json.dumps(options, ensure_ascii=False) if options else None
         with self._conn() as conn:
             cur = conn.execute(
-                "INSERT INTO dialogues (session_id, npc_id, role, content, options, stage) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (session_id, npc_id, role, content, options_json, stage),
+                "INSERT INTO dialogues (session_id, npc_id, role, content, options, stage, save_id) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (session_id, npc_id, role, content, options_json, stage, save_id),
             )
             return cur.lastrowid
 
     def get_dialogue_history(self, session_id: str, npc_id: Optional[str] = None,
-                             limit: int = 20) -> list[dict]:
+                             limit: int = 20, save_id: Optional[str] = None) -> list[dict]:
         with self._conn() as conn:
-            if npc_id:
-                rows = conn.execute(
-                    "SELECT * FROM dialogues WHERE session_id = ? AND npc_id = ? "
-                    "ORDER BY created_at DESC LIMIT ?",
-                    (session_id, npc_id, limit),
-                ).fetchall()
+            # 构建动态查询：可选 save_id 过滤
+            if save_id:
+                if npc_id:
+                    rows = conn.execute(
+                        "SELECT * FROM dialogues WHERE session_id = ? AND npc_id = ? AND save_id = ? "
+                        "ORDER BY created_at DESC LIMIT ?",
+                        (session_id, npc_id, save_id, limit),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        "SELECT * FROM dialogues WHERE session_id = ? AND save_id = ? "
+                        "ORDER BY created_at DESC LIMIT ?",
+                        (session_id, save_id, limit),
+                    ).fetchall()
             else:
-                rows = conn.execute(
-                    "SELECT * FROM dialogues WHERE session_id = ? "
-                    "ORDER BY created_at DESC LIMIT ?",
-                    (session_id, limit),
-                ).fetchall()
+                if npc_id:
+                    rows = conn.execute(
+                        "SELECT * FROM dialogues WHERE session_id = ? AND npc_id = ? "
+                        "ORDER BY created_at DESC LIMIT ?",
+                        (session_id, npc_id, limit),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        "SELECT * FROM dialogues WHERE session_id = ? "
+                        "ORDER BY created_at DESC LIMIT ?",
+                        (session_id, limit),
+                    ).fetchall()
         return [dict(r) for r in reversed(rows)]
 
     def get_dialogue_history_paginated(self, session_id: str, npc_id: Optional[str] = None,
-                                        page: int = 1, page_size: int = 20) -> dict:
+                                        page: int = 1, page_size: int = 20,
+                                        save_id: Optional[str] = None) -> dict:
         with self._conn() as conn:
+            # 动态构建 WHERE 条件
+            conditions = ["session_id = ?"]
+            params: list = [session_id]
             if npc_id:
-                count_row = conn.execute(
-                    "SELECT COUNT(*) as cnt FROM dialogues WHERE session_id = ? AND npc_id = ?",
-                    (session_id, npc_id),
-                ).fetchone()
-            else:
-                count_row = conn.execute(
-                    "SELECT COUNT(*) as cnt FROM dialogues WHERE session_id = ?",
-                    (session_id,),
-                ).fetchone()
+                conditions.append("npc_id = ?")
+                params.append(npc_id)
+            if save_id:
+                conditions.append("save_id = ?")
+                params.append(save_id)
+            where = " AND ".join(conditions)
+
+            count_row = conn.execute(
+                f"SELECT COUNT(*) as cnt FROM dialogues WHERE {where}",
+                params,
+            ).fetchone()
             total = count_row["cnt"]
             offset = (page - 1) * page_size
-            if npc_id:
-                rows = conn.execute(
-                    "SELECT * FROM dialogues WHERE session_id = ? AND npc_id = ? "
-                    "ORDER BY created_at ASC LIMIT ? OFFSET ?",
-                    (session_id, npc_id, page_size, offset),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM dialogues WHERE session_id = ? "
-                    "ORDER BY created_at ASC LIMIT ? OFFSET ?",
-                    (session_id, page_size, offset),
-                ).fetchall()
+            rows = conn.execute(
+                f"SELECT * FROM dialogues WHERE {where} "
+                "ORDER BY created_at ASC LIMIT ? OFFSET ?",
+                params + [page_size, offset],
+            ).fetchall()
         items = []
         for r in rows:
             d = dict(r)

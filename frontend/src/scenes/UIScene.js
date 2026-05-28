@@ -53,6 +53,7 @@ export class UIScene extends Phaser.Scene {
 
     // 历史对话
     this.dialogueHistory = [];
+    this._skipRestoreDialogue = false;
 
     // 物品/背包
     this.inventory = [];
@@ -336,10 +337,12 @@ export class UIScene extends Phaser.Scene {
 
   /** 对话历史记录 */
   addToHistory(npcName, npcText, playerText = null) {
+    // ★ 保持 npcText 为 null（而非空字符串），便于 HistoryPanel 区分"无 NPC 文本"与"空文本"
     this.dialogueHistory.push({
-      npcName, npcText: npcText || '', playerText: playerText || null,
+      npcName, npcText: npcText ?? null, playerText: playerText || null,
       stage: this.currentStage,
     });
+    console.log('[UIScene] addToHistory:', { npcName, npcText: npcText ?? null, playerText, stage: this.currentStage, total: this.dialogueHistory.length });
   }
 
   // =========================== 章节管理 ============================
@@ -522,6 +525,26 @@ export class UIScene extends Phaser.Scene {
     this._updateBackpackBtnLabel();
     this.inventoryPanel.refreshContent();
 
+    console.log('[UIScene] _onGameInit 收到 dialogueHistory 长度:', data.dialogueHistory?.length || 0);
+
+    // ★ 步骤1：彻底清空上一存档的对话缓存，防止堆叠
+    if (this.sessionId && this.sessionId !== data.sessionId) {
+      try { localStorage.removeItem(`__dialogue_history_${this.sessionId}`); } catch (e) { /* ignore */ }
+    }
+    this.dialogueHistory = [];
+
+    // ★ 步骤2：如果 game:init 携带对话历史（如存档加载），直接赋值并跳过 API 查询
+    if (data.dialogueHistory && Array.isArray(data.dialogueHistory) && data.dialogueHistory.length > 0) {
+      this.dialogueHistory = data.dialogueHistory;
+      this._skipRestoreDialogue = true;
+      console.log('[UIScene] _onGameInit 已直接从 game:init 加载对话历史，条数:', this.dialogueHistory.length);
+      try {
+        localStorage.setItem(`__dialogue_history_${this.sessionId}`, JSON.stringify(this.dialogueHistory));
+      } catch (e) { /* ignore */ }
+    } else {
+      this._skipRestoreDialogue = false;
+    }
+
     if (this.sessionId) this._restoreDialogueHistory(this.sessionId);
   }
 
@@ -593,8 +616,17 @@ export class UIScene extends Phaser.Scene {
   // =========================== 对话历史恢复 ============================
 
   async _restoreDialogueHistory(sessionId) {
+    // ★ 如果 game:init 已提供对话历史（存档加载等场景），跳过 API 查询
+    if (this._skipRestoreDialogue) {
+      this._skipRestoreDialogue = false;
+      console.log('[UIScene] _restoreDialogueHistory 跳过（game:init 已提供数据）');
+      return;
+    }
+    console.log('[UIScene] _restoreDialogueHistory 开始从 API 恢复');
+    this.dialogueHistory = [];
     try {
       const result = await getDialogues(sessionId);
+      console.log('[UIScene] _restoreDialogueHistory API 返回条数:', result?.items?.length || 0);
       if (!result || !result.items || result.items.length === 0) {
         this._tryRestoreHistoryFromCache(sessionId);
         return;
@@ -614,8 +646,10 @@ export class UIScene extends Phaser.Scene {
         }
       });
       if (pendingNpcText) this.addToHistory(lastName, pendingNpcText);
+      console.log('[UIScene] _restoreDialogueHistory 恢复完成，总条数:', this.dialogueHistory.length);
       try { localStorage.setItem(`__dialogue_history_${sessionId}`, JSON.stringify(this.dialogueHistory)); } catch (e) { /* */ }
     } catch (e) {
+      console.warn('[UIScene] _restoreDialogueHistory API 失败，回退到缓存:', e);
       this._tryRestoreHistoryFromCache(sessionId);
     }
   }

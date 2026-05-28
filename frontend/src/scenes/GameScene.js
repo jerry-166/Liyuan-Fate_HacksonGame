@@ -283,6 +283,8 @@ export class GameScene extends Phaser.Scene {
         sessionId: gameState.session_id,
         stage, chapterId, chapterName,
         inventory: gameState.inventory || [],
+        dialogueHistory: _convertDialogueHistory(gameState.dialogue_history || [], _buildNpcNameMap(gameState.npcs)),
+        npcNames: _buildNpcNameMap(gameState.npcs),
       });
 
       if (gameState.stage_params) {
@@ -371,6 +373,8 @@ export class GameScene extends Phaser.Scene {
       this.events.emit('game:init', {
         sessionId, stage: this.currentStage, chapterId, chapterName,
         inventory: gameState.inventory || [],
+        dialogueHistory: _convertDialogueHistory(gameState.dialogue_history || [], _buildNpcNameMap(gameState.npcs)),
+        npcNames: _buildNpcNameMap(gameState.npcs),
       });
 
       // ★ 子场景存档恢复：如果存档时玩家在子场景中，跳过主地图加载
@@ -455,9 +459,15 @@ export class GameScene extends Phaser.Scene {
       chapterId = gameState.current_chapter.chapter_id;
       chapterName = gameState.current_chapter.chapter_name;
     }
+    // ★ 构建 NPC 名称映射 + 转换 dialogue_history 为前端格式
+    const npcNames = _buildNpcNameMap(gameState.npcs);
+    const dialogueHistory = _convertDialogueHistory(gameState.dialogue_history || [], npcNames);
+
     this.events.emit('game:init', {
       sessionId, stage: this.currentStage, chapterId, chapterName,
       inventory: gameState.inventory || [],
+      dialogueHistory,
+      npcNames,
     });
 
     // 3. 应用阶段色调
@@ -1520,4 +1530,78 @@ export class GameScene extends Phaser.Scene {
     }
     if (!this.currentNearbyItem) this.interactHint.setVisible(false);
   }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 模块级辅助函数（存档对话历史转换）
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * 从 NPC 列表构建 ID → 名称映射。
+ * @param {Array|Object} npcs — npcs 数组或对象
+ * @returns {Record<string, string>}
+ */
+function _buildNpcNameMap(npcs) {
+  const map = {};
+  if (!npcs) return map;
+  const iterable = Array.isArray(npcs) ? npcs : Object.values(npcs);
+  for (const npc of iterable) {
+    if (npc && npc.id && npc.name) map[npc.id] = npc.name;
+  }
+  return map;
+}
+
+/**
+ * 将后端 dialogue_history 格式转换为前端 HistoryPanel 所需格式。
+ * 后端: { npc_id, npc_name, role, content, stage, chapter_id, turn_index }
+ * 前端: { npcName, npcText, playerText, stage }
+ * @param {Array} backendHistory — 来自 to_api_response().dialogue_history
+ * @param {Record<string,string>} npcNames — NPC ID → 名称映射
+ * @returns {Array<{npcName:string, npcText:string|null, playerText:string|null, stage:number}>}
+ */
+function _convertDialogueHistory(backendHistory, npcNames) {
+  if (!backendHistory || !Array.isArray(backendHistory)) return [];
+
+  console.log('[GameScene] _convertDialogueHistory 原始条目数:', backendHistory.length,
+    'sample:', backendHistory.slice(0, 3));
+
+  const frontendHistory = [];
+  let pendingNpcName = null;
+  let pendingNpcText = '';
+  let pendingStage = 1;
+
+  for (const entry of backendHistory) {
+    const npcName = entry.npc_name || npcNames[entry.npc_id] || entry.npc_id || '未知';
+    const stage = entry.stage || 1;
+
+    if (entry.role === 'npc') {
+      // 同一 NPC 连续发言时合并为一条（用换行分隔），避免拆分显示
+      if (pendingNpcText && pendingNpcName === npcName) {
+        pendingNpcText += '\n' + (entry.content || '');
+        pendingStage = stage;
+      } else {
+        if (pendingNpcText) {
+          frontendHistory.push({ npcName: pendingNpcName, npcText: pendingNpcText, playerText: null, stage: pendingStage });
+        }
+        pendingNpcText = entry.content || '';
+        pendingNpcName = npcName;
+        pendingStage = stage;
+      }
+    } else if (entry.role === 'player') {
+      // 玩家发言前先提交 NPC 对话
+      if (pendingNpcText) {
+        frontendHistory.push({ npcName: pendingNpcName, npcText: pendingNpcText, playerText: null, stage: pendingStage });
+        pendingNpcText = '';
+      }
+      frontendHistory.push({ npcName, npcText: null, playerText: entry.content, stage });
+    }
+  }
+  // 收尾：使用最后一条记录的 stage，而非硬编码 1
+  if (pendingNpcText) {
+    frontendHistory.push({ npcName: pendingNpcName, npcText: pendingNpcText, playerText: null, stage: pendingStage });
+  }
+
+  console.log('[GameScene] _convertDialogueHistory 转换后条目数:', frontendHistory.length,
+    'sample:', frontendHistory.slice(0, 2));
+  return frontendHistory;
 }

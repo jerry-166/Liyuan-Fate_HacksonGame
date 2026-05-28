@@ -136,20 +136,31 @@ async def load_save(session_id: str, save_id: str):
         })
 
     # 将快照状态写回当前 session（内存 + DB）
-    from state.session import NPCState, NarrativeItem, TaskInstance
+    from state.session import NPCState, NarrativeItem, TaskInstance, DialogueTurn
     session.current_stage = game_state.get("current_stage", session.current_stage)
     session.current_chapter_id = game_state.get("current_chapter_id")
     session.completed_chapters = game_state.get("completed_chapters", [])
     session.game_ended = game_state.get("game_ended", False)
     session.ending_type = game_state.get("ending_type")
     session.ending_data = game_state.get("ending_data")
+    session.player_name = game_state.get("player_name", session.player_name)
+    session.script_id = game_state.get("script_id", session.script_id)
 
-    # 恢复 NPC 状态
+    # 恢复全局 LLM 状态
+    session.stage_llm_consecutive = game_state.get("stage_llm_consecutive", 0)
+    session.persona_cache = game_state.get("persona_cache", {})
+    session.dialogue_turn_counter = game_state.get("dialogue_turn_counter", 0)
+
+    # ★ 设置当前存档上下文，后续 persist_dialogue 会关联此 save_id
+    session.current_save_id = save_id
+
+    # 恢复 NPC 状态（含对话历史与选项）
     npcs_data = game_state.get("npcs", {})
     for npc_id, npc_dict in npcs_data.items():
         if npc_id in session.npcs:
             npc = session.npcs[npc_id]
             npc.relationship = npc_dict.get("relationship", npc.relationship)
+            npc.relationship_default = npc_dict.get("relationship_default", npc.relationship_default)
             npc.is_available = npc_dict.get("is_available", True)
             npc.current_greeting = npc_dict.get("current_greeting", "")
             npc.dialogue_round_count = npc_dict.get("dialogue_round_count", 0)
@@ -159,6 +170,19 @@ async def load_save(session_id: str, save_id: str):
             scene = npc_dict.get("scene")
             if scene:
                 npc.scene = scene
+            # ★ 恢复对话历史（按存档维度完全隔离）
+            npc.dialogue_history = [
+                DialogueTurn(
+                    role=dt["role"],
+                    content=dt["content"],
+                    npc_id=dt.get("npc_id", npc_id),
+                    stage=dt.get("stage", session.current_stage),
+                    chapter_id=dt.get("chapter_id", ""),
+                    turn_index=dt.get("turn_index", 0),
+                )
+                for dt in npc_dict.get("dialogue_history", [])
+            ]
+            npc.last_options = npc_dict.get("last_options", [])
 
     # 恢复物品
     inventory_data = game_state.get("inventory", [])

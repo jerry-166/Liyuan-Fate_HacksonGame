@@ -276,6 +276,26 @@ Content-Type: application/json; charset=utf-8
   "events_triggered": ["first_enter_tavern"],
   "game_ended": false,
   "ending": null,
+  "dialogue_history": [
+    {
+      "npc_id": "npc_chen",
+      "npc_name": "陈师傅",
+      "role": "npc",
+      "content": "嗯……你倒是问到了点子上。",
+      "stage": 2,
+      "chapter_id": "ch_01",
+      "turn_index": 5
+    },
+    {
+      "npc_id": "npc_chen",
+      "npc_name": "陈师傅",
+      "role": "player",
+      "content": "后来发生了什么？",
+      "stage": 2,
+      "chapter_id": "ch_01",
+      "turn_index": 6
+    }
+  ],
   "inventory": [
     {
       "id": "item_urn",
@@ -784,7 +804,7 @@ Content-Type: application/json; charset=utf-8
 
 ### 3.13c 加载存档 — `POST /api/game/{session_id}/saves/{save_id}/load` 🔥v3
 
-**职责**: 从存档快照恢复完整游戏状态。将快照写入当前 session 内存 + DB，返回完整游戏状态给前端。
+**职责**: 从存档快照恢复完整游戏状态。将快照写入当前 session 内存 + DB，返回完整游戏状态给前端。每次加载会从快照 JSON 中完全恢复 `dialogue_history`，不同存档间的对话记录完全隔离。
 
 **Response** `200 OK`
 
@@ -800,6 +820,7 @@ Content-Type: application/json; charset=utf-8
   "current_chapter": { ... },
   "completed_chapters": [ ... ],
   "events_triggered": [ ... ],
+  "dialogue_history": [ ... ],
   "game_ended": false,
   "_player_position": { "col": 10, "row": 20 },
   "_town_npc_positions": [ ... ],
@@ -811,7 +832,7 @@ Content-Type: application/json; charset=utf-8
 }
 ```
 
-> **注意**: `loaded_from_save` 标识此次状态来自存档恢复。`_player_position` / `_town_npc_positions` 为主地图位置快照。`_sub_scene_*` 系列字段为子场景专用位置与标识，仅当存档时玩家处于子场景中才有值。
+> **注意**: `loaded_from_save` 标识此次状态来自存档恢复。`dialogue_history` 来自存档快照而非 DB 查询，确保加载存档 A 后按 H 键只看到存档 A 保存时的对话记录。`_player_position` / `_town_npc_positions` 为主地图位置快照。`_sub_scene_*` 系列字段为子场景专用位置与标识，仅当存档时玩家处于子场景中才有值。
 
 ### 3.13d 删除存档 — `DELETE /api/game/{session_id}/saves/{save_id}` 🔥v3
 
@@ -824,6 +845,8 @@ Content-Type: application/json; charset=utf-8
 ```
 
 ### 3.14 对话历史 — `GET /api/game/{session_id}/dialogues`
+
+> **注意**: 此接口返回当前 session 的全部对话（来自 SQLite `dialogues` 表），用于新游戏启动时恢复历史。存档加载场景下，前端优先使用 `GET /api/game/{id}` 或存档加载响应中的 `dialogue_history` 字段（来自存档快照），确保不同存档间的对话记录完全隔离。
 
 **Request**
 

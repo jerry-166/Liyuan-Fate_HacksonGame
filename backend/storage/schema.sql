@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS dialogues (
     content     TEXT NOT NULL,
     options     TEXT,
     stage       INTEGER,
+    save_id     TEXT,
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (session_id) REFERENCES sessions(session_id)
 );
