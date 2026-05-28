@@ -4,6 +4,8 @@
  * @module scenes/modules/HistoryPanel
  */
 
+import { getChapterLabel } from '../../config.js';
+
 export class HistoryPanel {
   /**
    * @param {Phaser.Scene} uiScene - UIScene 实例
@@ -132,8 +134,9 @@ export class HistoryPanel {
     }
 
     ui.dialogueHistory.forEach((entry, idx) => {
-      if (idx === 0 || entry.stage !== ui.dialogueHistory[idx - 1].stage) {
-        const sep = ui.add.text(ha.w / 2, y, `—— 第${entry.stage}章 ——`, {
+      if (idx === 0 || entry.chapterId !== ui.dialogueHistory[idx - 1].chapterId) {
+        const chLabel = getChapterLabel(entry.chapterId);
+        const sep = ui.add.text(ha.w / 2, y, `—— ${chLabel} ——`, {
           fontFamily: '"KaiTi","SimSun",serif', fontSize: '18px', color: '#998866',
         }).setOrigin(0.5, 0);
         ui.historyContent.add(sep);

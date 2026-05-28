@@ -19,7 +19,7 @@
  */
 
 import Phaser from 'phaser';
-import { GAME, COORD } from '../config.js';
+import { GAME, COORD, CHAPTER_IMAGES, CHAPTER_MAP } from '../config.js';
 import { generateMapData, MAP_SCALE, MAP_COLS, MAP_ROWS } from './modules/MapGenerator.js';
 import { CollisionEditor } from './modules/CollisionEditor.js';
 import {
@@ -107,6 +107,11 @@ export class GameScene extends Phaser.Scene {
       if (config.hasStateSwitch && config.altImageKey) {
         this.load.image(config.altImageKey, config.altImagePath);
       }
+    }
+
+    // 加载章节过渡背景图
+    for (const [stageId, path] of Object.entries(CHAPTER_IMAGES)) {
+      this.load.image(`transition_${stageId}`, path);
     }
   }
 
@@ -299,9 +304,11 @@ export class GameScene extends Phaser.Scene {
           const chResult = await startChapter(gameState.session_id);
           _hideLoadingHint(this._loadingHint);
           if (chResult && chResult.chapter_id) {
+            const stageId = CHAPTER_MAP[chResult.chapter_id] || 1;
             this.time.delayedCall(800, () => {
               this.events.emit('stage:change', {
-                id: 1, name: chResult.chapter_name || '归乡',
+                id: stageId, chapterId: chResult.chapter_id,
+                name: chResult.chapter_name || '归乡',
                 description: chResult.task ? chResult.task.description : '',
                 color_tone: chResult.color_tone || '#8899aa',
                 bgm_mood: chResult.bgm_mood || '',

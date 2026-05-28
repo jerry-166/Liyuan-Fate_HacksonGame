@@ -56,6 +56,7 @@ class Database:
             # v3: saves 表（新表，用 schema.sql 中的 CREATE TABLE IF NOT EXISTS 创建，
             # 这里添加一条无害的 SELECT 确保旧库迁移时 coverage）
             "ALTER TABLE dialogues ADD COLUMN save_id TEXT",
+            "ALTER TABLE sessions ADD COLUMN chapter_outlines TEXT",
         ]
         # 确保 saves 表和目录存在（处理旧库升级场景）
         with self._conn() as conn:
@@ -135,7 +136,8 @@ class Database:
                        ending_data: Optional[dict] = None,
                        current_chapter_id: Optional[str] = None,
                        active_item: Optional[str] = None,
-                       script_id: Optional[str] = None) -> None:
+                       script_id: Optional[str] = None,
+                       chapter_outlines: Optional[list] = None) -> None:
         fields = ["updated_at = CURRENT_TIMESTAMP"]
         params = []
         if stage is not None:
@@ -159,6 +161,9 @@ class Database:
         if script_id is not None:
             fields.append("script_id = ?")
             params.append(script_id)
+        if chapter_outlines is not None:
+            fields.append("chapter_outlines = ?")
+            params.append(json.dumps(chapter_outlines, ensure_ascii=False))
         params.append(session_id)
         with self._conn() as conn:
             conn.execute(

@@ -224,7 +224,7 @@ class PromptBuilder:
             task_vote_hint = """
 ## 任务进度投票（仅与你相关的子任务）
 对话结束后，请在 task_progress 字段中判断你是否认为相关任务已完成：
-- should_vote_complete: true/false
+- should_vote_complete: true/false（只有当对话内容确实推进了剧情、触发了关键信息交流时才投 true。闲聊、无关话题不算推进。）
 - vote_reason: 一句话说明
 - completed_sub_task_ids: 你认为已完成的子任务 ID 列表
 """
@@ -252,7 +252,8 @@ class PromptBuilder:
 {show_item_hint}
 {task_vote_hint}
 
-请以 JSON 格式输出你的回应（不要包含 markdown 代码块标记）：
+【重要】你必须且只能输出一个合法 JSON 对象，不要输出任何其他文字、解释、markdown 标记。
+直接输出 JSON，以 {{ 开头，以 }} 结尾：
 {{
   "dialogue_text": "你作为 {npc_name} 的自然对话回应（2-5句）",
   "relationship_delta": 0,
@@ -263,12 +264,14 @@ class PromptBuilder:
 }}
 
 字段说明：
-- dialogue_text: 你对玩家说的话
+- dialogue_text: 你对玩家说的话（直接写对话内容，不要包含动作描写或括号说明）
 - relationship_delta: 本轮态度变化 [-5, 10]
 - options: {options_instruction}
 - should_trigger_event: 是否触发关键事件
 - new_event: 事件 ID（如 "chen_tells_past"）
 - task_progress: 任务进度投票结果（如你不参与当前任务则设为 null）
+
+再次提醒：只输出 JSON，不要在 JSON 前后添加任何文字。
 """
 
     def _is_npc_relevant(self, st, npc_id: str) -> bool:

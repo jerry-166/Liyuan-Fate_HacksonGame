@@ -15,15 +15,16 @@
  */
 
 import Phaser from 'phaser';
-import { COLORS, STAGE_TONES, CHAPTER_MAP } from '../config.js';
+import { COLORS, STAGE_TONES, CHAPTER_MAP, getChapterLabel } from '../config.js';
 import {
-  startDialogueStream, exitDialogue, startChapter,
+  startDialogueStream, exitDialogue, startChapter, skipChapter,
   getGameState, saveGameState, getDialogues, batchReportNPCPositions,
   getItems,
 } from '../api/client.js';
 import { DialogueManager } from './modules/DialogueManager.js';
 import { InventoryPanel } from './modules/InventoryPanel.js';
 import { HistoryPanel } from './modules/HistoryPanel.js';
+import { TaskPanel } from './modules/TaskPanel.js';
 import { getTownNPCDialogue } from './modules/TownNPCDialogue.js';
 import { SaveManager } from './modules/SaveManager.js';
 import { EndingScreen } from './modules/EndingScreen.js';
@@ -72,6 +73,7 @@ export class UIScene extends Phaser.Scene {
     this.dialogue = new DialogueManager(this);
     this.inventoryPanel = new InventoryPanel(this);
     this.historyPanel = new HistoryPanel(this);
+    this.taskPanel = new TaskPanel(this);
     this.saveManager = new SaveManager(this);
     this.endingScreen = new EndingScreen(this);
     this.stageTransition = new StageTransition(this);
@@ -81,6 +83,7 @@ export class UIScene extends Phaser.Scene {
     this.dialogue.setupFreeInput();
     this.createHUD();
     this.historyPanel.createPanel();
+    this.taskPanel.createPanel();
     this.inventoryPanel.createPanel();
     this.stageTransition.createOverlay();
     this.endingScreen.createScreen();
@@ -127,6 +130,7 @@ export class UIScene extends Phaser.Scene {
     this.key3 = this.input.keyboard.addKey('THREE');
     this.key4 = this.input.keyboard.addKey('FOUR');
     this.keyH = this.input.keyboard.addKey('H');
+    this.keyT = this.input.keyboard.addKey('T');
     this.keyB = this.input.keyboard.addKey('B');
     this.keyW = this.input.keyboard.addKey('W');
     this.keyS = this.input.keyboard.addKey('S');
@@ -175,6 +179,33 @@ export class UIScene extends Phaser.Scene {
       }
     });
     this.hudContainer.add(this.backpackBtn);
+
+    // 任务按钮
+    this.taskBtn = this.add.text(width - 16, 112, '📋 任务 [T]', {
+      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+      fontSize: '16px', color: '#c4a882',
+      backgroundColor: '#1a1a2ecc', padding: { x: 10, y: 5 },
+    }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
+    this.taskBtn.on('pointerover', () => this.taskBtn.setColor('#e8d4a0'));
+    this.taskBtn.on('pointerout', () => this.taskBtn.setColor('#c4a882'));
+    this.taskBtn.on('pointerdown', () => {
+      if (!this.dialogActive && !this.pauseMenuVisible) {
+        this.taskPanel.toggle();
+      }
+    });
+    this.hudContainer.add(this.taskBtn);
+
+    // 跳章按钮（调试用）
+    this.skipBtn = this.add.text(width - 16, 144, '⏭ 跳章', {
+      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+      fontSize: '14px', color: '#886644',
+      backgroundColor: '#1a1a2ecc', padding: { x: 8, y: 4 },
+    }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
+    this.skipBtn.on('pointerover', () => this.skipBtn.setColor('#cc8844'));
+    this.skipBtn.on('pointerout', () => this.skipBtn.setColor('#886644'));
+    this.skipBtn.on('pointerdown', () => this._handleSkipChapter());
+    this.hudContainer.add(this.skipBtn);
+
     this.hudContainer.add(this.stageBadge);
   }
 
@@ -243,6 +274,8 @@ export class UIScene extends Phaser.Scene {
 
     if (this.historyPanelVisible) this.historyPanel.toggle();
 
+    if (this._taskPanelUI?.visible) this.taskPanel.hide();
+
     const gs = this.scene.get('GameScene');
     gs.events.emit('input:lock', true);
 
@@ -301,24 +334,22 @@ export class UIScene extends Phaser.Scene {
     this.pageHint.setText('');
     this.dialogClickZone.disableInteractive();
 
-    if (this.pendingChapterChange && this.pendingChapterChange.chapterCompleted) {
-      await this._handleChapterComplete();
+    if (this.pendingEnding) {
+      this.dialogHint.setText('[F] 关闭对话');
       return;
     }
 
-    if (!this.pendingEnding) {
-      this.dialogue.showOptions(this.pendingOptions);
-    }
+    // 章节完成时不立即跳转，先正常显示选项，等玩家关闭对话后再跳转
+    this.dialogue.showOptions(this.pendingOptions);
   }
 
   /** 关闭对话 */
-  closeDialog() {
+  async closeDialog() {
     this.dialogActive = false;
     this.isStreaming = false;
     this.dialogPages = [];
     this.dialogCurrentPage = 0;
     this.pendingOptions = null;
-    this.pendingChapterChange = null;
     this.pendingEnding = false;
     this.pageHint.setText('');
     this.dialogClickZone.disableInteractive();
@@ -332,6 +363,20 @@ export class UIScene extends Phaser.Scene {
 
     this._persistDialogueHistory();
 
+    // 对话结束后刷新任务面板（如果有新进度）
+    if (this._taskPanelUI?.visible) {
+      this.taskPanel.refreshContent();
+    }
+
+    // 章节完成：玩家关闭对话后再跳转
+    if (this.pendingChapterChange && this.pendingChapterChange.chapterCompleted) {
+      const chapterChange = this.pendingChapterChange;
+      this.pendingChapterChange = null;
+      this.time.delayedCall(300, () => this._handleChapterComplete());
+      return;
+    }
+    this.pendingChapterChange = null;
+
     if (this.sessionId && this.currentNPC) {
       exitDialogue(this.sessionId, this.currentNPC.id)
         .then(r => console.log('[UIScene] NPC 告别语:', r.dialogue_text))
@@ -341,15 +386,56 @@ export class UIScene extends Phaser.Scene {
 
   /** 对话历史记录 */
   addToHistory(npcName, npcText, playerText = null) {
-    // ★ 保持 npcText 为 null（而非空字符串），便于 HistoryPanel 区分"无 NPC 文本"与"空文本"
     this.dialogueHistory.push({
       npcName, npcText: npcText ?? null, playerText: playerText || null,
       stage: this.currentStage,
+      chapterId: this.currentChapterId,
     });
-    console.log('[UIScene] addToHistory:', { npcName, npcText: npcText ?? null, playerText, stage: this.currentStage, total: this.dialogueHistory.length });
   }
 
   // =========================== 章节管理 ============================
+
+  async _handleSkipChapter() {
+    if (this.dialogActive || !this.sessionId) return;
+    try {
+      console.log('[UIScene] skipChapter...');
+      const chapterResult = await skipChapter(this.sessionId);
+
+      if (chapterResult.game_ended) {
+        this.time.delayedCall(500, () => this.triggerEndingSequence());
+        return;
+      }
+
+      if (chapterResult.chapter_id) {
+        const stageId = CHAPTER_MAP[chapterResult.chapter_id] || this.currentStage + 1;
+        const tone = STAGE_TONES[stageId];
+        const newStage = {
+          id: stageId,
+          chapterId: chapterResult.chapter_id,
+          name: chapterResult.chapter_name || (tone ? tone.name : '未知'),
+          description: chapterResult.task ? chapterResult.task.description : '',
+          color_tone: chapterResult.color_tone || (tone ? tone.mood : 'cold'),
+          bgm_mood: chapterResult.bgm_mood || '',
+        };
+
+        this.currentStage = stageId;
+        this.currentChapterId = chapterResult.chapter_id;
+        this.currentChapterName = chapterResult.chapter_name;
+        this.updateStageBadge();
+
+        const gs = this.scene.get('GameScene');
+        gs.events.emit('stage:change', newStage);
+        gs.events.emit('chapter:new', chapterResult);
+
+        await this.stageTransition.play(newStage);
+
+        // 刷新任务面板
+        if (this.taskPanel) this.taskPanel.refreshContent();
+      }
+    } catch (e) {
+      console.error('[UIScene] 跳章失败:', e);
+    }
+  }
 
   async _handleChapterComplete() {
     this.dialogContainer.setVisible(false);
@@ -374,6 +460,7 @@ export class UIScene extends Phaser.Scene {
         const tone = STAGE_TONES[stageId];
         const newStage = {
           id: stageId,
+          chapterId: chapterResult.chapter_id,
           name: chapterResult.chapter_name || (tone ? tone.name : '未知'),
           description: chapterResult.task ? chapterResult.task.description : '',
           color_tone: chapterResult.color_tone || (tone ? tone.mood : 'cold'),
@@ -550,6 +637,8 @@ export class UIScene extends Phaser.Scene {
     }
 
     if (this.sessionId) this._restoreDialogueHistory(this.sessionId);
+    // 刷新任务面板
+    if (this._taskPanelUI?.visible) this.taskPanel.refreshContent();
   }
 
   _onStageChange(newStage) {
@@ -564,9 +653,10 @@ export class UIScene extends Phaser.Scene {
 
   updateStageBadge() {
     const tone = STAGE_TONES[this.currentStage];
+    const chapterLabel = getChapterLabel(this.currentChapterId);
+    const label = this.currentChapterName || (tone ? tone.name : '未知');
+    this.stageBadge.setText(`${chapterLabel} · ${label}`);
     if (tone) {
-      const label = this.currentChapterName || tone.name;
-      this.stageBadge.setText(`第${this.currentStage}章 · ${label}`);
       const tintColors = {
         cold: '#8899cc', warm: '#ccaa77', dramatic: '#cc8866', melancholy: '#8899aa', somber: '#998877'
       };
@@ -591,6 +681,7 @@ export class UIScene extends Phaser.Scene {
     if (this.stageBadge) this.stageBadge.setPosition(width - 16, 16);
     if (this.historyBtn) this.historyBtn.setPosition(width - 16, 48);
     if (this.backpackBtn) this.backpackBtn.setPosition(width - 16, 80);
+    if (this.taskBtn) this.taskBtn.setPosition(width - 16, 112);
 
     // 重定位自由输入框（DOM 元素，需单独处理）
     try {
@@ -604,6 +695,7 @@ export class UIScene extends Phaser.Scene {
       { name: 'dialogue',       inst: this.dialogue },
       { name: 'inventoryPanel', inst: this.inventoryPanel },
       { name: 'historyPanel',   inst: this.historyPanel },
+      { name: 'taskPanel',      inst: this.taskPanel },
       { name: 'saveManager',    inst: this.saveManager },
       { name: 'stageTransition',inst: this.stageTransition },
       { name: 'endingScreen',   inst: this.endingScreen },
@@ -772,6 +864,15 @@ export class UIScene extends Phaser.Scene {
     }
     if (this.historyPanelVisible && Phaser.Input.Keyboard.JustDown(this.keyF)) {
       this.historyPanel.toggle();
+    }
+
+    // 任务面板
+    const taskPanelVisible = this._taskPanelUI?.visible;
+    if (!this.dialogActive && !this.pauseMenuVisible && Phaser.Input.Keyboard.JustDown(this.keyT)) {
+      this.taskPanel.toggle();
+    }
+    if (taskPanelVisible && Phaser.Input.Keyboard.JustDown(this.keyT)) {
+      this.taskPanel.hide();
     }
 
     if (!this.dialogActive || this.isStreaming) return;

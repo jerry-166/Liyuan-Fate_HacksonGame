@@ -226,6 +226,7 @@ class SessionManager:
             ending_data=session.ending_data,
             current_chapter_id=session.current_chapter_id,
             active_item=session.active_item,
+            chapter_outlines=session.chapter_outlines,
         )
         self._db.save_npc_states_batch(session.session_id, session.npcs)
 
@@ -327,6 +328,7 @@ class SessionManager:
                 "persona_cache": session.persona_cache,
                 "dialogue_turn_counter": session.dialogue_turn_counter,
                 "current_save_id": session.current_save_id,
+                "chapter_outlines": session.chapter_outlines,
                 "_player_position": player_position,
                 "_town_npc_positions": town_npc_positions,
                 "_sub_scene_id": sub_scene_id,

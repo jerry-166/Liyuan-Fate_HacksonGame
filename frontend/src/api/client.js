@@ -192,6 +192,13 @@ export async function startChapter(sessionId, chapterId = null) {
   return res.json();
 }
 
+/** 跳过当前章节（调试用） */
+export async function skipChapter(sessionId) {
+  const res = await fetch(`${BASE}/game/${sessionId}/chapter/skip`, { method: 'POST' });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
 /** 获取当前章节信息 */
 export async function getChapter(sessionId) {
   if (USE_MOCK) {

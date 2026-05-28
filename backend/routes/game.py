@@ -43,6 +43,21 @@ async def start_game(req: StartGameRequest):
     )
     first_ch = session.get_next_chapter()
 
+    # 后台生成全5章大纲（不阻塞响应）
+    import asyncio
+    async def _gen_outline_bg():
+        try:
+            from agents.story_planner import StoryPlanner
+            planner = StoryPlanner()
+            outlines = await planner.generate_outline(session)
+            if outlines:
+                session.chapter_outlines = outlines
+                manager.persist_session(session)
+                logger.info(f"[GameStart] Generated {len(outlines)} chapter outlines for {session.session_id}")
+        except Exception as e:
+            logger.warning(f"[GameStart] Background outline generation failed: {e}")
+    asyncio.create_task(_gen_outline_bg())
+
     # 合并 to_api_response + first_chapter
     response = session.to_api_response()
     response["first_chapter"] = {
@@ -124,6 +139,10 @@ async def evaluate_ending(session_id: str):
             builder.set_system_prompt(session.system_prompt)
         messages = builder.build_evaluate_messages(session)
         result = await llm.chat_json(messages, api_key=session.api_key, temperature=0.7)
+        # 校验关键字段，缺失则用 raw 中的内容兜底
+        if not result.get("title") or not result.get("life_lesson"):
+            logger.warning(f"[Evaluate] LLM result missing fields, using fallback. raw keys: {list(result.keys())}")
+            raise ValueError("Missing required ending fields")
         session.ending_data = result
         manager.persist_session(session)
         return result

@@ -16,10 +16,19 @@ class ChapterEngine:
 
     async def start_chapter(self, session: GameSession,
                             chapter_def: dict) -> TaskInstance:
-        """开始一个新章节：调用 LLM 规划任务实例。"""
-        from agents.task_planner import TaskPlanner
-        planner = TaskPlanner()
-        task = await planner.plan_chapter(session, chapter_def)
+        """开始一个新章节：优先用 StoryPlanner（含 AI 大纲），兜底用 TaskPlanner。"""
+        from agents.story_planner import StoryPlanner
+        planner = StoryPlanner()
+
+        # 查找该章的 AI 大纲（如果有）
+        outline = None
+        ch_id = chapter_def.get("id", "")
+        for o in session.chapter_outlines:
+            if o.get("chapter_id") == ch_id:
+                outline = o
+                break
+
+        task = await planner.generate_chapter_detail(session, chapter_def, outline=outline)
 
         # 设置 session 状态
         session.current_chapter_id = chapter_def.get("id")
@@ -89,7 +98,6 @@ class ChapterEngine:
         elif mode == "show_item":
             if st.required_item_id:
                 return session.get_inventory_item(st.required_item_id) is not None
-            # 还需要 NPC 投票确认
 
         elif mode == "deliver":
             if st.required_item_id:
@@ -102,12 +110,16 @@ class ChapterEngine:
                     return npc.relationship >= st.relation_threshold
 
         elif mode == "explore":
-            # 探索类子任务需要 NPC 投票或事件触发
-            pass
+            if st.target_scene:
+                for npc in session.npcs.values():
+                    if npc.scene == st.target_scene and npc.dialogue_round_count > 0:
+                        return True
 
         elif mode == "dialogue":
-            # 对话类需要 NPC 投票
-            pass
+            if st.target_npc_id:
+                npc = session.npcs.get(st.target_npc_id)
+                if npc and st.min_dialogue_rounds > 0:
+                    return npc.dialogue_round_count >= st.min_dialogue_rounds
 
         return False
 

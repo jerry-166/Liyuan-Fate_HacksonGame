@@ -48,6 +48,7 @@ class SubTask:
     target_scene: Optional[str] = None
     relation_threshold: Optional[int] = None
     status: str = SubTaskStatus.LOCKED.value
+    min_dialogue_rounds: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -61,6 +62,7 @@ class SubTask:
             "target_scene": self.target_scene,
             "relation_threshold": self.relation_threshold,
             "status": self.status,
+            "min_dialogue_rounds": self.min_dialogue_rounds,
         }
 
     @classmethod
@@ -76,6 +78,7 @@ class SubTask:
             target_scene=d.get("target_scene"),
             relation_threshold=d.get("relation_threshold"),
             status=d.get("status", SubTaskStatus.LOCKED.value),
+            min_dialogue_rounds=d.get("min_dialogue_rounds", 0),
         )
 
 
@@ -298,6 +301,9 @@ class GameSession:
 
     # ─── 存档上下文 ─────────────────────────────
     current_save_id: Optional[str] = None
+
+    # ─── AI 生成的章节大纲 ───────────────────────
+    chapter_outlines: list[dict] = field(default_factory=list)
 
     def get_current_chapter(self) -> Optional[dict]:
         """获取当前章节定义。"""

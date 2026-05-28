@@ -12,7 +12,7 @@
  */
 
 import Phaser from 'phaser';
-import { STAGE_TONES } from '../config.js';
+import { getChapterLabel } from '../config.js';
 import { getSessions, deleteSession } from '../api/client.js';
 
 // ========== UI 工具函数 ==========
@@ -315,10 +315,6 @@ export class MenuScene extends Phaser.Scene {
     const { width } = this.cameras.main;
     const panelW = 580, panelX = (width - panelW) / 2;
 
-    // 阶段名映射
-    const stageNames = {};
-    for (const [k, v] of Object.entries(STAGE_TONES)) stageNames[k] = v.name;
-
     const sorted = [...sessions].sort((a, b) =>
       (b.updated_at || b.created_at || '').localeCompare(a.updated_at || a.created_at || '')
     );
@@ -327,10 +323,10 @@ export class MenuScene extends Phaser.Scene {
     let y = 8;
 
     sorted.forEach((s) => {
-      const stageName = s.stage_name || stageNames[s.stage] || '未知';
+      const chLabel = getChapterLabel(s.chapter_id);
       const date = (s.updated_at || s.created_at || '').slice(0, 16);
       const ended = s.game_ended ? ' [已结局]' : '';
-      const label = `${s.player_name || '玩家'} · 第${s.stage || '?'}章「${stageName}」${ended}`;
+      const label = `${s.player_name || '玩家'} · ${chLabel}${ended}`;
 
       const rowBg = this.add.graphics();
       rowBg.fillStyle(0x1a1a28, 1);
@@ -394,6 +390,12 @@ export class MenuScene extends Phaser.Scene {
   }
 
   _startNewGame() {
+    // 清除旧会话标记，防止残留数据干扰新游戏
+    const oldSession = localStorage.getItem('__active_session__');
+    if (oldSession) {
+      try { localStorage.removeItem(`__dialogue_history_${oldSession}`); } catch (_) {}
+      localStorage.removeItem('__active_session__');
+    }
     this.cameras.main.fadeOut(600, 0, 0, 0);
     this.time.delayedCall(600, () => this.scene.start('GameScene'));
   }

@@ -19,16 +19,16 @@ async def list_sessions():
     manager = get_session_manager()
     sessions = manager.list_sessions()
 
-    # 补充阶段名称
-    from config import STAGES
+    # 补充章节信息
+    from config import CHAPTER_TO_STAGE
     result = []
     for s in sessions:
-        stage_name = STAGES.get(s.get("current_stage", 1), {}).get("name", "未知")
+        chapter_id = s.get("current_chapter_id") or ""
         result.append({
             "session_id": s["session_id"],
             "player_name": s["player_name"],
+            "chapter_id": chapter_id,
             "stage": s["current_stage"],
-            "stage_name": stage_name,
             "game_ended": bool(s.get("game_ended", 0)),
             "created_at": str(s.get("created_at", "")),
             "updated_at": str(s.get("updated_at", "")),
@@ -145,6 +145,7 @@ async def load_save(session_id: str, save_id: str):
     session.ending_data = game_state.get("ending_data")
     session.player_name = game_state.get("player_name", session.player_name)
     session.script_id = game_state.get("script_id", session.script_id)
+    session.chapter_outlines = game_state.get("chapter_outlines", session.chapter_outlines)
 
     # 恢复全局 LLM 状态
     session.stage_llm_consecutive = game_state.get("stage_llm_consecutive", 0)

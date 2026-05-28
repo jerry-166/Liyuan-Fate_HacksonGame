@@ -57,6 +57,16 @@ export const STAGE_TONES = {
   6: { name: '承戏·重振',  tint: 0xcc8866, mood: 'dramatic',    hex: '#cc8866' },
 };
 
+/** 章节过渡背景图映射（stageId → 图片路径） */
+export const CHAPTER_IMAGES = {
+  1: 'assets/images/transitions/ch0_prologue.png',
+  2: 'assets/images/transitions/ch1_sound.png',
+  3: 'assets/images/transitions/ch2_explore.png',
+  4: 'assets/images/transitions/ch3_memory.png',
+  5: 'assets/images/transitions/ch4_witness.png',
+  6: 'assets/images/transitions/ch5_inherit.png',
+};
+
 /** chapter_id → stage 编号映射 */
 export const CHAPTER_MAP = {
   'ch_prologue': 1,
@@ -66,6 +76,19 @@ export const CHAPTER_MAP = {
   'ch_04': 5,
   'ch_05': 6,
 };
+
+/**
+ * chapter_id → 用户可见的章节显示文字
+ * 序章显示 "序章"，ch_01~ch_05 显示 "第一章"~"第五章"
+ */
+export function getChapterLabel(chapterId) {
+  if (!chapterId) return '未知';
+  if (chapterId === 'ch_prologue') return '序章';
+  const num = parseInt(chapterId.replace('ch_', ''), 10);
+  if (isNaN(num)) return '未知';
+  const zhNum = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+  return `第${zhNum[num - 1] || num}章`;
+}
 
 /**
  * 坐标转换工具 —— 瓦片坐标 ↔ 像素坐标

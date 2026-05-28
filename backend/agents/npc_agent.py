@@ -66,14 +66,38 @@ class NPCAgent:
         full_text = ""
         prev_dialogue_len = 0
         api_key = session.api_key
+        # None=未决定, True=JSON模式, False=纯文本模式
+        output_mode = None
+        text_yielded = 0  # 纯文本模式下已输出的字符数
 
         async for token in self.llm.chat_stream(messages, api_key=api_key):
             full_text += token
-            current_dialogue = _extract_dialogue_partial(full_text)
-            if len(current_dialogue) > prev_dialogue_len:
-                new_chars = current_dialogue[prev_dialogue_len:]
-                prev_dialogue_len = len(current_dialogue)
-                yield ("token", new_chars)
+
+            # 判断输出模式（直到看到第一个非空白字符）
+            if output_mode is None:
+                stripped = full_text.strip()
+                if not stripped:
+                    pass  # 还没收到有效内容，等待
+                elif stripped.startswith("{") or stripped.startswith("```"):
+                    output_mode = True  # JSON
+                else:
+                    output_mode = False  # 纯文本
+                    # 输出之前缓冲的全部内容
+                    yield ("token", full_text)
+                    text_yielded = len(full_text)
+
+            if output_mode is True:
+                # JSON 模式：提取 dialogue_text 内的内容
+                current_dialogue = _extract_dialogue_partial(full_text)
+                if len(current_dialogue) > prev_dialogue_len:
+                    new_chars = current_dialogue[prev_dialogue_len:]
+                    prev_dialogue_len = len(current_dialogue)
+                    yield ("token", new_chars)
+            elif output_mode is False:
+                # 纯文本模式：只输出增量
+                if len(full_text) > text_yielded:
+                    yield ("token", full_text[text_yielded:])
+                    text_yielded = len(full_text)
 
         result = parse_dialogue_response(full_text)
         self._apply_result(session, npc_id, result, player_message, full_text)
@@ -155,7 +179,7 @@ class NPCAgent:
 
     def _handle_task_vote(self, session: GameSession, npc_id: str,
                           task_progress) -> None:
-        """处理 NPC 的任务进度投票。"""
+        """处理 NPC 的任务进度投票（LLM 投票 + 对话轮数双重门槛）。"""
         if not session.current_task:
             return
 
@@ -163,15 +187,28 @@ class NPCAgent:
         if npc_id not in task.related_npc_ids:
             return
 
-        # 更新投票
-        task.npc_completion_votes[npc_id] = task_progress.should_vote_complete
+        # 双重门槛：LLM 投票 AND 该 NPC 相关子任务的 min_dialogue_rounds 已满足
+        npc = session.npcs.get(npc_id)
+        llm_vote = task_progress.should_vote_complete
+        rounds_ok = True
+
+        if npc and llm_vote:
+            for st in task.sub_tasks:
+                if st.target_npc_id == npc_id and st.status != "completed":
+                    if st.min_dialogue_rounds > 0 and npc.dialogue_round_count < st.min_dialogue_rounds:
+                        rounds_ok = False
+                        logger.info(f"[NPCAgent] NPC {npc_id} voted yes but rounds insufficient "
+                                    f"({npc.dialogue_round_count}/{st.min_dialogue_rounds})")
+                        break
+
+        vote = llm_vote and rounds_ok
+        task.npc_completion_votes[npc_id] = vote
 
         # 更新子任务状态
         for st_id in task_progress.completed_sub_task_ids:
             for st in task.sub_tasks:
                 if st.id == st_id and st.status != "completed":
                     st.status = "completed"
-                    # 解锁下一个
                     idx = task.sub_tasks.index(st)
                     if idx + 1 < len(task.sub_tasks):
                         next_st = task.sub_tasks[idx + 1]

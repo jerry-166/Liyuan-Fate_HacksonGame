@@ -30,24 +30,97 @@ class DialogueResult:
     task_progress: Optional[TaskProgress] = None
 
 
+def _fix_unescaped_quotes(text: str) -> str:
+    """修复 JSON 中 dialogue_text 值内未转义的双引号。
+
+    LLM 经常在对话文本中使用 "xxx" 包裹角色台词，
+    但不会转义这些引号，导致 JSON 解析失败。
+    """
+    import re
+
+    pattern = r'("dialogue_text"\s*:\s*")'
+    m = re.search(pattern, text)
+    if not m:
+        return text
+
+    value_start = m.end()
+
+    # 已知的后续 key
+    next_keys = [
+        '"relationship_delta"', '"options"', '"should_trigger_event"',
+        '"new_event"', '"stage_should_advance"', '"advance_reason"',
+        '"task_progress"', '"key_event"',
+    ]
+
+    # 在 value_start 之后找最近的下一个 key
+    earliest_pos = len(text)
+    for key in next_keys:
+        pos = text.find(key, value_start)
+        if pos != -1 and pos < earliest_pos:
+            earliest_pos = pos
+
+    if earliest_pos <= value_start:
+        return text
+
+    # 值区域：value_start 到 earliest_pos
+    # 去掉末尾的引号/逗号/空白
+    value_end = earliest_pos
+    while value_end > value_start and text[value_end - 1] in ('"', ' ', ',', '\n', '\r', '\t'):
+        value_end -= 1
+
+    # 最后一个 " 可能是值的结束引号
+    if value_end > value_start and text[value_end - 1] == '"':
+        value_end -= 1
+
+    value_region = text[value_start:value_end]
+
+    # 替换值区域内的 ASCII 双引号为中文引号（但保留转义的 \"）
+    fixed = value_region.replace('\\"', '\x00ESCAPED\x00')
+    fixed = fixed.replace('"', '“')
+    fixed = fixed.replace('\x00ESCAPED\x00', '"')
+
+    return text[:value_start] + fixed + text[value_end:]
+
+
+def _strip_markdown_fences(text: str) -> str:
+    text = text.strip()
+    if text.startswith("```json"):
+        text = text[7:]
+    elif text.startswith("```"):
+        text = text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    return text.strip()
+
+
 def parse_dialogue_response(llm_raw: str) -> DialogueResult:
     result = DialogueResult()
     parsed = None
 
+    # 第一次尝试：直接解析
     try:
-        text = llm_raw.strip()
-        if text.startswith("```json"):
-            text = text[7:]
-        elif text.startswith("```"):
-            text = text[3:]
-        if text.endswith("```"):
-            text = text[:-3]
-        parsed = json.loads(text.strip())
+        parsed = json.loads(_strip_markdown_fences(llm_raw))
     except json.JSONDecodeError:
-        logger.warning(f"[ResponseParser] JSON parse failed, using raw. First 200: {llm_raw[:200]}")
+        pass
+
+    # 第二次尝试：修复未转义引号后重试
+    if parsed is None:
+        try:
+            fixed = _fix_unescaped_quotes(_strip_markdown_fences(llm_raw))
+            parsed = json.loads(fixed)
+            logger.info("[ResponseParser] Recovered via quote fix")
+        except (json.JSONDecodeError, Exception):
+            logger.debug(f"[ResponseParser] JSON parse failed, using raw text fallback. First 200: {llm_raw[:200]}")
 
     if parsed is None:
         result.dialogue_text = llm_raw.strip()
+        # 纯文本 fallback：生成默认选项
+        result.relationship_delta = 3
+        result.options = [
+            "继续聊",
+            "我还有其他想问的",
+            "我先走了",
+        ]
         return result
 
     result.dialogue_text = str(parsed.get("dialogue_text", "")).strip()

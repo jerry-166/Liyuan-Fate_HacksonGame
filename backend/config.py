@@ -11,7 +11,7 @@ load_dotenv()
 # ─── LLM 配置 ───────────────────────────────────────────
 
 LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "https://tokenhub.tencentmaas.com/v1")
-LLM_MODEL: str = os.getenv("LLM_MODEL", "deepseek-v4-flash")
+LLM_MODEL: str = os.getenv("LLM_MODEL", "qwen3.5-flash")
 LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "2048"))
 LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.8"))
 LLM_API_KEY_FALLBACK: Optional[str] = os.getenv("TENCENT_LLM_API_KEY")

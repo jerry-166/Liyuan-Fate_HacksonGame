@@ -28,6 +28,123 @@ from config import (
 logger = logging.getLogger(__name__)
 
 
+def _parse_json_content(content: str) -> dict:
+    """从 LLM 返回的 content 中提取 JSON dict。
+
+    处理以下情况：
+    - 纯 JSON 字符串
+    - markdown code block 包裹: ```json ... ``` 或 ``` ... ```
+    - 前后有多余空白或文字
+    - 截断的 JSON（尝试修复）
+    """
+    import re
+
+    text = content.strip()
+
+    # 1. 尝试直接解析
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # 2. 去掉 markdown code block
+    m = re.search(r"```(?:json)?\s*\n?(.*?)```", text, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+
+    # 3. 找到第一个 { 和最后一个 } 之间的内容
+    first = text.find("{")
+    last = text.rfind("}")
+    if first != -1 and last != -1 and last > first:
+        sub = text[first:last + 1]
+        try:
+            return json.loads(sub)
+        except json.JSONDecodeError:
+            pass
+
+        # 4. 截断修复：补全缺失的括号
+        repaired = _repair_truncated_json(sub)
+        if repaired is not None:
+            return repaired
+
+    logger.warning(f"[LLM] Failed to parse JSON response: {content[:200]}")
+    return {"raw": content}
+
+
+def _repair_truncated_json(text: str) -> dict | None:
+    """尝试修复截断的 JSON：从末尾找最后一个完整的 key-value 或数组元素，然后补全括号。"""
+    # 简单策略：统计未关闭的括号，补全
+    stack = []
+    in_string = False
+    escape = False
+    for ch in text:
+        if escape:
+            escape = False
+            continue
+        if ch == '\\' and in_string:
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch in '{[':
+            stack.append(ch)
+        elif ch == '}' and stack and stack[-1] == '{':
+            stack.pop()
+        elif ch == ']' and stack and stack[-1] == '[':
+            stack.pop()
+
+    if not stack:
+        return None
+
+    # 找到最后一个逗号或冒号后的截断点，截断到那里
+    repaired = text.rstrip()
+    # 移除末尾不完整的 token（未闭合的字符串、不完整的 key 等）
+    while repaired and not repaired.endswith(('"', '}', ']', '}', 'e', 's', 'd', 'n', 'l')):
+        repaired = repaired[:-1]
+
+    # 补全未关闭的括号
+    stack2 = []
+    in_str2 = False
+    esc2 = False
+    for ch in repaired:
+        if esc2:
+            esc2 = False
+            continue
+        if ch == '\\' and in_str2:
+            esc2 = True
+            continue
+        if ch == '"':
+            in_str2 = not in_str2
+            continue
+        if in_str2:
+            continue
+        if ch in '{[':
+            stack2.append(ch)
+        elif ch == '}' and stack2 and stack2[-1] == '{':
+            stack2.pop()
+        elif ch == ']' and stack2 and stack2[-1] == '[':
+            stack2.pop()
+
+    # 如果还在字符串内，先关闭字符串
+    if in_str2:
+        repaired += '"'
+
+    # 按反向顺序补全括号
+    for bracket in reversed(stack2):
+        repaired += ']' if bracket == '[' else '}'
+
+    try:
+        return json.loads(repaired)
+    except json.JSONDecodeError:
+        return None
+
+
 class LLMClient:
     """异步 LLM 调用客户端。"""
 
@@ -79,12 +196,15 @@ class LLMClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
             "stream": True,
+            "response_format": {"type": "json_object"},
         }
 
         start = time.time()
         logger.info(f"[LLM] Stream request → {self.base_url}/chat/completions (model={self.model})")
 
-        async with httpx.AsyncClient(timeout=LLM_SSE_TIMEOUT) as client:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=10.0, read=LLM_SSE_TIMEOUT, write=10.0, pool=10.0)
+        ) as client:
             async with client.stream(
                 "POST",
                 f"{self.base_url}/chat/completions",
@@ -144,7 +264,9 @@ class LLMClient:
 
         logger.info(f"[LLM] JSON request → {self.base_url}/chat/completions")
 
-        async with httpx.AsyncClient(timeout=LLM_HTTP_TIMEOUT) as client:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=10.0, read=LLM_HTTP_TIMEOUT, write=10.0, pool=10.0)
+        ) as client:
             response = await client.post(
                 f"{self.base_url}/chat/completions",
                 headers=self._headers(key),
@@ -159,11 +281,7 @@ class LLMClient:
 
             data = response.json()
             content = data["choices"][0]["message"]["content"]
-            try:
-                return json.loads(content)
-            except json.JSONDecodeError:
-                logger.warning(f"[LLM] Failed to parse JSON response: {content[:200]}")
-                return {"raw": content}
+            return _parse_json_content(content)
 
 
 class LLMError(Exception):

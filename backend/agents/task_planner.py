@@ -129,10 +129,11 @@ class TaskPlanner:
         raw_sub_tasks = llm_result.get("sub_tasks", [])
         sub_tasks = []
         for i, st in enumerate(raw_sub_tasks):
+            mode = st.get("mode", "dialogue")
             sub_tasks.append(SubTask(
                 id=st.get("id", f"st_{i+1:03d}"),
                 title=st.get("title", f"子任务 {i+1}"),
-                mode=st.get("mode", "dialogue"),
+                mode=mode,
                 description=st.get("description", ""),
                 target_npc_id=st.get("target_npc_id"),
                 deliver_to_npc_id=st.get("deliver_to_npc_id"),
@@ -140,6 +141,7 @@ class TaskPlanner:
                 target_scene=st.get("target_scene"),
                 relation_threshold=st.get("relation_threshold"),
                 status="locked" if i > 0 else "active",
+                min_dialogue_rounds=st.get("min_dialogue_rounds", 2 if mode == "dialogue" else 0),
             ))
 
         # 如果没有 LLM 生成的子任务，用模板兜底
@@ -191,10 +193,11 @@ class TaskPlanner:
         sub_tasks = []
         st_templates = chapter_def.get("sub_task_templates", [])
         for i, st in enumerate(st_templates):
+            mode = st.get("mode", "dialogue")
             sub_tasks.append(SubTask(
                 id=st.get("id", f"st_{i+1:03d}"),
                 title=st.get("title", ""),
-                mode=st.get("mode", "dialogue"),
+                mode=mode,
                 description=st.get("description", ""),
                 target_npc_id=st.get("target_npc_id"),
                 required_item_id=st.get("required_item_id"),
@@ -202,5 +205,6 @@ class TaskPlanner:
                 target_scene=st.get("target_scene"),
                 relation_threshold=st.get("relation_threshold"),
                 status="locked" if i > 0 else "active",
+                min_dialogue_rounds=st.get("min_dialogue_rounds", 2 if mode == "dialogue" else 0),
             ))
         return sub_tasks
