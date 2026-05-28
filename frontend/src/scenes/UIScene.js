@@ -750,11 +750,13 @@ export class UIScene extends Phaser.Scene {
       if (Phaser.Input.Keyboard.JustDown(this.keyW) && this.inventory.length > 0) {
         this.backpackCursorIndex = (this.backpackCursorIndex - 1 + this.inventory.length) % this.inventory.length;
         this.inventoryPanel.highlightItem();
+        this.inventoryPanel.scrollToIndex(this.backpackCursorIndex);
         return;
       }
       if (Phaser.Input.Keyboard.JustDown(this.keyS) && this.inventory.length > 0) {
         this.backpackCursorIndex = (this.backpackCursorIndex + 1) % this.inventory.length;
         this.inventoryPanel.highlightItem();
+        this.inventoryPanel.scrollToIndex(this.backpackCursorIndex);
         return;
       }
       if (this.showItemMode && Phaser.Input.Keyboard.JustDown(this.keyEnter)) {

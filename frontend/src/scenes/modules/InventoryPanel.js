@@ -147,6 +147,31 @@ export class InventoryPanel {
     ui.bpShowItemBtnContainer.add([sbBg, sbText, sbZone]);
     ui.backpackPanel.add(ui.bpShowItemBtnContainer);
 
+    // 左侧列表裁剪遮罩
+    const listClipTop = panelY + titleH + 40;
+    const listClipH = panelH - titleH - bottomH - 48;
+    const listClipGfx = ui.add.graphics();
+    listClipGfx.fillRect(panelX, listClipTop, leftW, listClipH);
+    listClipGfx.setVisible(false);
+    ui.bpListContent.setMask(listClipGfx.createGeometryMask());
+    ui.backpackPanel.add(listClipGfx);
+
+    // 滚动条（track + thumb）
+    const sbTrackX = panelX + leftW - 14;
+    const sbTrackW = 6;
+    ui.bpScrollbarTrack = ui.add.graphics();
+    ui.bpScrollbarTrack.fillStyle(0x33332a, 0.5);
+    ui.bpScrollbarTrack.fillRoundedRect(sbTrackX, listClipTop + 4, sbTrackW, listClipH - 8, 3);
+    ui.bpScrollbarTrack.setVisible(false);
+    ui.backpackPanel.add(ui.bpScrollbarTrack);
+
+    ui.bpScrollbarThumb = ui.add.graphics();
+    ui.bpScrollbarThumb.fillStyle(0x887766, 0.7);
+    ui.bpScrollbarThumb.setVisible(false);
+    ui.backpackPanel.add(ui.bpScrollbarThumb);
+
+    ui._sbLayout = { trackX: sbTrackX, trackW: sbTrackW, trackTop: listClipTop + 4, trackH: listClipH - 8 };
+
     // 滚轮滚动
     if (this._wheelHandler) {
       ui.input.off('wheel', this._wheelHandler);
@@ -159,7 +184,7 @@ export class InventoryPanel {
         Math.min(0, (ui.bpListScrollY || 0) - deltaY * 0.5),
         -(ui.bpListContentHeight - (ba.h - ba.titleH - 80))
       );
-      ui.bpListContent.setY(ba.y + ba.titleH + 44 + (ui.bpListScrollY || 0));
+      this._applyListScroll();
     };
     ui.input.on('wheel', this._wheelHandler);
   }
@@ -199,6 +224,53 @@ export class InventoryPanel {
     }
   }
 
+  /** 应用滚动位置：更新列表 Y + 滚动条 */
+  _applyListScroll() {
+    const ui = this.ui;
+    const ba = ui._backpackArea;
+    const listY = ba.y + ba.titleH + 44;
+    ui.bpListContent.setY(listY + (ui.bpListScrollY || 0));
+
+    // 滚动条
+    const needsScrollbar = ui.inventory.length > 8;
+    ui.bpScrollbarTrack.setVisible(needsScrollbar);
+    ui.bpScrollbarThumb.setVisible(needsScrollbar);
+    if (!needsScrollbar) return;
+
+    const sb = ui._sbLayout;
+    const maxScroll = Math.max(1, ui.bpListContentHeight - (ba.h - ba.titleH - 80));
+    const ratio = Math.min(1, (ba.h - ba.titleH - 80) / ui.bpListContentHeight);
+    const thumbH = Math.max(20, sb.trackH * ratio);
+    const scrollRatio = Math.min(1, Math.abs(ui.bpListScrollY || 0) / maxScroll);
+    const thumbY = sb.trackTop + scrollRatio * (sb.trackH - thumbH);
+
+    ui.bpScrollbarThumb.clear();
+    ui.bpScrollbarThumb.fillStyle(0x887766, 0.7);
+    ui.bpScrollbarThumb.fillRoundedRect(sb.trackX, thumbY, sb.trackW, thumbH, 3);
+  }
+
+  /** 滚动到指定索引，确保选中项可见 */
+  scrollToIndex(idx) {
+    const ui = this.ui;
+    const ba = ui._backpackArea;
+    const visibleH = ba.h - ba.titleH - 80;
+    const itemH = 52;
+    if (ui.bpListContentHeight <= visibleH) return;
+
+    const itemTop = idx * itemH;
+    const itemBottom = itemTop + itemH;
+    const currentOffset = Math.abs(ui.bpListScrollY || 0);
+
+    if (itemTop < currentOffset) {
+      ui.bpListScrollY = -itemTop;
+    } else if (itemBottom > currentOffset + visibleH) {
+      ui.bpListScrollY = -(itemBottom - visibleH);
+    } else {
+      return;
+    }
+    this._applyListScroll();
+  }
+
   /** 刷新物品列表 */
   refreshContent() {
     const ui = this.ui;
@@ -216,7 +288,7 @@ export class InventoryPanel {
       }).setOrigin(0.5, 0);
       ui.bpListContent.add(empty);
       ui.bpListContentHeight = 70;
-      ui.bpListContent.setY(listY);
+      this._applyListScroll();
       this.updateDetail(null);
       return;
     }
@@ -251,7 +323,7 @@ export class InventoryPanel {
     });
 
     ui.bpListContentHeight = y;
-    ui.bpListContent.setY(listY);
+    this._applyListScroll();
     this.highlightItem();
   }
 

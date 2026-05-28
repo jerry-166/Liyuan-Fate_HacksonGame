@@ -147,24 +147,11 @@ async def discover_item(session_id: str, req: DiscoverItemRequest):
     from agents.item_generator import ItemGenerator
     runtime_item = ItemGenerator.create_runtime_item(item_def)
     runtime_item.is_discovered = True
+    runtime_item.discovery_context = f"你发现了「{runtime_item.name}」。"
 
-    # 尝试生成发现旁白
-    try:
-        gen = ItemGenerator()
-        narration = await gen.generate_discovery_narration(session, runtime_item)
-        runtime_item.discovery_context = narration
-    except Exception as e:
-        logger.warning(f"[Item] 旁白生成失败: {e}")
-        runtime_item.discovery_context = f"你发现了「{runtime_item.name}」。"
-
-    # 如果物品可持有，加入背包
-    if runtime_item.holdable:
-        session.add_to_inventory(runtime_item)
-        logger.info(f"[Item] Discovered & added to inventory: {req.item_id}")
-    else:
-        # 不可拾取的物品只标记已发现，不加入背包
-        session.add_to_inventory(runtime_item)
-        logger.info(f"[Item] Discovered (non-holdable): {req.item_id}")
+    # 加入背包
+    session.add_to_inventory(runtime_item)
+    logger.info(f"[Item] Discovered: {req.item_id}")
 
     # 持久化
     try:
@@ -172,9 +159,24 @@ async def discover_item(session_id: str, req: DiscoverItemRequest):
     except Exception as e:
         logger.error(f"[Item] 持久化失败: {e}")
 
-    return {
+    # 立即返回，不等旁白生成
+    response = {
         "item_id": req.item_id,
         "already_discovered": False,
         "item": runtime_item.to_dict(),
         "discovery_narration": runtime_item.discovery_context,
     }
+
+    # 旁白生成放后台，不阻塞响应
+    import asyncio
+    async def _gen_narration_bg():
+        try:
+            gen = ItemGenerator()
+            narration = await gen.generate_discovery_narration(session, runtime_item)
+            runtime_item.discovery_context = narration
+            manager._db.save_narrative_item(session_id, runtime_item.to_dict())
+        except Exception as e:
+            logger.warning(f"[Item] 旁白后台生成失败: {e}")
+    asyncio.create_task(_gen_narration_bg())
+
+    return response
