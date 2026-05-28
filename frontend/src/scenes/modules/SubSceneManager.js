@@ -569,12 +569,17 @@ export class SubSceneManager {
     scene._mapBounds = { w: actualW, h: actualH };
   }
 
-  /** 恢复主地图边界 */
+  /** 恢复主地图边界 — 以地图图片实际渲染尺寸为准，与 create() 保持一致 */
   _restoreWorldBounds() {
     const scene = this.scene;
-    const actualW = MAP_COLS * TILE * MAP_SCALE;
-    const actualH = MAP_ROWS * TILE * MAP_SCALE;
-    scene._mapBounds = { w: actualW, h: actualH };
+    if (scene.mapImage && scene.mapImage.displayWidth > 0) {
+      scene._mapBounds = { w: scene.mapImage.displayWidth, h: scene.mapImage.displayHeight };
+    } else {
+      // 后备：按逻辑网格计算
+      const actualW = MAP_COLS * TILE * MAP_SCALE;
+      const actualH = MAP_ROWS * TILE * MAP_SCALE;
+      scene._mapBounds = { w: actualW, h: actualH };
+    }
   }
 
   // ==================== 主地图实体恢复 ====================

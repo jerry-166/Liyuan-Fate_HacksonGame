@@ -102,19 +102,23 @@ export class UIScene extends Phaser.Scene {
     if (canvas) {
       canvas.setAttribute('tabindex', '0');
       canvas.style.outline = 'none';
-      canvas.addEventListener('click', () => canvas.focus(), { passive: true });
+      // 更激进的焦点策略：任意 DOM 点击/按下都聚焦 canvas
+      const focusCanvas = () => { if (document.activeElement !== canvas) canvas.focus(); };
+      document.addEventListener('mousedown', focusCanvas, { passive: true, capture: true });
+      document.addEventListener('pointerdown', focusCanvas, { passive: true, capture: true });
+      canvas.addEventListener('contextmenu', focusCanvas);
+      setTimeout(() => canvas.focus(), 100);
       setTimeout(() => canvas.focus(), 500);
     }
 
-    // 原生 DOM 键盘监听（ESC 备用方案）
+    // 原生 DOM 键盘监听（canvas 无焦点时也能响应 ESC）
     this._domKeyHandler = (e) => {
       if (e.key === 'Escape' || e.key === 'Esc') {
         e.preventDefault();
-        e.stopPropagation();
         this._handleEscPress();
       }
     };
-    document.addEventListener('keydown', this._domKeyHandler);
+    document.addEventListener('keydown', this._domKeyHandler, true);
 
     // 预创建键盘按键
     this.keyF = this.input.keyboard.addKey('F');
@@ -703,6 +707,11 @@ export class UIScene extends Phaser.Scene {
   // =========================== ESC 键统一处理 ============================
 
   _handleEscPress() {
+    // 防抖：DOM 监听器（capture 阶段）和 update() 中 Phaser JustDown 可能触发两次
+    const now = Date.now();
+    if (now - (this._lastEscPress || 0) < 150) return;
+    this._lastEscPress = now;
+
     if (this.pauseMenuVisible) { this.togglePauseMenu(); return; }
     if (this.dialogActive) { this.closeDialog(); return; }
     if (this.backpackPanelVisible) {

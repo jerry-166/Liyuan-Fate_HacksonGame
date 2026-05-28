@@ -35,7 +35,11 @@ export class InventoryPanel {
     overlay.fillStyle(0x000000, 0.4);
     overlay.fillRect(0, 0, width, height);
     overlay.setInteractive(new Phaser.Geom.Rectangle(0, 0, width, height), Phaser.Geom.Rectangle.Contains);
-    overlay.on('pointerdown', () => {
+    overlay.on('pointerdown', (pointer) => {
+      const ba = ui._backpackArea;
+      // 点击面板内部（含左右分栏）时不关闭，仅点击外部遮罩区域才关闭
+      if (pointer.x >= ba.x && pointer.x <= ba.x + ba.w &&
+          pointer.y >= ba.y && pointer.y <= ba.y + ba.h) return;
       if (ui.showItemMode) ui.cancelShowItemMode();
       else ui.toggleBackpackPanel();
     });
@@ -232,7 +236,8 @@ export class InventoryPanel {
       row.add(ui.add.text(16, itemH / 2, emoji, { fontSize: '24px' }).setOrigin(0.5));
       row.add(ui.add.text(46, itemH / 2, item.name || item.narrative_name || '未知物品', {
         fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '19px', color: nameColor,
-      }).setOrigin(0.5));
+        wordWrap: { width: ba.leftW - 80, useAdvancedWrap: true },
+      }).setOrigin(0, 0.5));
 
       row.setSize(ba.leftW - 24, itemH - 4);
       row.setInteractive();
