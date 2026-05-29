@@ -227,6 +227,13 @@ export async function getChapter(sessionId) {
   return res.json();
 }
 
+/** 获取剧本状态（章节大纲+任务） */
+export async function getStoryStatus(sessionId) {
+  const res = await fetch(`${BASE}/game/${sessionId}/story`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
 /** 获取当前任务 */
 export async function getTask(sessionId) {
   if (USE_MOCK) {

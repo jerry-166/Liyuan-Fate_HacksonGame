@@ -221,3 +221,46 @@ async def get_task_detail(session_id: str):
         return {"task": None}
 
     return {"task": session.current_task.to_dict()}
+
+
+@router.get("/game/{session_id}/story")
+async def get_story_status(session_id: str):
+    """获取剧本状态：章节大纲 + 已完成章节 + 当前任务。"""
+    manager = get_session_manager()
+    session = manager.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail={
+            "error": True, "code": "SESSION_NOT_FOUND",
+            "message": f"游戏会话不存在: {session_id}"
+        })
+
+    from config import CHAPTER_TO_STAGE
+
+    # 构建章节列表（带大纲信息）
+    chapters = []
+    for ch_def in session.chapter_defs:
+        ch_id = ch_def.get("id", "")
+        outline = None
+        for o in session.chapter_outlines:
+            if o.get("chapter_id") == ch_id:
+                outline = o
+                break
+        chapters.append({
+            "chapter_id": ch_id,
+            "name": ch_def.get("name", ""),
+            "description": ch_def.get("description", ""),
+            "sort_order": ch_def.get("sort_order", 0),
+            "completed": ch_id in (session.completed_chapters or []),
+            "current": ch_id == session.current_chapter_id,
+            "outline": outline,
+        })
+
+    # 当前任务
+    current_task = session.current_task.to_dict() if session.current_task else None
+
+    return {
+        "chapters": chapters,
+        "current_chapter_id": session.current_chapter_id,
+        "current_task": current_task,
+        "completed_chapters": session.completed_chapters or [],
+    }

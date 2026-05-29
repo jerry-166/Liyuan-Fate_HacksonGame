@@ -64,6 +64,7 @@ async def start_game(req: StartGameRequest):
         "chapter_id": first_ch.get("id") if first_ch else None,
         "type": first_ch.get("type") if first_ch else None,
         "name": first_ch.get("name") if first_ch else None,
+        "description": first_ch.get("description") if first_ch else None,
     }
     return response
 

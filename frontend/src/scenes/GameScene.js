@@ -373,6 +373,21 @@ export class GameScene extends Phaser.Scene {
         }
       }
 
+      // 序章过渡动画（新游戏时展示）
+      this.time.delayedCall(1000, () => {
+        const ui = this.scene.get('UIScene');
+        if (ui && ui.stageTransition) {
+          const firstCh = gameState.first_chapter || {};
+          const chDesc = firstCh.description || '';
+          ui.stageTransition.play({
+            id: CHAPTER_MAP[firstCh.chapter_id] || 1,
+            chapterId: firstCh.chapter_id || 'ch_prologue',
+            name: firstCh.name || '归乡',
+            description: chDesc,
+          });
+        }
+      });
+
       console.log('[GameScene] 游戏已初始化, session:', gameState.session_id);
     } catch (e) {
       _hideLoadingHint(this._loadingHint);

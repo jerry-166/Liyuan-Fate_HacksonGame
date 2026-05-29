@@ -25,6 +25,7 @@ import { DialogueManager } from './modules/DialogueManager.js';
 import { InventoryPanel } from './modules/InventoryPanel.js';
 import { HistoryPanel } from './modules/HistoryPanel.js';
 import { TaskPanel } from './modules/TaskPanel.js';
+import { StoryPanel } from './modules/StoryPanel.js';
 import { getTownNPCDialogue } from './modules/TownNPCDialogue.js';
 import { SaveManager } from './modules/SaveManager.js';
 import { EndingScreen } from './modules/EndingScreen.js';
@@ -74,6 +75,7 @@ export class UIScene extends Phaser.Scene {
     this.inventoryPanel = new InventoryPanel(this);
     this.historyPanel = new HistoryPanel(this);
     this.taskPanel = new TaskPanel(this);
+    this.storyPanel = new StoryPanel(this);
     this.saveManager = new SaveManager(this);
     this.endingScreen = new EndingScreen(this);
     this.stageTransition = new StageTransition(this);
@@ -84,6 +86,7 @@ export class UIScene extends Phaser.Scene {
     this.createHUD();
     this.historyPanel.createPanel();
     this.taskPanel.createPanel();
+    this.storyPanel.createPanel();
     this.inventoryPanel.createPanel();
     this.stageTransition.createOverlay();
     this.endingScreen.createScreen();
@@ -205,6 +208,17 @@ export class UIScene extends Phaser.Scene {
     this.skipBtn.on('pointerout', () => this.skipBtn.setColor('#886644'));
     this.skipBtn.on('pointerdown', () => this._handleSkipChapter());
     this.hudContainer.add(this.skipBtn);
+
+    // 剧本按钮
+    this.storyBtn = this.add.text(width - 16, 170, '📜 剧本', {
+      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+      fontSize: '14px', color: '#886644',
+      backgroundColor: '#1a1a2ecc', padding: { x: 8, y: 4 },
+    }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
+    this.storyBtn.on('pointerover', () => this.storyBtn.setColor('#cc8844'));
+    this.storyBtn.on('pointerout', () => this.storyBtn.setColor('#886644'));
+    this.storyBtn.on('pointerdown', () => this.storyPanel.toggle());
+    this.hudContainer.add(this.storyBtn);
 
     this.hudContainer.add(this.stageBadge);
   }
@@ -696,6 +710,7 @@ export class UIScene extends Phaser.Scene {
       { name: 'inventoryPanel', inst: this.inventoryPanel },
       { name: 'historyPanel',   inst: this.historyPanel },
       { name: 'taskPanel',      inst: this.taskPanel },
+      { name: 'storyPanel',     inst: this.storyPanel },
       { name: 'saveManager',    inst: this.saveManager },
       { name: 'stageTransition',inst: this.stageTransition },
       { name: 'endingScreen',   inst: this.endingScreen },
@@ -824,6 +839,8 @@ export class UIScene extends Phaser.Scene {
       else this.toggleBackpackPanel();
       return;
     }
+    if (this._storyPanelUI?.visible) { this.storyPanel.hide(); return; }
+    if (this._taskPanelUI?.visible) { this.taskPanel.hide(); return; }
     if (this.historyPanelVisible) { this.historyPanel.toggle(); return; }
     this.togglePauseMenu();
   }
