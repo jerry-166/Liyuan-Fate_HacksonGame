@@ -796,9 +796,22 @@ export class UIScene extends Phaser.Scene {
     try { localStorage.setItem(`__dialogue_history_${this.sessionId}`, JSON.stringify(this.dialogueHistory)); } catch (e) { /* */ }
   }
 
+  // =========================== 编辑模式检测 ============================
+
+  /** 检测 GameScene 是否正在编辑模式中 */
+  _isGameEditing() {
+    try {
+      const gs = this.scene.get('GameScene');
+      return !!(gs && gs._editor && gs._editor.editMode);
+    } catch (e) { return false; }
+  }
+
   // =========================== ESC 键统一处理 ============================
 
   _handleEscPress() {
+    // 编辑模式下不处理 ESC，交给 GameScene 的编辑器
+    if (this._isGameEditing()) return;
+
     // 防抖：DOM 监听器（capture 阶段）和 update() 中 Phaser JustDown 可能触发两次
     const now = Date.now();
     if (now - (this._lastEscPress || 0) < 150) return;
@@ -818,14 +831,16 @@ export class UIScene extends Phaser.Scene {
   // =========================== 更新循环 ============================
 
   update() {
-    // ESC 键
+    const editing = this._isGameEditing();
+
+    // ESC 键 — 编辑模式下交给 GameScene 处理
     if (Phaser.Input.Keyboard.JustDown(this.keyESC)) {
-      this._handleEscPress();
+      if (!editing) this._handleEscPress();
       return;
     }
 
-    // 背包面板 B 键
-    if (Phaser.Input.Keyboard.JustDown(this.keyB)) {
+    // 背包面板 B 键 — 编辑模式下给出生点设置让路
+    if (Phaser.Input.Keyboard.JustDown(this.keyB) && !editing) {
       if (this.backpackPanelVisible) {
         if (this.showItemMode) this.cancelShowItemMode();
         else this.toggleBackpackPanel();
@@ -837,8 +852,8 @@ export class UIScene extends Phaser.Scene {
       }
     }
 
-    // 背包内 W/S/Enter
-    if (this.backpackPanelVisible) {
+    // 背包内 W/S/Enter — 编辑模式下禁用
+    if (this.backpackPanelVisible && !editing) {
       if (Phaser.Input.Keyboard.JustDown(this.keyW) && this.inventory.length > 0) {
         this.backpackCursorIndex = (this.backpackCursorIndex - 1 + this.inventory.length) % this.inventory.length;
         this.inventoryPanel.highlightItem();
@@ -858,8 +873,8 @@ export class UIScene extends Phaser.Scene {
       return;
     }
 
-    // 历史面板
-    if (!this.dialogActive && Phaser.Input.Keyboard.JustDown(this.keyH)) {
+    // 历史面板 — 编辑模式下禁用
+    if (!editing && !this.dialogActive && Phaser.Input.Keyboard.JustDown(this.keyH)) {
       this.historyPanel.toggle();
     }
     if (this.historyPanelVisible && Phaser.Input.Keyboard.JustDown(this.keyF)) {

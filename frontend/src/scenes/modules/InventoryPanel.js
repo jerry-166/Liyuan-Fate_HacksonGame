@@ -353,6 +353,9 @@ export class InventoryPanel {
     ui.bpDetailName.setText(item.name || item.narrative_name || '未知物品');
     ui.bpDetailDesc.setText(item.base_description || item.description || item.narrative_desc || '暂无描述');
 
+    // ★ 标签位置跟随描述文字实际高度，避免长描述覆盖标签
+    ui.bpDetailTags.setY(ui.bpDetailDesc.y + ui.bpDetailDesc.height + 12);
+
     let tags = '';
     if (item.is_key) tags += '⭐ 关键道具';
     if (item.related_npcs && item.related_npcs.length > 0) {

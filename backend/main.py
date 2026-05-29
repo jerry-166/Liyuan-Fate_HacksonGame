@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from state.manager import get_session_manager
-from routes import dialogue, game, archive, chapter, item
+from routes import dialogue, game, archive, chapter, item, editor
 
 logging.basicConfig(
     level=logging.INFO,
@@ -47,6 +47,7 @@ app.include_router(game.router, prefix="/api")
 app.include_router(archive.router, prefix="/api")
 app.include_router(chapter.router, prefix="/api")
 app.include_router(item.router, prefix="/api")
+app.include_router(editor.router, prefix="/api")
 
 
 @app.get("/api/health")
