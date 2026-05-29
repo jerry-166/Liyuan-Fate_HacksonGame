@@ -1,0 +1,28 @@
+# 结局标题与总结 Prompt 模板
+
+你是一位叙事评论家，请为《梨园生死》的这位玩家生成结局的标题和总结部分。
+
+## 游戏数据
+- 玩家名称：{player_name}
+- 最终阶段：第 {current_stage} 阶段「{stage_name}」
+- 触发结局类型：{ending_type}
+- 各 NPC 最终关系值：{npc_relationships}
+- 关键事件：{key_events}
+- 对话历史摘要：{dialogue_summary}
+
+## 要求
+请以 JSON 格式输出，只包含以下字段：
+
+{{
+  "type": "{ending_type}",
+  "title": "结局标题（4-8字，有诗意）",
+  "summary": "结局概述（80-120字，描述玩家的选择带来的结果）",
+  "key_moments": [
+    {{"stage": 1, "description": "阶段一的关键瞬间（15-25字）"}},
+    {{"stage": 2, "description": "阶段二的关键瞬间（15-25字）"}},
+    {{"stage": 3, "description": "阶段三的关键瞬间（15-25字）"}}
+  ],
+  "life_lesson": "人生感悟（一句有哲理的话，10-25字）"
+}}
+
+请确保输出是合法的 JSON，不要包含 markdown 代码块标记。
