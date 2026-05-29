@@ -70,23 +70,26 @@ export function showToast(scene, message, duration = 2000) {
  */
 export function showLoadingHint(scene, text) {
   const { width, height } = scene.cameras.main;
+  const bg = scene.add.graphics().setScrollFactor(0).setDepth(499);
+  bg.fillStyle(0x0a0a12, 0.8);
+  bg.fillRect(0, 0, width, height);
   const hint = scene.add.text(width / 2, height / 2, text, {
     fontFamily: '"KaiTi","SimSun",serif',
     fontSize: '26px', color: '#d4b896',
     backgroundColor: '#0a0a12cc',
     padding: { x: 24, y: 16 },
-    borderRadius: 8,
-  }).setOrigin(0.5).setDepth(500);
-  return hint;
+  }).setOrigin(0.5).setScrollFactor(0).setDepth(500);
+  return { bg, hint };
 }
 
 /**
  * 隐藏加载提示
- * @param {Phaser.GameObjects.Text|null} hint
+ * @param {Object|null} hint - { bg, hint }
  */
 export function hideLoadingHint(hint) {
   if (hint) {
-    hint.setVisible(false);
+    if (hint.bg) hint.bg.setVisible(false);
+    if (hint.hint) hint.hint.setVisible(false);
   }
 }
 

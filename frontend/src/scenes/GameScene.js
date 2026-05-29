@@ -348,24 +348,15 @@ export class GameScene extends Phaser.Scene {
         this.time.delayedCall(500, () => this.applyStageTone(gameState.stage_params));
       }
 
-      // v2: 自动开始第一章
+      // v2: 自动开始第一章（静默拉取，不触发 stage:change，等序章过渡后统一处理）
+      let pendingChapterResult = null;
       if (!chapterId) {
-        _hideLoadingHint(this._loadingHint);
-        this._loadingHint = _showLoadingHint(this, '正在载入第一章……');
+        this._loadingHint = _showLoadingHint(this, '正在载入序章……');
         try {
           const chResult = await startChapter(gameState.session_id);
           _hideLoadingHint(this._loadingHint);
           if (chResult && chResult.chapter_id) {
-            const stageId = CHAPTER_MAP[chResult.chapter_id] || 1;
-            this.time.delayedCall(800, () => {
-              this.events.emit('stage:change', {
-                id: stageId, chapterId: chResult.chapter_id,
-                name: chResult.chapter_name || '归乡',
-                description: chResult.task ? chResult.task.description : '',
-                color_tone: chResult.color_tone || '#8899aa',
-                bgm_mood: chResult.bgm_mood || '',
-              });
-            });
+            pendingChapterResult = chResult;
           }
         } catch (chErr) {
           _hideLoadingHint(this._loadingHint);
@@ -384,6 +375,19 @@ export class GameScene extends Phaser.Scene {
             chapterId: firstCh.chapter_id || 'ch_prologue',
             name: firstCh.name || '归乡',
             description: chDesc,
+          }, () => {
+            // 序章过渡完成后：更新 HUD 章节显示 + 加载任务面板
+            if (pendingChapterResult) {
+              const stageId = CHAPTER_MAP[pendingChapterResult.chapter_id] || 1;
+              this.events.emit('stage:change', {
+                id: stageId, chapterId: pendingChapterResult.chapter_id,
+                name: pendingChapterResult.chapter_name || '归乡',
+                description: pendingChapterResult.task ? pendingChapterResult.task.description : '',
+                color_tone: pendingChapterResult.color_tone || '#8899aa',
+                bgm_mood: pendingChapterResult.bgm_mood || '',
+              });
+            }
+            if (ui.taskPanel) ui.taskPanel.refreshContent();
           });
         }
       });
@@ -449,6 +453,12 @@ export class GameScene extends Phaser.Scene {
         inventory: gameState.inventory || [],
         dialogueHistory: _convertDialogueHistory(gameState.dialogue_history || [], _buildNpcNameMap(gameState.npcs)),
         npcNames: _buildNpcNameMap(gameState.npcs),
+      });
+
+      // 读档后刷新任务面板
+      this.time.delayedCall(200, () => {
+        const ui = this.scene.get('UIScene');
+        if (ui && ui.taskPanel) ui.taskPanel.refreshContent();
       });
 
       // ★ 子场景存档恢复：如果存档时玩家在子场景中，跳过主地图加载
@@ -542,6 +552,12 @@ export class GameScene extends Phaser.Scene {
       inventory: gameState.inventory || [],
       dialogueHistory,
       npcNames,
+    });
+
+    // 子场景读档后刷新任务面板
+    this.time.delayedCall(200, () => {
+      const ui = this.scene.get('UIScene');
+      if (ui && ui.taskPanel) ui.taskPanel.refreshContent();
     });
 
     // 3. 应用阶段色调

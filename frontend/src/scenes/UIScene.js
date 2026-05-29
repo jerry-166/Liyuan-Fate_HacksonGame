@@ -151,19 +151,22 @@ export class UIScene extends Phaser.Scene {
     this.add.text(16, 16, '《梨园生死》', {
       fontFamily: '"KaiTi","SimSun",serif', fontSize: '22px', color: '#d4b896',
     }).setDepth(200);
+    this.add.text(16, 42, '[T] 任务', {
+      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '12px', color: '#665544',
+    }).setDepth(200);
 
     // 右上角阶段指示器
     this.stageBadge = this.add.text(width - 16, 16, '阶段一 · 不屑', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '18px', color: '#c4a882',
-      backgroundColor: '#1a1a2ecc', padding: { x: 14, y: 7 },
+      fontSize: '16px', color: '#c4a882',
+      backgroundColor: '#1a1a2ecc', padding: { x: 10, y: 5 },
     }).setOrigin(1, 0);
 
     // 历史对话按钮
     this.historyBtn = this.add.text(width - 16, 48, '📜 历史 [H]', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '16px', color: '#887766',
-      backgroundColor: '#1a1a2ecc', padding: { x: 10, y: 5 },
+      fontSize: '14px', color: '#887766',
+      backgroundColor: '#1a1a2ecc', padding: { x: 8, y: 4 },
     }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
     this.historyBtn.on('pointerdown', () => this.historyPanel.toggle());
     this.hudContainer.add(this.historyBtn);
@@ -171,8 +174,8 @@ export class UIScene extends Phaser.Scene {
     // 背包按钮
     this.backpackBtn = this.add.text(width - 16, 80, '🎒 行囊 [B]', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '16px', color: '#c4a882',
-      backgroundColor: '#1a1a2ecc', padding: { x: 10, y: 5 },
+      fontSize: '14px', color: '#c4a882',
+      backgroundColor: '#1a1a2ecc', padding: { x: 8, y: 4 },
     }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
     this.backpackBtn.on('pointerover', () => this.backpackBtn.setColor('#e8d4a0'));
     this.backpackBtn.on('pointerout', () => this.backpackBtn.setColor('#c4a882'));
@@ -183,23 +186,8 @@ export class UIScene extends Phaser.Scene {
     });
     this.hudContainer.add(this.backpackBtn);
 
-    // 任务按钮
-    this.taskBtn = this.add.text(width - 16, 112, '📋 任务 [T]', {
-      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '16px', color: '#c4a882',
-      backgroundColor: '#1a1a2ecc', padding: { x: 10, y: 5 },
-    }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
-    this.taskBtn.on('pointerover', () => this.taskBtn.setColor('#e8d4a0'));
-    this.taskBtn.on('pointerout', () => this.taskBtn.setColor('#c4a882'));
-    this.taskBtn.on('pointerdown', () => {
-      if (!this.dialogActive && !this.pauseMenuVisible) {
-        this.taskPanel.toggle();
-      }
-    });
-    this.hudContainer.add(this.taskBtn);
-
     // 跳章按钮（调试用）
-    this.skipBtn = this.add.text(width - 16, 144, '⏭ 跳章', {
+    this.skipBtn = this.add.text(width - 16, 112, '⏭ 跳章', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
       fontSize: '14px', color: '#886644',
       backgroundColor: '#1a1a2ecc', padding: { x: 8, y: 4 },
@@ -210,7 +198,7 @@ export class UIScene extends Phaser.Scene {
     this.hudContainer.add(this.skipBtn);
 
     // 剧本按钮
-    this.storyBtn = this.add.text(width - 16, 170, '📜 剧本', {
+    this.storyBtn = this.add.text(width - 16, 138, '📜 剧本', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
       fontSize: '14px', color: '#886644',
       backgroundColor: '#1a1a2ecc', padding: { x: 8, y: 4 },
@@ -377,10 +365,8 @@ export class UIScene extends Phaser.Scene {
 
     this._persistDialogueHistory();
 
-    // 对话结束后刷新任务面板（如果有新进度）
-    if (this._taskPanelUI?.visible) {
-      this.taskPanel.refreshContent();
-    }
+    // 对话结束后显示并刷新任务面板
+    this.taskPanel.show();
 
     // 章节完成：玩家关闭对话后再跳转
     if (this.pendingChapterChange && this.pendingChapterChange.chapterCompleted) {
@@ -489,57 +475,64 @@ export class UIScene extends Phaser.Scene {
         gs.events.emit('stage:change', newStage);
         gs.events.emit('chapter:new', chapterResult);
 
-        await this.stageTransition.play(newStage);
-
-        if (this.sessionId) {
-          // ★ 收集当前所有 NPC 和主角的实时位置
-          let positions = null;
-          if (gs && gs.collectPositions) {
-            positions = gs.collectPositions();
-            console.log('[UIScene] chapterComplete collectPositions:', positions);
-            if (positions.storyNpcs.length > 0) {
-              batchReportNPCPositions(this.sessionId, positions.storyNpcs).catch(e =>
-                console.warn('[UIScene] chapterComplete batchReport failed:', e));
-            }
-          } else {
-            console.warn('[UIScene] chapterComplete: collectPositions not available');
-          }
-
-          const state = await getGameState(this.sessionId);
-
-          // ★ 直接更新 state 中的位置数据 + 子场景标识
-          if (positions) {
-            if (positions.subSceneId) {
-              // 子场景中：不污染主地图位置字段
-              state._sub_scene_id = positions.subSceneId;
-              state._sub_scene_player_position = positions.player;
-              state._sub_scene_story_npc_positions = positions.storyNpcs;
-              state._sub_scene_town_npc_positions = positions.townNpcs;
-            } else {
-              state._sub_scene_id = null;
-              if (state.npcs && Array.isArray(state.npcs)) {
-                for (const pos of positions.storyNpcs) {
-                  const npc = state.npcs.find(n => n.id === pos.npc_id);
-                  if (npc) npc.position = pos.position;
-                }
-              }
-              state._town_npc_positions = positions.townNpcs;
-              state._player_position = positions.player;
-            }
-          }
-
-          gs.events.emit('state:refresh', state);
-          saveGameState(this.sessionId, state);
-        }
-
-        this.dialogActive = false;
-        this.pendingChapterChange = null;
+        await this.stageTransition.play(newStage, () => {
+          this._afterChapterTransition(gs);
+        });
       }
     } catch (e) {
       console.error('[UIScene] 章节推进失败:', e);
       this.dialogActive = false;
       this.pendingChapterChange = null;
     }
+  }
+
+  async _afterChapterTransition(gs) {
+    if (this.sessionId) {
+      try {
+        // ★ 收集当前所有 NPC 和主角的实时位置
+        let positions = null;
+        if (gs && gs.collectPositions) {
+          positions = gs.collectPositions();
+          console.log('[UIScene] chapterComplete collectPositions:', positions);
+          if (positions.storyNpcs.length > 0) {
+            batchReportNPCPositions(this.sessionId, positions.storyNpcs).catch(e =>
+              console.warn('[UIScene] chapterComplete batchReport failed:', e));
+          }
+        } else {
+          console.warn('[UIScene] chapterComplete: collectPositions not available');
+        }
+
+        const state = await getGameState(this.sessionId);
+
+        if (positions) {
+          if (positions.subSceneId) {
+            state._sub_scene_id = positions.subSceneId;
+            state._sub_scene_player_position = positions.player;
+            state._sub_scene_story_npc_positions = positions.storyNpcs;
+            state._sub_scene_town_npc_positions = positions.townNpcs;
+          } else {
+            state._sub_scene_id = null;
+            if (state.npcs && Array.isArray(state.npcs)) {
+              for (const pos of positions.storyNpcs) {
+                const npc = state.npcs.find(n => n.id === pos.npc_id);
+                if (npc) npc.position = pos.position;
+              }
+            }
+            state._town_npc_positions = positions.townNpcs;
+            state._player_position = positions.player;
+          }
+        }
+
+        gs.events.emit('state:refresh', state);
+        saveGameState(this.sessionId, state);
+      } catch (e) {
+        console.error('[UIScene] _afterChapterTransition 失败:', e);
+      }
+    }
+
+    this.dialogActive = false;
+    this.pendingChapterChange = null;
+    if (this.taskPanel) this.taskPanel.refreshContent();
   }
 
   markChapterCompleted(chapterInfo) {
@@ -651,12 +644,13 @@ export class UIScene extends Phaser.Scene {
     }
 
     if (this.sessionId) this._restoreDialogueHistory(this.sessionId);
-    // 刷新任务面板
-    if (this._taskPanelUI?.visible) this.taskPanel.refreshContent();
+    this.taskPanel.refreshWithCachedData();
   }
 
   _onStageChange(newStage) {
     this.currentStage = newStage.id;
+    if (newStage.chapterId) this.currentChapterId = newStage.chapterId;
+    if (newStage.name) this.currentChapterName = newStage.name;
     this.updateStageBadge();
     if (this.sessionId) {
       getGameState(this.sessionId)
@@ -695,7 +689,8 @@ export class UIScene extends Phaser.Scene {
     if (this.stageBadge) this.stageBadge.setPosition(width - 16, 16);
     if (this.historyBtn) this.historyBtn.setPosition(width - 16, 48);
     if (this.backpackBtn) this.backpackBtn.setPosition(width - 16, 80);
-    if (this.taskBtn) this.taskBtn.setPosition(width - 16, 112);
+    if (this.skipBtn) this.skipBtn.setPosition(width - 16, 112);
+    if (this.storyBtn) this.storyBtn.setPosition(width - 16, 138);
 
     // 重定位自由输入框（DOM 元素，需单独处理）
     try {
@@ -840,7 +835,6 @@ export class UIScene extends Phaser.Scene {
       return;
     }
     if (this._storyPanelUI?.visible) { this.storyPanel.hide(); return; }
-    if (this._taskPanelUI?.visible) { this.taskPanel.hide(); return; }
     if (this.historyPanelVisible) { this.historyPanel.toggle(); return; }
     this.togglePauseMenu();
   }
@@ -899,12 +893,8 @@ export class UIScene extends Phaser.Scene {
     }
 
     // 任务面板
-    const taskPanelVisible = this._taskPanelUI?.visible;
     if (!this.dialogActive && !this.pauseMenuVisible && Phaser.Input.Keyboard.JustDown(this.keyT)) {
       this.taskPanel.toggle();
-    }
-    if (taskPanelVisible && Phaser.Input.Keyboard.JustDown(this.keyT)) {
-      this.taskPanel.hide();
     }
 
     if (!this.dialogActive || this.isStreaming) return;

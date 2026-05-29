@@ -149,21 +149,24 @@ export async function deleteSession(sessionId) {
 /** 开始/推进章节 */
 export async function startChapter(sessionId, chapterId = null) {
   if (USE_MOCK) {
+    const m = await import('./mock-data.js');
+    let idx = m.mockChapterIdx;
     if (chapterId) {
-      const m = await import('./mock-data.js');
-      m.mockChapterIdx = MOCK_CHAPTERS.findIndex(c => c.chapter_id === chapterId);
+      idx = MOCK_CHAPTERS.findIndex(c => c.chapter_id === chapterId);
+      m.mockChapterIdx = idx;
     }
     // 跳过 cinematic 类型
-    while (mockChapterIdx < MOCK_CHAPTERS.length) {
-      const ch = MOCK_CHAPTERS[mockChapterIdx];
+    while (idx < MOCK_CHAPTERS.length) {
+      const ch = MOCK_CHAPTERS[idx];
       if (ch.type !== 'cinematic') break;
       mockChapterCompleted.add(ch.chapter_id);
-      mockChapterIdx++;
+      idx++;
     }
-    if (mockChapterIdx >= MOCK_CHAPTERS.length) {
+    m.mockChapterIdx = idx;
+    if (idx >= MOCK_CHAPTERS.length) {
       return { chapter_id: null, game_ended: true, message: '所有章节已完成' };
     }
-    const ch = MOCK_CHAPTERS[mockChapterIdx];
+    const ch = MOCK_CHAPTERS[idx];
     const subTasks = [
       { id: 'st_001', title: `探索${ch.name}`, mode: 'explore',
         description: `进入场景，感受${ch.name}的氛围`, status: 'active', target_scene: null },
