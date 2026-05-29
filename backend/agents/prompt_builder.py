@@ -371,6 +371,78 @@ class PromptBuilder:
             {"role": "user", "content": prompt},
         ]
 
+    # ─── 结局 Header Prompt ─────────────────────────
+
+    def build_evaluate_header_messages(self, session: GameSession) -> list[dict]:
+        header_path = os.path.join(_PROMPTS_DIR, "evaluate_header.txt")
+        if os.path.exists(header_path):
+            with open(header_path, "r", encoding="utf-8") as f:
+                template = f.read()
+        else:
+            template = "请生成结局标题和总结 JSON。"
+
+        chapter = session.get_current_chapter()
+        stage_name = chapter.get("name", "未知") if chapter else str(session.current_stage)
+
+        npc_relationships = ", ".join(
+            f"{n.name}({n.id})={n.relationship}" for n in session.npcs.values()
+        )
+        dialogue_summary = ""
+        for npc in session.npcs.values():
+            if npc.dialogue_history:
+                for turn in npc.dialogue_history[-2:]:
+                    role = "玩家" if turn.role == "player" else npc.name
+                    dialogue_summary += f"{role}：{turn.content[:60]}\n"
+
+        prompt = template.format(
+            player_name=session.player_name,
+            current_stage=session.current_stage,
+            stage_name=stage_name,
+            ending_type=session.ending_type or "default_ending",
+            npc_relationships=npc_relationships,
+            key_events=", ".join(sorted(session.events_triggered)) if session.events_triggered else "无",
+            dialogue_summary=dialogue_summary or "（尚无对话）",
+        )
+        return [
+            {"role": "system", "content": "你是叙事评论家，生成结局标题和总结 JSON。"},
+            {"role": "user", "content": prompt},
+        ]
+
+    # ─── 单 NPC 结局 Prompt ─────────────────────────
+
+    def build_evaluate_npc_messages(self, session: GameSession, npc_id: str,
+                                     ending_type: str = "") -> list[dict]:
+        npc_path = os.path.join(_PROMPTS_DIR, "evaluate_npc.txt")
+        if os.path.exists(npc_path):
+            with open(npc_path, "r", encoding="utf-8") as f:
+                template = f.read()
+        else:
+            template = "请为 NPC 生成结局描述 JSON。"
+
+        npc = session.npcs.get(npc_id)
+        if not npc:
+            return []
+
+        dialogue_sample = ""
+        if npc.dialogue_history:
+            for turn in npc.dialogue_history[-2:]:
+                role = "玩家" if turn.role == "player" else npc.name
+                dialogue_sample += f"{role}：{turn.content[:60]}\n"
+
+        prompt = template.format(
+            npc_name=npc.name,
+            npc_role=npc.role,
+            npc_id=npc_id,
+            final_relationship=npc.relationship,
+            dialogue_sample=dialogue_sample or "（无对话记录）",
+            player_name=session.player_name,
+            ending_type=ending_type or session.ending_type or "default_ending",
+        )
+        return [
+            {"role": "system", "content": "你是一位叙事评论家，为 NPC 生成结局描述 JSON。"},
+            {"role": "user", "content": prompt},
+        ]
+
     # ─── 任务投票检查 Prompt ────────────────────────────
 
     def build_task_vote_messages(self, session: GameSession, npc_id: str,
