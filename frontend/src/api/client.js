@@ -411,6 +411,109 @@ export async function evaluateEnding(sessionId) {
   return res.json();
 }
 
+/**
+ * 流式结局评价 — SSE 渐进返回 header + 各 NPC 结局
+ * @param {string} sessionId
+ * @param {{onHeader, onNpcEnding, onDone, onError}} callbacks
+ */
+export async function evaluateEndingStream(sessionId, callbacks) {
+  const { onHeader, onNpcEnding, onDone, onError } = callbacks;
+  if (USE_MOCK) {
+    // Mock: 模拟渐进返回
+    const headerData = {
+      title: '梨园新火', summary: '你选择扛起戏班的大旗。虽然前路艰难，但你在陈师傅的眼中看到了一丝久违的光。',
+      key_moments: [
+        { stage: 1, description: '你第一次踏入破旧的戏台，小华对你冷嘲热讽' },
+        { stage: 2, description: '陈师傅终于开口，讲起了戏班三十年前的辉煌与衰落' },
+        { stage: 3, description: '在父亲旧居中翻出的孩童戏服，唤醒了尘封的记忆' },
+      ],
+      life_lesson: '传承不是守住灰烬，而是让火焰在另一片土地上继续燃烧。',
+    };
+    const npcs = [
+      { npc_id: 'npc_chen', name: '陈师傅', summary: '陈师傅在晚年终于找到了传人。他走的时候嘴角带着笑。' },
+      { npc_id: 'npc_xiaohua', name: '小华', summary: '小华从一开始的敌意，逐渐成了你最好的搭档。' },
+      { npc_id: 'npc_laozhou', name: '老周', summary: '老周在戏班重振后精神焕发，又活跃了几年。' },
+      { npc_id: 'npc_meiyi', name: '梅姨', summary: '梅姨的茶馆成了戏班常聚的地方，茶香依旧。' },
+      { npc_id: 'npc_laoli', name: '老李', summary: '老李依旧在渡口撑船，但他常来看戏。' },
+    ];
+    setTimeout(() => onHeader?.(headerData), 800);
+    npcs.forEach((n, i) => {
+      setTimeout(() => onNpcEnding?.(n), 1200 + i * 500);
+    });
+    setTimeout(() => onDone?.({ type: 'accept_leader' }), 1200 + npcs.length * 500);
+    return;
+  }
+
+  try {
+    const res = await fetch(`${BASE}/game/${sessionId}/evaluate/stream`);
+    if (!res.ok) {
+      const errText = await _extractApiError(res);
+      onError?.(errText);
+      return;
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let eventType = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('event: ')) {
+          eventType = trimmed.slice(7).trim();
+        } else if (trimmed.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(trimmed.slice(6));
+            switch (eventType) {
+              case 'header': onHeader?.(data); break;
+              case 'npc': onNpcEnding?.(data); break;
+              case 'done': onDone?.(data); break;
+              case 'error': onError?.(data.message || '未知错误'); break;
+            }
+          } catch (e) {
+            console.warn('[Ending SSE] parse failed:', trimmed, e);
+          }
+          eventType = '';
+        }
+      }
+    }
+  } catch (e) {
+    onError?.(e.message || '网络错误');
+  }
+}
+
+/** 获取已有结局数据（只读，用于回看） */
+export async function getEnding(sessionId) {
+  if (USE_MOCK) {
+    return {
+      type: 'accept_leader', title: '梨园新火',
+      summary: '你选择扛起戏班的大旗。虽然前路艰难，但你在陈师傅的眼中看到了一丝久违的光。',
+      key_moments: [
+        { stage: 1, description: '你第一次踏入破旧的戏台，小华对你冷嘲热讽' },
+        { stage: 2, description: '陈师傅终于开口，讲起了戏班三十年前的辉煌与衰落' },
+        { stage: 3, description: '在父亲旧居中翻出的孩童戏服，唤醒了尘封的记忆' },
+      ],
+      life_lesson: '传承不是守住灰烬，而是让火焰在另一片土地上继续燃烧。',
+      npc_endings: [
+        { npc_id: 'npc_chen', name: '陈师傅', summary: '陈师傅在晚年终于找到了传人。他走的时候嘴角带着笑。' },
+        { npc_id: 'npc_xiaohua', name: '小华', summary: '小华从一开始的敌意，逐渐成了你最好的搭档。' },
+        { npc_id: 'npc_laozhou', name: '老周', summary: '老周在戏班重振后精神焕发，又活跃了几年。' },
+        { npc_id: 'npc_meiyi', name: '梅姨', summary: '梅姨的茶馆成了戏班常聚的地方，茶香依旧。' },
+        { npc_id: 'npc_laoli', name: '老李', summary: '老李依旧在渡口撑船，但他常来看戏。' },
+      ],
+    };
+  }
+  const res = await fetch(`${BASE}/game/${sessionId}/ending`);
+  if (!res.ok) throw new Error(await _extractApiError(res));
+  return res.json();
+}
+
 // ==================== 物品 API ====================
 
 /** 获取物品列表（背包 + 场景物品） */

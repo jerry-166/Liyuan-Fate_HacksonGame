@@ -13,7 +13,7 @@
 
 import Phaser from 'phaser';
 import { getChapterLabel } from '../config.js';
-import { getSessions, deleteSession } from '../api/client.js';
+import { getSessions, deleteSession, getEnding } from '../api/client.js';
 
 // ========== UI 工具函数 ==========
 
@@ -86,7 +86,7 @@ function createSmallButton(scene, x, y, w, h, label, color, callback) {
 
   container.add(scene.add.text(w / 2, h / 2, label, {
     fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-    fontSize: '16px', color: color,
+    fontSize: '13px', color: color,
   }).setOrigin(0.5));
 
   const zone = scene.add.zone(w / 2, h / 2, w, h).setInteractive({ useHandCursor: true });
@@ -344,15 +344,22 @@ export class MenuScene extends Phaser.Scene {
         fontFamily: 'monospace', fontSize: '14px', color: '#665544',
       }));
 
-      // 继续按钮
-      this.archiveListContent.add(
-        createSmallButton(this, panelX + colW - 150, y + 10, 60, 32, '继续', '#889966',
-          () => this._loadArchive(s.session_id))
-      );
+      // 继续 / 查看结局按钮
+      if (s.game_ended) {
+        this.archiveListContent.add(
+          createSmallButton(this, panelX + colW - 130, y + 12, 52, 26, '结局', '#669988',
+            () => this._showEndingViewer(s.session_id))
+        );
+      } else {
+        this.archiveListContent.add(
+          createSmallButton(this, panelX + colW - 130, y + 12, 52, 26, '继续', '#889966',
+            () => this._loadArchive(s.session_id))
+        );
+      }
 
       // 删除按钮
       this.archiveListContent.add(
-        createSmallButton(this, panelX + colW - 90, y + 10, 60, 32, '删除', '#aa6655',
+        createSmallButton(this, panelX + colW - 68, y + 12, 52, 26, '删除', '#aa6655',
           () => this._confirmDelete(s.session_id, s.player_name))
       );
 
@@ -387,6 +394,179 @@ export class MenuScene extends Phaser.Scene {
     this.time.delayedCall(600, () => {
       this.scene.start('GameScene', { savedSessionId: sessionId });
     });
+  }
+
+  // ==================== 结局查看弹窗 ====================
+
+  _createEndingViewer() {
+    const { width, height } = this.cameras.main;
+    this.endingViewer = this.add.container(0, 0).setDepth(200).setVisible(false);
+
+    // 遮罩
+    const dimBg = this.add.graphics();
+    dimBg.fillStyle(0x000000, 1);
+    dimBg.fillRect(0, 0, width, height);
+    dimBg.setInteractive(new Phaser.Geom.Rectangle(0, 0, width, height), Phaser.Geom.Rectangle.Contains);
+    dimBg.on('pointerdown', () => this._hideEndingViewer());
+    this.endingViewer.add(dimBg);
+
+    // 内容框 — 全部按比例
+    const margin = Math.round(Math.min(width, height) * 0.04);
+    const bx = margin;
+    const by = margin;
+    const bw = width - margin * 2;
+    const bh = height - margin * 2;
+
+    this._evBox = { x: bx, y: by, w: bw, h: bh };
+
+    const boxBg = this.add.graphics();
+    boxBg.fillStyle(0x141420, 1);
+    boxBg.fillRoundedRect(bx, by, bw, bh, 8);
+    boxBg.lineStyle(1, 0xc4a882, 0.35);
+    boxBg.strokeRoundedRect(bx, by, bw, bh, 8);
+    this.endingViewer.add(boxBg);
+
+    // 底部提示
+    const hintFontSize = Math.max(12, Math.round(bh * 0.025));
+    const hintY = by + bh - hintFontSize - 8;
+    this.endingViewerHint = this.add.text(width / 2, hintY, '[ ESC 或点击空白处关闭 ]', {
+      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+      fontSize: `${hintFontSize}px`, color: '#665544',
+    }).setOrigin(0.5).setAlpha(0.7);
+    this.endingViewer.add(this.endingViewerHint);
+  }
+
+  async _showEndingViewer(sessionId) {
+    // 每次销毁重建，彻底避免缓存重叠
+    if (this.endingViewer) {
+      this.endingViewer.destroy(true);
+      this.endingViewer = null;
+    }
+    this._createEndingViewer();
+    this.endingViewer.setVisible(true);
+    this.archivePanel.setVisible(false);
+
+    // 加载提示
+    const { width, height } = this.cameras.main;
+    const loadingText = this.add.text(width / 2, height / 2, '加载结局……', {
+      fontFamily: '"KaiTi","SimSun",serif', fontSize: '24px', color: '#887766',
+    }).setOrigin(0.5);
+    this.endingViewer.add(loadingText);
+
+    try {
+      const data = await getEnding(sessionId);
+      loadingText.destroy();
+      this._renderEndingViewer(data);
+    } catch (err) {
+      console.error('[MenuScene] 获取结局失败:', err);
+      loadingText.setText('无法加载结局数据');
+    }
+
+    // ESC 关闭
+    this._endingEscHandler = (event) => {
+      if (event.key === 'Escape') this._hideEndingViewer();
+    };
+    this.input.keyboard.on('keydown', this._endingEscHandler);
+  }
+
+  _hideEndingViewer() {
+    if (this.endingViewer) this.endingViewer.setVisible(false);
+    if (this._endingEscHandler) {
+      this.input.keyboard.off('keydown', this._endingEscHandler);
+      this._endingEscHandler = null;
+    }
+    this.archivePanel.setVisible(true);
+  }
+
+  _renderEndingViewer(data) {
+    const { width, height } = this.cameras.main;
+    const cx = width / 2;
+    const { x: bx, y: by, w: bw, h: bh } = this._evBox;
+    const pad = Math.round(Math.min(bw, bh) * 0.06);
+    const wrapW = bw - pad * 2;
+
+    // 字号按窗口缩放
+    const titleFS = Math.max(18, Math.round(bh * 0.05));
+    const subFS = Math.max(11, Math.round(bh * 0.028));
+    const bodyFS = Math.max(11, Math.round(bh * 0.024));
+    const npcNameFS = Math.max(12, Math.round(bh * 0.026));
+    const npcBodyFS = Math.max(11, Math.round(bh * 0.022));
+    const lineGap = Math.max(4, Math.round(bh * 0.012));
+
+    const v = this.endingViewer;
+
+    // 标题
+    v.add(this.add.text(cx, by + pad + 8, data.title || '梨园余韵', {
+      fontFamily: '"KaiTi","SimSun",serif', fontSize: `${titleFS}px`, color: '#d4b896',
+      align: 'center', wordWrap: { width: wrapW },
+    }).setOrigin(0.5, 0));
+
+    // 副标题
+    const titleH = Math.round(titleFS * 1.4);
+    const typeLabel = data.type === 'accept_leader' ? '—— 梨园传承线 ——' : '—— 遗憾离别线 ——';
+    v.add(this.add.text(cx, by + pad + 8 + titleH + 6, typeLabel, {
+      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+      fontSize: `${subFS}px`, color: '#998866',
+    }).setOrigin(0.5, 0));
+
+    // 分隔线
+    const divY = by + pad + 8 + titleH + 6 + Math.round(subFS * 1.4) + lineGap;
+    const divGfx = this.add.graphics();
+    divGfx.lineStyle(1, 0xc4a882, 0.3);
+    divGfx.lineBetween(bx + pad, divY, bx + bw - pad, divY);
+    v.add(divGfx);
+
+    let y = divY + lineGap;
+
+    // 关键瞬间
+    if (data.key_moments && data.key_moments.length > 0) {
+      for (const m of data.key_moments) {
+        const t = this.add.text(cx, y, `「${m.description}」`, {
+          fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+          fontSize: `${bodyFS}px`, color: '#a89878',
+          lineSpacing: lineGap, align: 'center', wordWrap: { width: wrapW },
+        }).setOrigin(0.5, 0);
+        v.add(t);
+        y += t.height + lineGap;
+      }
+      y += lineGap;
+    }
+
+    // 人生感悟
+    if (data.life_lesson) {
+      const lessonText = this.add.text(cx, y, `"${data.life_lesson}"`, {
+        fontFamily: '"KaiTi","SimSun",serif',
+        fontSize: `${Math.max(13, Math.round(bh * 0.03))}px`, color: '#e8d8b8',
+        align: 'center', wordWrap: { width: wrapW }, lineSpacing: lineGap,
+      }).setOrigin(0.5, 0);
+      v.add(lessonText);
+      y += lessonText.height + lineGap * 2;
+    }
+
+    // NPC 结局
+    if (data.npc_endings && data.npc_endings.length > 0) {
+      const npcSep = this.add.graphics();
+      npcSep.lineStyle(1, 0xc4a882, 0.15);
+      npcSep.lineBetween(bx + pad + 20, y, bx + bw - pad - 20, y);
+      v.add(npcSep);
+      y += lineGap;
+
+      for (const ne of data.npc_endings) {
+        const name = ne.name || ne.npc_id || '???';
+        v.add(this.add.text(cx, y, `◆ ${name}`, {
+          fontFamily: '"KaiTi","SimSun",serif',
+          fontSize: `${npcNameFS}px`, color: '#c4a882',
+        }).setOrigin(0.5, 0));
+        y += npcNameFS + lineGap;
+        const npcText = this.add.text(cx, y, ne.summary || '', {
+          fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+          fontSize: `${npcBodyFS}px`, color: '#887766',
+          lineSpacing: lineGap, align: 'center', wordWrap: { width: wrapW },
+        }).setOrigin(0.5, 0);
+        v.add(npcText);
+        y += npcText.height + lineGap * 2;
+      }
+    }
   }
 
   _startNewGame() {

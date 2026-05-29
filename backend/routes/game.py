@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Optional, List
 
 import yaml
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from config import MAP_COLS, MAP_ROWS
@@ -164,6 +165,140 @@ async def evaluate_ending(session_id: str):
         session.ending_data = fallback
         manager.persist_session(session)
         return fallback
+
+
+@router.get("/game/{session_id}/evaluate/stream")
+async def evaluate_ending_stream(session_id: str, request: Request):
+    """流式结局评价 — SSE 渐进返回 header + 各 NPC 结局。"""
+    manager = get_session_manager()
+    session = manager.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail={
+            "error": True, "code": "SESSION_NOT_FOUND",
+            "message": f"游戏会话不存在: {session_id}"
+        })
+
+    if not session.game_ended:
+        raise HTTPException(status_code=400, detail={
+            "error": True, "code": "INVALID_PARAM",
+            "message": "游戏尚未结束"
+        })
+
+    # 缓存复用：已有完整数据直接返回
+    if session.ending_data and session.ending_data.get("npc_endings"):
+        cached = session.ending_data
+
+        async def replay_stream():
+            yield f"event: header\ndata: {json.dumps({**{k: cached.get(k) for k in ['title','summary','key_moments','life_lesson']}, 'type': session.ending_type or 'story_complete'}, ensure_ascii=False)}\n\n"
+            for ne in cached.get("npc_endings", []):
+                yield f"event: npc\ndata: {json.dumps({'npc_id': ne.get('npc_id',''), 'name': session.npcs.get(ne.get('npc_id','')).name if session.npcs.get(ne.get('npc_id','')) else '', 'summary': ne.get('summary','')}, ensure_ascii=False)}\n\n"
+            yield f"event: done\ndata: {json.dumps({'type': session.ending_type or 'story_complete'}, ensure_ascii=False)}\n\n"
+
+        return StreamingResponse(
+            replay_stream(), media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+        )
+
+    llm = LLMClient()
+    builder = PromptBuilder()
+    if session.system_prompt:
+        builder.set_system_prompt(session.system_prompt)
+
+    async def event_stream():
+        collected_npc_endings = []
+        header_data = None
+
+        try:
+            async def is_disconnected():
+                return await request.is_disconnected()
+
+            # Phase 1: 生成 header（标题+总结+关键瞬间+感悟）
+            header_msgs = builder.build_evaluate_header_messages(session)
+            header_data = await llm.chat_json(header_msgs, api_key=session.api_key, temperature=0.7)
+            if not header_data.get("title"):
+                header_data = {"title": "梨园余韵", "summary": "故事告一段落。", "key_moments": [], "life_lesson": "戏如人生。"}
+            header_data["type"] = session.ending_type or "story_complete"
+            yield f"event: header\ndata: {json.dumps(header_data, ensure_ascii=False)}\n\n"
+
+            if await is_disconnected():
+                return
+
+            # Phase 2: 并行生成 5 个 NPC 结局
+            import asyncio
+            async def gen_one_npc(npc_id):
+                try:
+                    msgs = builder.build_evaluate_npc_messages(session, npc_id)
+                    if not msgs:
+                        return None
+                    result = await llm.chat_json(msgs, api_key=session.api_key, temperature=0.7)
+                    name = session.npcs.get(npc_id).name if session.npcs.get(npc_id) else npc_id
+                    return {"npc_id": npc_id, "name": name,
+                            "summary": result.get("summary", f"{name}的故事还在继续……")}
+                except Exception as e:
+                    logger.warning(f"[EvaluateStream] NPC {npc_id} failed: {e}")
+                    name = session.npcs.get(npc_id).name if session.npcs.get(npc_id) else npc_id
+                    return {"npc_id": npc_id, "name": name,
+                            "summary": f"{name}的故事还在继续……"}
+
+            tasks = [gen_one_npc(nid) for nid in session.npcs.keys()]
+            # 谁先完成就先 yield
+            for coro in asyncio.as_completed(tasks):
+                if await is_disconnected():
+                    break
+                npc_result = await coro
+                if npc_result:
+                    collected_npc_endings.append(npc_result)
+                    yield f"event: npc\ndata: {json.dumps(npc_result, ensure_ascii=False)}\n\n"
+
+            # 组装完整 ending_data 并持久化
+            full_ending = {
+                **header_data,
+                "type": session.ending_type or "story_complete",
+                "npc_endings": collected_npc_endings,
+            }
+            session.ending_data = full_ending
+            manager.persist_session(session)
+
+            yield f"event: done\ndata: {json.dumps({'type': session.ending_type or 'story_complete'}, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            logger.exception(f"[EvaluateStream] Error: {e}")
+            yield f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_stream(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/game/{session_id}/ending")
+async def get_ending(session_id: str):
+    """只读端点：返回已有的结局数据（用于主菜单回看）。"""
+    manager = get_session_manager()
+    session = manager.get(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail={
+            "error": True, "code": "SESSION_NOT_FOUND",
+            "message": f"游戏会话不存在: {session_id}"
+        })
+
+    if not session.ending_data:
+        # 兜底：没有结局数据时生成默认结局并持久化
+        session.ending_data = {
+            "type": session.ending_type or "story_complete",
+            "title": "梨园余韵",
+            "summary": "你在梨溪镇的故事告一段落。",
+            "key_moments": [],
+            "life_lesson": "戏如人生，人生如戏。",
+            "npc_endings": [
+                {"npc_id": npc.id, "name": npc.name,
+                 "summary": f"{npc.name}的故事还在继续……"}
+                for npc in session.npcs.values()
+            ],
+        }
+        manager.persist_session(session)
+
+    return session.ending_data
 
 
 @router.get("/game/{session_id}/relationships")
