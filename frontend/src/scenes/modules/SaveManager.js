@@ -195,6 +195,11 @@ export class SaveManager {
     localStorage.setItem('__music_volume__', String(vol));
     if (drawFill) drawFill(vol);
     if (drawKnob) drawKnob(vol, false);
+    // ★ 同步到音乐管理器
+    const gs = ui.scene.get('GameScene');
+    if (gs && gs.musicManager) {
+      gs.musicManager.setVolume(vol);
+    }
   }
 
   /** 切换暂停菜单 */

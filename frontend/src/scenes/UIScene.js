@@ -152,9 +152,19 @@ export class UIScene extends Phaser.Scene {
     this.add.text(16, 16, '《梨园生死》', {
       fontFamily: '"KaiTi","SimSun",serif', fontSize: '22px', color: '#d4b896',
     }).setDepth(200);
-    this.add.text(16, 42, '[T] 任务', {
-      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '12px', color: '#665544',
+    this.add.text(16, 42, '[T] 指引', {
+      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '15px', color: '#665544',
     }).setDepth(200);
+
+    // ★ 左侧指引提示：常驻显示当前活跃子任务
+    this._miniTaskHint = this.add.text(16, 72, '', {
+      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+      fontSize: '15px', color: '#c4a882',
+      backgroundColor: '#0d0c12cc',
+      padding: { x: 10, y: 4 },
+      maxWidth: 260,
+      wordWrap: { width: 244, useAdvancedWrap: true },
+    }).setOrigin(0, 0).setDepth(201);
 
     // 右上角阶段指示器
     this.stageBadge = this.add.text(width - 16, 16, '阶段一 · 不屑', {
@@ -292,6 +302,11 @@ export class UIScene extends Phaser.Scene {
     this.dialogHint.setText('对话生成中……');
     this.dialogue.clearOptions();
 
+    // ★ 显示角色立绘（底部居中，对话框覆盖下半身）
+    if (!isTownNPC) {
+      this.dialogue.showPortrait(npcId);
+    }
+
     // 城镇 NPC：使用本地随机话术库，不调用后端 API
     if (isTownNPC) {
       await this._handleTownNPCDialogue(name, role);
@@ -363,6 +378,7 @@ export class UIScene extends Phaser.Scene {
     this.dialogue.stopCursorBlink();
     this.dialogue.clearOptions();
     this.dialogue.hideFreeInput();
+    this.dialogue.hidePortrait();
     this.dialogContainer.setVisible(false);
 
     const gs = this.scene.get('GameScene');
@@ -370,8 +386,8 @@ export class UIScene extends Phaser.Scene {
 
     this._persistDialogueHistory();
 
-    // 对话结束后显示并刷新任务面板
-    this.taskPanel.show();
+    // 对话结束后刷新任务面板数据（不自动弹出）
+    this.taskPanel.refreshContent();
 
     // 章节完成：玩家关闭对话后再跳转
     if (this.pendingChapterChange && this.pendingChapterChange.chapterCompleted) {
@@ -432,7 +448,7 @@ export class UIScene extends Phaser.Scene {
         gs.events.emit('stage:change', newStage);
         gs.events.emit('chapter:new', chapterResult);
 
-        await this.stageTransition.play(newStage, { clickToDismiss: true });
+        await this.stageTransition.play(newStage);
         if (this.taskPanel) this.taskPanel.refreshContent();
       }
     } catch (e) {
@@ -478,7 +494,7 @@ export class UIScene extends Phaser.Scene {
         gs.events.emit('stage:change', newStage);
         gs.events.emit('chapter:new', chapterResult);
 
-        await this.stageTransition.play(newStage, { clickToDismiss: true });
+        await this.stageTransition.play(newStage);
 
         if (this.sessionId) {
           // ★ 收集当前所有 NPC 和主角的实时位置

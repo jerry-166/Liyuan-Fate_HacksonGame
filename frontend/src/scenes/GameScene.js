@@ -27,11 +27,16 @@ import {
   showToast as _showToast, showLoadingHint as _showLoadingHint, hideLoadingHint as _hideLoadingHint,
   addItemSparkle as _addItemSparkle,
   loadImagesOnDemand, isTextureLoaded, markTextureLoaded,
+  preloadNPCSprites, CHAPTER_NPCS,
 } from './modules/GameUIHelpers.js';
 import { SUBSCENES, SUB_MAP_SCALE } from './modules/SubSceneConfig.js';
 import { SubSceneManager } from './modules/SubSceneManager.js';
+import { MusicManager } from './modules/MusicManager.js';
 
 const TILE = GAME.TILE_SIZE;
+
+/** 回退精灵：纹理加载失败或 NPC 无专属精灵时使用（向下 idle 帧） */
+const FALLBACK_TEXTURE_KEY = `${FALLBACK_NPC_SPRITE.prefix}_idle_down`;
 
 /**
  * 从 localStorage 合并仅前端持有的位置数据到后端 state（后端 API 不含 _town_npc_positions / _player_position）
@@ -88,26 +93,15 @@ export class GameScene extends Phaser.Scene {
   }
 
   preload() {
-    // ★ 主角精灵已由 BootScene 加载，这里标记避免重复
+    // ★ 主角、地图、过渡图、墓地已由 BootScene 加载
     for (const dir of DIRS) {
       markTextureLoaded(`${PROTAGONIST.prefix}_idle_${dir}`);
       markTextureLoaded(`${PROTAGONIST.prefix}_walk_${dir}`);
     }
     markTextureLoaded('town_worldmap');
     markTextureLoaded('transition_1');
-
-    // 加载所有 NPC 精灵（5个NPC × 8帧 = 40个文件，~2MB，文件小影响不大）
-    for (const cfg of Object.values(NPC_SPRITES)) {
-      for (const dir of DIRS) {
-        this.load.image(`${cfg.prefix}_idle_${dir}`, `${cfg.baseDir}/${cfg.prefix}_idle_${dir}.png`);
-        this.load.image(`${cfg.prefix}_walk_${dir}`, `${cfg.baseDir}/${cfg.prefix}_walk_${dir}.png`);
-      }
-    }
-
-    // ★ 只预加载序章立即使用的子场景（墓地），其余按需懒加载
-    this.load.image('subscene_graveyard', '/assets/images/maps/graveyard.png');
-
-    // ★ 其余子场景地图和过渡图由 SubSceneManager / StageTransition 按需加载
+    markTextureLoaded('subscene_graveyard');
+    // ★ NPC精灵由后台异步预加载，不在此处加载也不标记
   }
 
   create() {
@@ -133,10 +127,21 @@ export class GameScene extends Phaser.Scene {
     // 子场景管理器
     this.subSceneManager = new SubSceneManager(this);
 
+    // ★ 音乐管理器
+    this.musicManager = new MusicManager(this);
+    this.musicManager.preloadAll();
+
     // ★ 黑色遮罩：覆盖主地图加载过程，进入游戏后根据流程移除
     const { width: sw, height: sh } = this.cameras.main;
     this._startupOverlay = this.add.rectangle(sw / 2, sh / 2, sw, sh, 0x000000, 1)
       .setDepth(200).setScrollFactor(0).setOrigin(0.5);
+
+    // ★ 后台预加载全部NPC精灵（5个NPC × 8贴图 = 40张小图，总体积很小）
+    //   一次性加载避免章节切换时缺纹理，也避免子场景内重复按需加载
+    //   不 await，让它和 initGame / 过渡动画 / 墓地探索并行运行
+    const allNPCs = [...CHAPTER_NPCS[1], ...CHAPTER_NPCS[2]];
+    this._npcPreloadPromise = preloadNPCSprites(this, allNPCs);
+    console.log('[GameScene] 全部NPC精灵后台预加载已启动');
 
     // 从后端文件系统加载编辑器配置（如果localStorage中没有数据）
     // 必须等配置加载完再创建 NPC，否则首次打开时NPC位置会回退到硬编码默认值
@@ -152,11 +157,14 @@ export class GameScene extends Phaser.Scene {
     this.createCollisionLayer();
     this.createPlayer();
 
-    // 等编辑器配置就绪后再创建 NPC，确保使用正确的出生点
-    this._editorConfigPromise.then((restored) => {
+    // 等编辑器配置就绪 + NPC纹理预加载完成后再创建 NPC
+    // （因为编辑器配置读取很快，纹理加载是网络IO，必须等两者都完成）
+    this._editorConfigPromise.then(async (restored) => {
       if (restored) {
         console.log('[Editor] 配置已恢复，创建 NPC 使用编辑器出生点');
       }
+      // ★ 等待 NPC 纹理预加载完成（否则精灵将不可见）
+      if (this._npcPreloadPromise) await this._npcPreloadPromise;
       this.createNPCs();
     });
 
@@ -260,6 +268,15 @@ export class GameScene extends Phaser.Scene {
     this.events.on('subscene:exit', () => {
       this.subSceneManager.exitSubScene();
     });
+    // ★ 离开子场景回调 — 序章阶段离开墓地时推进至第一章
+    this.events.on('subscene:exited', this._onSubSceneExited, this);
+
+    // ★ 音乐切换事件 — 子场景管理器发出
+    this.events.on('music:scene', (subSceneId) => {
+      if (this.musicManager) {
+        this.musicManager.playForScene(subSceneId || null);
+      }
+    });
 
     // 阶段色调遮罩
     this.tintOverlay = this.add.rectangle(
@@ -271,6 +288,15 @@ export class GameScene extends Phaser.Scene {
     this.tintOverlay.setInteractive = () => this.tintOverlay;
 
     this.scene.launch('UIScene');
+
+    // ★ 音频上下文解锁：首次用户交互后启动音乐播放
+    const unlockAudio = () => {
+      if (this.musicManager) this.musicManager.start();
+      this.input.off('pointerdown', unlockAudio);
+      this.input.keyboard?.off('keydown', unlockAudio);
+    };
+    this.input.on('pointerdown', unlockAudio);
+    this.input.keyboard?.on('keydown', unlockAudio);
 
     // 控制提示
     this._showControlsHint();
@@ -343,12 +369,10 @@ export class GameScene extends Phaser.Scene {
 
       localStorage.setItem('__active_session__', gameState.session_id);
       saveGameState(gameState.session_id, gameState);
-      // ★ 新游戏：清除旧的子场景入口位置备份，避免残留数据干扰
       localStorage.removeItem('subscene_entry_position');
       localStorage.removeItem('subscene_entry_building');
 
       if (gameState.npcs) {
-        // ★ 注入编辑器 NPC 位置到 state，refreshNPCsFromState 会直接使用这些位置
         try {
           const subId = this.subSceneManager.currentSubSceneId;
           const npcKey = subId
@@ -381,56 +405,90 @@ export class GameScene extends Phaser.Scene {
         this.time.delayedCall(500, () => this.applyStageTone(gameState.stage_params));
       }
 
-      // v2: 自动开始第一章（静默拉取，不触发 stage:change，等序章过渡后统一处理）
+      // ★★★ 核心优化：过渡动画与 API 并行 ★★★
+      // 不再先等 API 再播过渡。而是先播过渡（图片已在 BootScene 预加载），
+      // 同时从 readyPromise 通道获知 API 何时完成。
+      // 用户点击"继续"后，过渡界面会等到 API 就绪再淡出，体验无缝。
+      const firstCh = gameState.first_chapter || {};
+
+      // 给过渡动画的 ready 通道：API 完成后 resolve
+      let resolveChapterReady;
+      const chapterReady = new Promise(resolve => { resolveChapterReady = resolve; });
+
+      // 启动过渡动画（与 API 调用并行，不阻塞）
+      const transitionPromise = (async () => {
+        await new Promise(r => this.time.delayedCall(200, r));
+        const ui = this.scene.get('UIScene');
+        if (ui && ui.stageTransition) {
+          return ui.stageTransition.play({
+            id: 1, // ★ 序章固定用 stage 1 过渡图
+            chapterId: 'ch_prologue',
+            name: '归乡',
+            description: firstCh.description || '',
+          }, { readyPromise: chapterReady });
+        }
+      })();
+
+      // 并行：调 API 获取章节内容（LLM 调用，最耗时）
+      // ★ 后端会自动跳过 cinematic 类型的序章，返回的是第一章数据
       let pendingChapterResult = null;
       if (!chapterId) {
-        this._loadingHint = _showLoadingHint(this, '正在载入序章……');
         try {
-          const chResult = await startChapter(gameState.session_id);
-          _hideLoadingHint(this._loadingHint);
-          if (chResult && chResult.chapter_id) {
-            pendingChapterResult = chResult;
-          }
+          pendingChapterResult = await startChapter(gameState.session_id);
         } catch (chErr) {
-          _hideLoadingHint(this._loadingHint);
           console.warn('[GameScene] 章节初始化失败（非阻塞）:', chErr);
         }
       }
+      // ★ 通知过渡动画：API 已就绪
+      resolveChapterReady();
 
-      // 序章过渡动画（新游戏时展示）：提前启动 timer，与 startChapter 并行
-      this.time.delayedCall(300, async () => {
-        const ui = this.scene.get('UIScene');
-        if (ui && ui.stageTransition) {
-          const firstCh = gameState.first_chapter || {};
-          const chDesc = firstCh.description || '';
-          await ui.stageTransition.play({
-            id: CHAPTER_MAP[firstCh.chapter_id] || 1,
-            chapterId: firstCh.chapter_id || 'ch_prologue',
-            name: firstCh.name || '归乡',
-            description: chDesc,
-          }, () => {
-            // 序章过渡完成后：更新 HUD 章节显示 + 加载任务面板
-            if (pendingChapterResult) {
-              const stageId = CHAPTER_MAP[pendingChapterResult.chapter_id] || 1;
-              this.events.emit('stage:change', {
-                id: stageId, chapterId: pendingChapterResult.chapter_id,
-                name: pendingChapterResult.chapter_name || '归乡',
-                description: pendingChapterResult.task ? pendingChapterResult.task.description : '',
-                color_tone: pendingChapterResult.color_tone || '#8899aa',
-                bgm_mood: pendingChapterResult.bgm_mood || '',
-              });
-            }
-            if (ui.taskPanel) ui.taskPanel.refreshContent();
-          });
+      // ★ 等待过渡动画完全淡出
+      await transitionPromise;
 
-          // ★ 将主地图玩家位置设为墓地入口区域中心，确保离开墓地时出现在入口处
-          this._setPlayerToBuildingEntrance('graveyard');
-          // 点击后：进入墓地（黑色遮罩覆盖过渡过程，避免主地图闪现）
-          await this.subSceneManager.enterSubScene('graveyard');
-          // 墓地加载完成，移除遮罩露出子场景
-          this._removeStartupOverlay();
-        }
+      // ★ 关键：保存第一章数据为延后数据（离开墓地时才应用）
+      // 现在先发序章的 stage:change，让 HUD 显示"序章 · 归乡"
+      if (pendingChapterResult) {
+        this._deferredChapterResult = pendingChapterResult;
+        console.log('[GameScene] 序章阶段：缓存第一章数据，离开墓地后应用');
+      }
+      // ★ 发序章的 stage:change（不是第一章的）
+      this.events.emit('stage:change', {
+        id: 1,
+        chapterId: 'ch_prologue',
+        name: '归乡',
+        description: '离开墓地，踏上归乡之路',
+        color_tone: '#8899aa',
+        bgm_mood: '',
       });
+
+      // ★ 将主地图玩家位置设为墓地入口区域中心，确保离开墓地时出现在入口处
+      this._setPlayerToBuildingEntrance('graveyard');
+      // ★ 标记序章阶段，离开墓地时触发章节推进
+      this._isProloguePhase = true;
+      // 进入墓地
+      await this.subSceneManager.enterSubScene('graveyard');
+      // 墓地加载完成，移除遮罩露出子场景
+      this._removeStartupOverlay();
+
+      // ★ 序章阶段任务提示固定为"离开墓地"
+      const uiScene = this.scene.get('UIScene');
+      if (uiScene && uiScene._miniTaskHint) {
+        uiScene._miniTaskHint.setText('📋 离开墓地');
+        uiScene._miniTaskHint.setVisible(true);
+      }
+      // 同时也缓存序章任务数据给 TaskPanel（不能用第一章的API数据）
+      if (uiScene && uiScene.taskPanel) {
+        uiScene.taskPanel._taskData = {
+          task: {
+            chapter_name: '归乡',
+            description: '离开墓地，到小镇上去散散心',
+            completion_rate: 0,
+            sub_tasks: [],
+          },
+        };
+        // 序章迷你提示覆盖
+        uiScene._prologueHintText = '离开墓地';
+      }
 
       console.log('[GameScene] 游戏已初始化, session:', gameState.session_id);
     } catch (e) {
@@ -438,6 +496,56 @@ export class GameScene extends Phaser.Scene {
       console.error('[GameScene] 初始化游戏失败:', e);
       _showToast(this, '连接服务器失败，请确认后端已启动', 3000);
     }
+  }
+
+  /**
+   * ★ 子场景退出回调：序章阶段离开墓地 → 推进至第一章
+   */
+  async _onSubSceneExited(exitedSubSceneId) {
+    // 只在序章阶段 + 离开的是墓地时触发
+    if (!this._isProloguePhase || exitedSubSceneId !== 'graveyard') return;
+    if (!this._deferredChapterResult) {
+      console.warn('[GameScene] 序章离开墓地但无第一章缓存数据');
+      this._isProloguePhase = false;
+      return;
+    }
+
+    this._isProloguePhase = false;
+    const chData = this._deferredChapterResult;
+    this._deferredChapterResult = null;
+    const ui = this.scene.get('UIScene');
+    const stageId = CHAPTER_MAP[chData.chapter_id] || 2;
+
+    console.log('[GameScene] 序章完成，推进至第一章:', chData.chapter_name);
+
+    // 1. 移除序章迷你提示覆盖，让 TaskPanel 从 API 数据取
+    if (ui) {
+      delete ui._prologueHintText;
+    }
+
+    // 2. 发 stage:change → 更新 HUD（序章 → 第一章）
+    const newStage = {
+      id: stageId,
+      chapterId: chData.chapter_id,
+      name: chData.chapter_name || '闻声·异样',
+      description: chData.task ? chData.task.description : '',
+      color_tone: chData.color_tone || '#8899cc',
+      bgm_mood: chData.bgm_mood || '',
+    };
+    this.events.emit('stage:change', newStage);
+
+    // 3. 播放章节过渡动画（序章 → 第一章）
+    if (ui && ui.stageTransition) {
+      await ui.stageTransition.play(newStage);
+    }
+
+    // 4. 刷新任务面板 + 同步左侧迷你提示
+    if (ui && ui.taskPanel) {
+      ui.taskPanel._taskData = chData;
+      await ui.taskPanel.refreshContent();
+    }
+
+    console.log('[GameScene] 第一章已就绪');
   }
 
   /**
@@ -1157,7 +1265,14 @@ export class GameScene extends Phaser.Scene {
     }
 
     const { x: posX, y: posY } = COORD.toPixel(col, row);
-    const sprite = this.physics.add.sprite(posX * MAP_SCALE, posY * MAP_SCALE, `${cfg.prefix}_idle_down`);
+    const textureKey = `${cfg.prefix}_idle_down`;
+    // ★ 纹理检查：验证纹理是否已加载
+    if (!this.textures.exists(textureKey)) {
+      console.warn(`[GameScene] _createNPCSprite: NPC "${npcId}" 纹理 "${textureKey}" 未加载，使用回退精灵`);
+    }
+    const useKey = this.textures.exists(textureKey) ? textureKey : FALLBACK_TEXTURE_KEY;
+
+    const sprite = this.physics.add.sprite(posX * MAP_SCALE, posY * MAP_SCALE, useKey);
     sprite.setScale(cfg.scale);
     sprite.setData('npcId', npcId);
     sprite.setData('name', name);
@@ -1181,7 +1296,7 @@ export class GameScene extends Phaser.Scene {
     return sprite;
   }
 
-  /** 创建初始 NPC */
+  /** 创建初始 NPC（带去重保护） */
   createNPCs() {
     let savedNPCPositions = null;
     try {
@@ -1195,17 +1310,30 @@ export class GameScene extends Phaser.Scene {
     ];
 
     defaultNPCs.forEach((def) => {
+      // ★ 去重：如果该 npcId 的精灵已存在，跳过创建（防止 refresh/initGame 重复调用）
+      if (this.npcs.some(s => s.getData('npcId') === def.id)) {
+        console.log(`[GameScene] createNPCs: ${def.id} 已存在，跳过`);
+        return;
+      }
+
       const pos = savedNPCPositions && savedNPCPositions[def.id]
         ? savedNPCPositions[def.id] : { col: def.col, row: def.row };
       const pixelPos = COORD.toPixel(pos.col, pos.row);
       const cfg = NPC_SPRITES[def.id];
-      const startKey = cfg ? `${cfg.prefix}_idle_down` : null;
+      let startKey = cfg ? `${cfg.prefix}_idle_down` : null;
+
+      // ★ 纹理检查：如果主纹理不存在，回退到 FALLBACK_TEXTURE_KEY
+      if (startKey && !this.textures.exists(startKey)) {
+        console.warn(`[GameScene] NPC ${def.id} 纹理 "${startKey}" 未加载，使用回退精灵`);
+        startKey = null;
+      }
+      const useKey = startKey || FALLBACK_TEXTURE_KEY;
 
       const sprite = this.physics.add.sprite(
         pixelPos.x * MAP_SCALE, pixelPos.y * MAP_SCALE,
-        startKey || '__fallback_npc__'
+        useKey
       );
-      if (cfg) sprite.setScale(cfg.scale);
+      sprite.setScale(cfg ? cfg.scale : FALLBACK_NPC_SPRITE.scale);
       sprite.setData('npcId', def.id);
       sprite.setData('name', def.name);
       sprite.setData('greeting', def.greeting);

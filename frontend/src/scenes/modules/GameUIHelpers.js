@@ -30,6 +30,113 @@ export const FALLBACK_NPC_SPRITE = {
   scale: 0.08,
 };
 
+// ==================== 角色立绘配置 ====================
+
+/**
+ * 角色立绘映射
+ * key: npcId 或 'protagonist'
+ * default: 默认表情key
+ * variants: { emotionName → portraitKey }
+ * baseDir: 立绘图片目录
+ */
+export const CHARACTER_PORTRAITS = {
+  'protagonist': {
+    baseDir: '/assets/images/characters/protagonist/portraits',
+    default: 'protagonist_lost',
+    variants: {
+      lost: 'protagonist_lost',
+      determined: 'protagonist_determined',
+    },
+  },
+  'npc_chen': {
+    baseDir: '/assets/images/characters/npc-chenshifu/portraits',
+    default: 'chenshifu_cold',
+    variants: {
+      cold: 'chenshifu_cold',
+      gentle: 'chenshifu_gentle',
+      tears: 'chenshifu_tears',
+    },
+  },
+  'npc_xiaohua': {
+    baseDir: '/assets/images/characters/npc-xiaohua/portraits',
+    default: 'xiaohua_friendly',
+    variants: {
+      friendly: 'xiaohua_friendly',
+      guarded: 'xiaohua_guarded',
+      hopeful: 'xiaohua_hopeful',
+    },
+  },
+  'npc_laozhou': {
+    baseDir: '/assets/images/characters/npc-laozhou/portraits',
+    default: 'laozhou_dazed',
+    variants: {
+      dazed: 'laozhou_dazed',
+      tears: 'laozhou_tears',
+    },
+  },
+  'npc_meiyi': {
+    baseDir: '/assets/images/characters/npc-meiyi/portraits',
+    default: 'meiyi_curious',
+    variants: {
+      curious: 'meiyi_curious',
+      sigh: 'meiyi_sigh',
+    },
+  },
+};
+
+/**
+ * 获取所有立绘纹理的加载列表（供 BootScene 使用）
+ * @returns {Array<{key:string, path:string}>}
+ */
+export function getAllPortraitAssets() {
+  const assets = [];
+  for (const cfg of Object.values(CHARACTER_PORTRAITS)) {
+    const keys = new Set([cfg.default, ...Object.values(cfg.variants)]);
+    for (const key of keys) {
+      assets.push({ key, path: `${cfg.baseDir}/${key}.png` });
+    }
+  }
+  return assets;
+}
+
+/**
+ * 根据对话文本检测应该使用的立绘表情
+ * @param {string} npcId
+ * @param {string} text - 当前累积的对话文本
+ * @returns {string|null} 表情变体名，或null表示使用默认
+ */
+export function detectPortraitEmotion(npcId, text) {
+  const cfg = CHARACTER_PORTRAITS[npcId];
+  if (!cfg || !text) return null;
+
+  const lower = text.toLowerCase();
+
+  // 通用情绪关键词 → 变体名映射
+  const emotionRules = [
+    { keywords: ['泪', '哭', '伤心', '难过', '悲痛', 'tears', 'cry', 'weep', 'sob'], emotion: 'tears' },
+    { keywords: ['温柔', '微笑', '笑', '暖', 'gentle', 'smile', 'warm'], emotion: 'gentle' },
+    { keywords: ['冷', '沉默', 'cold', 'silent', '哼'], emotion: 'cold' },
+    { keywords: ['叹', '叹息', 'sigh', '无奈'], emotion: 'sigh' },
+    { keywords: ['好奇', '打听', 'curious', 'wonder'], emotion: 'curious' },
+    { keywords: ['希望', '未来', '明天', 'hope', 'hopeful'], emotion: 'hopeful' },
+    { keywords: ['戒备', '怀疑', 'guarded', 'suspicious', '警惕'], emotion: 'guarded' },
+    { keywords: ['坚定', '决心', 'determined', 'resolve'], emotion: 'determined' },
+    { keywords: ['恍惚', '回忆', '过去', 'dazed', 'memory', 'reminisce'], emotion: 'dazed' },
+    { keywords: ['友善', '开心', 'friendly', 'happy'], emotion: 'friendly' },
+    { keywords: ['迷茫', '困惑', 'lost', 'confused', '茫然'], emotion: 'lost' },
+  ];
+
+  for (const rule of emotionRules) {
+    // 检查该变体是否在角色的可用变体中
+    if (!cfg.variants[rule.emotion]) continue;
+    for (const kw of rule.keywords) {
+      if (lower.includes(kw)) return rule.emotion;
+    }
+  }
+
+  return null;
+}
+
 /** 四方向常量 */
 export const DIRS = ['down', 'left', 'right', 'up'];
 
@@ -174,6 +281,38 @@ export function isTextureLoaded(key) {
  */
 export function markTextureLoaded(key) {
   _loadedTextures.add(key);
+}
+
+// ==================== NPC 分批预加载（按章节需要） ====================
+
+/**
+ * 章节 → 首次需要该NPC的章节映射
+ * 序章(ch_prologue, 墓地)不需要任何NPC；
+ * 第一章(ch_01)主地图首次出现小华、老周；
+ * 第二章(ch_02)出现陈师傅、梅姨、船夫老李。
+ */
+export const CHAPTER_NPCS = {
+  1: ['npc_chen', 'npc_xiaohua', 'npc_laozhou'],
+  2: ['npc_meiyi', 'npc_laoli'],
+};
+
+/**
+ * 后台预加载指定NPC列表的所有精灵纹理（不阻塞主流程）
+ * @param {Phaser.Scene} scene
+ * @param {string[]} npcIds - NPC ID 列表，如 ['npc_xiaohua', 'npc_laozhou']
+ * @returns {Promise<void>} 注意：调用方不需要 await，Promise 只用于确保加载完成
+ */
+export function preloadNPCSprites(scene, npcIds) {
+  const assets = [];
+  for (const id of npcIds) {
+    const cfg = NPC_SPRITES[id];
+    if (!cfg) continue;
+    for (const dir of DIRS) {
+      assets.push({ key: `${cfg.prefix}_idle_${dir}`, path: `${cfg.baseDir}/${cfg.prefix}_idle_${dir}.png` });
+      assets.push({ key: `${cfg.prefix}_walk_${dir}`, path: `${cfg.baseDir}/${cfg.prefix}_walk_${dir}.png` });
+    }
+  }
+  return loadImagesOnDemand(scene, assets);
 }
 
 // ==================== NPC 漫游状态初始化（供 GameScene 使用）====================

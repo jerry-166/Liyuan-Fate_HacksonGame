@@ -14,6 +14,7 @@
 import Phaser from 'phaser';
 import { getChapterLabel } from '../config.js';
 import { getSessions, deleteSession, getEnding } from '../api/client.js';
+import { getAllPortraitAssets } from './modules/GameUIHelpers.js';
 
 // ========== UI 工具函数 ==========
 
@@ -108,6 +109,18 @@ export class MenuScene extends Phaser.Scene {
   create() {
     const { width, height } = this.cameras.main;
     const cx = width / 2;
+
+    // ★ 立绘异步预加载（不阻塞菜单显示，后台加载）
+    const allPortraits = getAllPortraitAssets();
+    if (allPortraits.length > 0) {
+      for (const asset of allPortraits) {
+        this.load.image(asset.key, asset.path);
+      }
+      this.load.once('complete', () => {
+        console.log(`[MenuScene] 立绘后台加载完成 (${allPortraits.length} 张)`);
+      });
+      this.load.start();
+    }
 
     // 背景
     this.cameras.main.setBackgroundColor('#0d0d1a');

@@ -7,6 +7,7 @@
 import { COLORS } from '../../config.js';
 import { startDialogueStream, parseSSEStream, showItemToNpcStream } from '../../api/client.js';
 import { createGlobalInput, globalInputValues } from '../../main.js';
+import { CHARACTER_PORTRAITS, detectPortraitEmotion } from './GameUIHelpers.js';
 
 /**
  * 对话管理器
@@ -29,6 +30,8 @@ export class DialogueManager {
     const panelX = (width - panelW) / 2;
     const panelY = height - panelH - 28;
 
+    // ★ 立绘占左侧约 28% 宽度（对话框自然覆盖下半身）
+
     ui._dialogArea = { x: panelX, y: panelY, w: panelW, h: panelH };
     ui._textArea = {
       x: panelX + 28, y: panelY + 50,
@@ -36,6 +39,19 @@ export class DialogueManager {
     };
 
     ui.dialogContainer = ui.add.container(0, 0).setDepth(300).setVisible(false);
+
+    // ★ 立绘图片（左侧，朝向右侧，对话框覆盖其下半身）
+    const portraitW = Math.round(width * 0.28);
+    const portraitDisplayH = Math.round((height - 32) * 0.75);
+    ui.portraitImage = ui.add.image(panelX + portraitW * 0.45, height - 40, '__BLANK__')
+      .setOrigin(0.5, 1)
+      .setDisplaySize(portraitW, portraitDisplayH)
+      .setFlipX(true)  // 统一朝向右侧
+      .setAlpha(0)
+      .setDepth(0);
+    ui.dialogContainer.add(ui.portraitImage);
+    ui._portraitDisplayH = portraitDisplayH;
+    ui._portraitW = portraitW;
 
     // 背景
     const bg = ui.add.graphics();
@@ -107,6 +123,121 @@ export class DialogueManager {
     ui.dialogClickZone.on('pointerdown', () => this.onDialogClick());
     ui.dialogContainer.add(ui.dialogClickZone);
     ui.dialogClickZone.setVisible(false);
+  }
+
+  // ==================== 立绘显示 ====================
+
+  /**
+   * 显示角色立绘
+   * @param {string} npcId - NPC ID（如 'npc_chen'）或 'protagonist'
+   * @param {string} [emotion] - 表情变体名，不传使用默认
+   */
+  showPortrait(npcId, emotion) {
+    const ui = this.ui;
+    const cfg = CHARACTER_PORTRAITS[npcId];
+    if (!cfg) {
+      this.hidePortrait();
+      return;
+    }
+
+    // 确定使用的 portrait key
+    let portraitKey = cfg.default;
+    if (emotion && cfg.variants[emotion]) {
+      portraitKey = cfg.variants[emotion];
+    }
+
+    // 检查纹理是否存在
+    if (!ui.textures.exists(portraitKey)) {
+      console.warn(`[DialogueManager] 立绘纹理 "${portraitKey}" 不存在，使用默认`);
+      portraitKey = cfg.default;
+      if (!ui.textures.exists(portraitKey)) {
+        this.hidePortrait();
+        return;
+      }
+    }
+
+    const { width, height } = ui.cameras.main;
+    const portraitW = ui._portraitW || Math.round(width * 0.28);
+
+    // 更新纹理和位置（左侧，朝右，底部锚定）
+    ui.portraitImage.setTexture(portraitKey);
+    ui.portraitImage.setPosition(ui._dialogArea.x + portraitW * 0.45, height - 40);
+    ui.portraitImage.setOrigin(0.5, 1);
+    ui.portraitImage.setFlipX(true);
+    ui.portraitImage.setDisplaySize(portraitW, ui._portraitDisplayH);
+
+    // 淡入动画
+    ui.tweens.killTweensOf(ui.portraitImage);
+    ui.portraitImage.setAlpha(0);
+    ui.tweens.add({
+      targets: ui.portraitImage,
+      alpha: 1,
+      duration: 350,
+      ease: 'Sine.easeInOut',
+    });
+
+    ui._currentPortraitNpcId = npcId;
+    ui._currentPortraitEmotion = emotion || 'default';
+    console.log(`[DialogueManager] 显示立绘: ${npcId} / ${portraitKey}`);
+  }
+
+  /**
+   * 根据文本情感切换立绘表情
+   * @param {string} text - 当前累积的对话文本
+   */
+  updatePortraitEmotion(text) {
+    const ui = this.ui;
+    const npcId = ui._currentPortraitNpcId;
+    if (!npcId || !text) return;
+
+    const emotion = detectPortraitEmotion(npcId, text);
+    if (!emotion || emotion === ui._currentPortraitEmotion) return;
+
+    const cfg = CHARACTER_PORTRAITS[npcId];
+    if (!cfg) return;
+
+    const portraitKey = cfg.variants[emotion];
+    if (!portraitKey || !ui.textures.exists(portraitKey)) return;
+
+    const { width, height } = ui.cameras.main;
+    const portraitW = ui._portraitW || Math.round(width * 0.28);
+
+    // 快速切换表情（短淡入淡出）
+    ui.tweens.add({
+      targets: ui.portraitImage,
+      alpha: 0,
+      duration: 150,
+      onComplete: () => {
+        ui.portraitImage.setTexture(portraitKey);
+        ui.portraitImage.setPosition(ui._dialogArea.x + portraitW * 0.45, height - 40);
+        ui.portraitImage.setOrigin(0.5, 1);
+        ui.portraitImage.setFlipX(true);
+        ui.portraitImage.setDisplaySize(portraitW, ui._portraitDisplayH);
+        ui.tweens.add({
+          targets: ui.portraitImage,
+          alpha: 1,
+          duration: 250,
+          ease: 'Sine.easeInOut',
+        });
+      },
+    });
+
+    ui._currentPortraitEmotion = emotion;
+    console.log(`[DialogueManager] 切换立绘表情: ${portraitKey}`);
+  }
+
+  /** 隐藏立绘 */
+  hidePortrait() {
+    const ui = this.ui;
+    ui.tweens.killTweensOf(ui.portraitImage);
+    ui.tweens.add({
+      targets: ui.portraitImage,
+      alpha: 0,
+      duration: 200,
+      ease: 'Sine.easeIn',
+    });
+    ui._currentPortraitNpcId = null;
+    ui._currentPortraitEmotion = null;
   }
 
   /** 创建自由文本输入框 */
@@ -412,6 +543,7 @@ export class DialogueManager {
     ui.dialogName.setText(npcName);
     ui.dialogText.setText('');
     ui.dialogHint.setText('对话生成中……');
+    this.showPortrait(npcId);
     this.clearOptions();
     this.startCursorBlink();
 
@@ -447,6 +579,10 @@ export class DialogueManager {
           ui.cursorBlink.setVisible(false);
         } else {
           this.updateCursorPosition();
+        }
+        // ★ 根据文本内容检测情绪并切换立绘表情
+        if (ui._currentPortraitNpcId) {
+          this.updatePortraitEmotion(accumulatedText);
         }
       },
       onDone: async (result) => {
@@ -611,6 +747,8 @@ export class DialogueManager {
     const savedIsStreaming = ui.isStreaming;
     const savedPendingChapterChange = ui.pendingChapterChange;
     const savedPendingEnding = ui.pendingEnding;
+    const savedPortraitNpcId = ui._currentPortraitNpcId;
+    const savedPortraitEmotion = ui._currentPortraitEmotion;
 
     this.clearOptions();
     if (ui.dialogText) ui.dialogText.setMask(null);
@@ -633,6 +771,11 @@ export class DialogueManager {
       ui.isStreaming = savedIsStreaming;
       ui.pendingChapterChange = savedPendingChapterChange;
       ui.pendingEnding = savedPendingEnding;
+
+      // ★ 恢复立绘
+      if (savedPortraitNpcId) {
+        this.showPortrait(savedPortraitNpcId, savedPortraitEmotion);
+      }
 
       if (savedIsStreaming) {
         this.startCursorBlink();

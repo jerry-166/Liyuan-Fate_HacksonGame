@@ -50,46 +50,30 @@ export class StageTransition {
     }).setOrigin(0.5, 0).setAlpha(0);
     ui.transitionContainer.add(ui.transitionDesc);
 
-    // 点击提示
-    ui.transitionHint = ui.add.text(width / 2, height / 2, '', {
+    // 点击提示（居中靠下，醒目但不抢眼）
+    ui.transitionHint = ui.add.text(width / 2, height - 60, '', {
       fontFamily: '"Microsoft YaHei","PingFang SC","SimHei",sans-serif',
       fontSize: '18px', color: '#c8c0a0',
       stroke: '#000000', strokeThickness: 3,
-    }).setOrigin(0.5, 0).setAlpha(0);
+    }).setOrigin(0.5).setAlpha(0);
     ui.transitionContainer.add(ui.transitionHint);
 
-    // 继续按钮
-    ui.transitionContinueBtn = ui.add.container(width - 160, height - 80).setAlpha(0);
-    const btnBg = ui.add.graphics();
-    const drawBtn = (hover) => {
-      btnBg.clear();
-      btnBg.fillStyle(hover ? 0x3a3830 : 0x2a2820, 1);
-      btnBg.fillRoundedRect(-60, -16, 120, 32, 6);
-      btnBg.lineStyle(1, hover ? 0xd4b896 : 0x887766, hover ? 0.8 : 0.5);
-      btnBg.strokeRoundedRect(-60, -16, 120, 32, 6);
-    };
-    drawBtn(false);
-    ui.transitionContinueBtn.add(btnBg);
-    ui.transitionContinueBtn.add(ui.add.text(0, 0, '继续下一章', {
-      fontFamily: '"KaiTi","SimSun",serif', fontSize: '16px', color: '#d4b896',
-    }).setOrigin(0.5));
-    const btnZone = ui.add.zone(0, 0, 120, 32).setInteractive({ useHandCursor: true });
-    btnZone.on('pointerover', () => drawBtn(true));
-    btnZone.on('pointerout', () => drawBtn(false));
-    ui.transitionContinueBtn.add(btnZone);
-    ui.transitionContainer.add(ui.transitionContinueBtn);
+    // ★ 全屏透明交互层，用于点击检测
+    ui.transitionClickZone = ui.add.zone(width / 2, height / 2, width, height)
+      .setInteractive({ useHandCursor: true });
+    ui.transitionContainer.add(ui.transitionClickZone);
   }
 
-  /** 播放阶段过渡动画
+  /** 播放阶段过渡动画 — 点击全屏任意位置继续
    *  @param {Object} newStage - 阶段数据 { id, chapterId, name, description }
-   *  @param {Object} [options] - 可选配置
-   *  @param {boolean} [options.clickToDismiss=false] - 是否点击后关闭（序章用）
+   *  @param {Object} [options]
+   *  @param {Promise} [options.readyPromise] - 外部就绪 Promise；点击后等待它再淡出
    */
   async play(newStage, options = {}) {
     const ui = this.ui;
     const { width, height } = ui.cameras.main;
     const stageId = newStage.id;
-    const clickToDismiss = options.clickToDismiss === true;
+    const { readyPromise } = options;
 
     // 选择背景图：优先当前章节，无则 fallback 到默认（stageId=1）
     const textureKey = `transition_${stageId}`;
@@ -138,41 +122,45 @@ export class StageTransition {
       ui.tweens.add({ targets: ui.transitionDesc, alpha: 1, duration: 600, ease: 'Sine.easeIn' });
     });
 
-    if (clickToDismiss) {
-      // ★ 点击播放模式：显示提示，等待点击
-      ui.time.delayedCall(1000, () => {
-        ui.transitionHint.setText('—— 点击任意位置继续 ——');
-        ui.tweens.add({
-          targets: ui.transitionHint, alpha: 1, duration: 500,
-          onComplete: () => {
-            // 提示文字呼吸效果
-            ui.tweens.add({
-              targets: ui.transitionHint, alpha: 0.4, duration: 1200,
-              yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
-            });
-          },
-        });
+    // ★ 全屏点击播放模式：显示提示，等待点击
+    ui.time.delayedCall(1000, () => {
+      ui.transitionHint.setText('—— 点击任意位置继续 ——');
+      ui.tweens.add({
+        targets: ui.transitionHint, alpha: 1, duration: 500,
+        onComplete: () => {
+          // 提示文字呼吸效果
+          ui.tweens.add({
+            targets: ui.transitionHint, alpha: 0.4, duration: 1200,
+            yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
+          });
+        },
       });
+    });
 
-      // ★ 使用 scene 级 input 监听全屏点击，比 container 级更可靠
-      await new Promise(resolve => {
-        const onAnyClick = () => {
-          ui.input.off('pointerdown', onAnyClick);
-          resolve();
-        };
-        ui.input.on('pointerdown', onAnyClick);
-      });
+    // ★ scene 级全屏 pointerdown 监听，覆盖整个画布
+    await new Promise(resolve => {
+      const onAnyClick = () => {
+        ui.input.off('pointerdown', onAnyClick);
+        resolve();
+      };
+      ui.input.on('pointerdown', onAnyClick);
+    });
 
-      // 停掉呼吸动画
-      ui.tweens.killTweensOf(ui.transitionHint);
+    // 停掉呼吸动画
+    ui.tweens.killTweensOf(ui.transitionHint);
+    ui.transitionHint.setAlpha(1);
+
+    // ★ 如果有外部就绪 Promise（如 API 调用未完成），等待它再淡出
+    if (readyPromise) {
+      ui.transitionHint.setText('—— 正在准备剧情…… ——');
       ui.transitionHint.setAlpha(1);
-      // ★ 点击模式：快速淡出（300ms），让后续子场景切换更流畅
-      await this._fadeOut(ui.transitionContainer, 300);
-    } else {
-      // ★ 自动播放模式（章节过渡）：等待后淡出
-      await this._wait(2200);
-      await this._fadeOut(ui.transitionContainer, 600);
+      try {
+        await readyPromise;
+      } catch (_) { /* 忽略错误 */ }
     }
+
+    // 快速淡出（300ms），让后续场景切换更流畅
+    await this._fadeOut(ui.transitionContainer, 300);
 
     ui.transitionContainer.setVisible(false);
   }

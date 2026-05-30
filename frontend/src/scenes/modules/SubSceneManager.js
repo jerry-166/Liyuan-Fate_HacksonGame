@@ -19,9 +19,12 @@ import {
   generateBorderCollision, getCollisionKey, getNPCPositionsKey,
   SUB_MAP_SCALE,
 } from './SubSceneConfig.js';
-import { FALLBACK_NPC_SPRITE, NPC_SPRITES, addItemSparkle, loadImagesOnDemand, isTextureLoaded } from './GameUIHelpers.js';
+import { FALLBACK_NPC_SPRITE, NPC_SPRITES, addItemSparkle, loadImagesOnDemand, isTextureLoaded, preloadNPCSprites } from './GameUIHelpers.js';
 
 const TILE = GAME.TILE_SIZE;
+
+/** 回退精灵纹理 key */
+const FALLBACK_TEXTURE_KEY = `${FALLBACK_NPC_SPRITE.prefix}_idle_down`;
 
 export class SubSceneManager {
   /**
@@ -216,8 +219,8 @@ export class SubSceneManager {
     // 6. 加载子场景碰撞数据
     this._loadSubSceneCollision(config);
 
-    // 7. 创建子场景NPC（支持存档恢复位置）
-    this._createSubSceneNPCs(config, options?.storyNpcPositions);
+    // 7. 创建子场景NPC（支持存档恢复位置，含纹理预加载）
+    await this._createSubSceneNPCs(config, options?.storyNpcPositions);
 
     // 7.5 加载子场景专属物品
     this._createSubSceneItems(config);
@@ -251,6 +254,9 @@ export class SubSceneManager {
     scene.events.emit('input:lock', false);
     this._transitioning = false;
 
+    // ★ 通知音乐管理器切换BGM
+    scene.events.emit('music:scene', subSceneId);
+
     console.log(`[SubSceneManager] 进入子场景: ${config.name} (${subSceneId})`,
       options ? '(存档恢复)' : '');
   }
@@ -276,6 +282,18 @@ export class SubSceneManager {
     // 3. 销毁子场景NPC/物品精灵
     this._destroyAllEntities();
 
+    // ★ 保存离开的子场景ID（清除前记下）
+    const exitedSubSceneId = this.currentSubSceneId;
+    this.currentSubSceneId = null;
+
+    // ★★ 序章离开墓地：先播放章节过渡动画，再恢复地图（避免地图闪现）
+    const isPrologueGraveyardExit = scene._isProloguePhase && exitedSubSceneId === 'graveyard';
+    if (isPrologueGraveyardExit) {
+      // 屏幕当前为黑（fadeOut后），过渡动画在黑色底上出现
+      // 带动画播放完（含用户点击），再恢复地图 + 淡入，顺序整洁无闪动
+      await scene._onSubSceneExited(exitedSubSceneId);
+    }
+
     // 4. 恢复主地图
     this._restoreWorldMap();
 
@@ -299,16 +317,21 @@ export class SubSceneManager {
       cam.scrollY = Phaser.Math.Clamp(cam.scrollY, 0, Math.max(0, scene._mapBounds.h - cam.height));
     }
 
-    // 10. 清除子场景状态
-    this.currentSubSceneId = null;
-
-    // 11. 摄像机淡入
+    // 10. 摄像机淡入
     await this._fadeIn();
 
-    // 12. 解锁输入
+    // 11. 解锁输入
     scene.inputLocked = false;
     scene.events.emit('input:lock', false);
     this._transitioning = false;
+
+    // ★ 通知外部：子场景已退出（序章墓地已在上面处理，避免重复触发）
+    if (!isPrologueGraveyardExit) {
+      scene.events.emit('subscene:exited', exitedSubSceneId);
+    }
+
+    // ★ 通知音乐管理器切换回主地图BGM
+    scene.events.emit('music:scene', null);
 
     console.log('[SubSceneManager] 返回主地图');
   }
@@ -400,6 +423,9 @@ export class SubSceneManager {
     scene.interactHint?.setVisible(false);
     scene.currentNearbyNPC = null;
     scene.currentNearbyItem = null;
+
+    // ★ 通知音乐管理器切换回主地图BGM（存档加载等场景）
+    scene.events.emit('music:scene', null);
   }
 
   // ==================== 世界状态保存/恢复 ====================
@@ -683,11 +709,23 @@ export class SubSceneManager {
 
   // ==================== 子场景NPC ====================
 
-  /** 创建子场景NPC */
-  _createSubSceneNPCs(config, overridePositions) {
+  /** 创建子场景NPC（异步预加载纹理） */
+  async _createSubSceneNPCs(config, overridePositions) {
     const scene = this.scene;
     const placeholders = config.npcPlaceholders || [];
+    if (placeholders.length === 0) return;
+
     const scale = this._currentSubScale;
+
+    // ★ 预加载子场景所需的 NPC 纹理（不阻塞淡出动画期间的其他工作）
+    const neededIds = placeholders
+      .map(ph => ph.id)
+      .filter(id => NPC_SPRITES[id]); // 只预加载有专属精灵的 NPC
+    if (neededIds.length > 0) {
+      await preloadNPCSprites(scene, neededIds);
+    }
+
+    // ...existing code continues from here...
 
     // 位置优先级：存档恢复 > localStorage编辑器 > 配置默认值
     const overrideMap = {};
@@ -717,9 +755,15 @@ export class SubSceneManager {
       const off = this._subSceneOffset || { x: 0, y: 0 };
       const cfg = NPC_SPRITES[ph.id] || FALLBACK_NPC_SPRITE;
       const { x: posX, y: posY } = COORD.toPixel(col, row);
-      const startKey = `${cfg.prefix}_idle_down`;
+      const textureKey = `${cfg.prefix}_idle_down`;
 
-      const sprite = scene.physics.add.sprite(off.x + posX * scale, off.y + posY * scale, startKey);
+      // ★ 纹理检查：如果主纹理未加载，回退到 FALLBACK_TEXTURE_KEY
+      const useKey = scene.textures.exists(textureKey) ? textureKey : FALLBACK_TEXTURE_KEY;
+      if (!scene.textures.exists(textureKey)) {
+        console.warn(`[SubSceneManager] NPC "${ph.id}" 纹理 "${textureKey}" 未加载，使用回退精灵`);
+      }
+
+      const sprite = scene.physics.add.sprite(off.x + posX * scale, off.y + posY * scale, useKey);
       sprite.setScale(cfg.scale);
       sprite.setData('npcId', ph.id);
       sprite.setData('name', ph.name);
@@ -946,11 +990,17 @@ export class SubSceneManager {
     const saved = this._savedWorldState;
     if (!saved) return;
 
-    // 恢复故事NPC
+    // 恢复故事NPC（带去重保护）
     saved.storyNPCs.forEach(data => {
+      // ★ 去重：如果该 npcId 的精灵已存在，跳过
+      if (scene.npcs.some(s => s.getData('npcId') === data.npcId)) {
+        return;
+      }
       const cfg = data.spriteCfg || NPC_SPRITES[data.npcId] || FALLBACK_NPC_SPRITE;
-      const startKey = `${cfg.prefix}_idle_down`;
-      const sprite = scene.physics.add.sprite(data.x, data.y, startKey);
+      const textureKey = `${cfg.prefix}_idle_down`;
+      // ★ 纹理检查：如果主纹理不存在，回退到 FALLBACK_TEXTURE_KEY
+      const useKey = scene.textures.exists(textureKey) ? textureKey : FALLBACK_TEXTURE_KEY;
+      const sprite = scene.physics.add.sprite(data.x, data.y, useKey);
       sprite.setScale(cfg.scale);
       sprite.setData('npcId', data.npcId);
       sprite.setData('name', data.name);
@@ -974,11 +1024,17 @@ export class SubSceneManager {
       scene.npcBubbles.push(bubbleText);
     });
 
-    // 恢复普通NPC
+    // 恢复普通NPC（带去重保护）
     saved.townNPCs.forEach(data => {
+      // ★ 去重：如果该 npcId 的精灵已存在，跳过
+      if (scene.townNpcs.some(s => s.getData('npcId') === data.npcId)) {
+        return;
+      }
       const cfg = data.spriteCfg || FALLBACK_NPC_SPRITE;
-      const startKey = `${cfg.prefix}_idle_down`;
-      const sprite = scene.physics.add.sprite(data.x, data.y, startKey);
+      const textureKey = `${cfg.prefix}_idle_down`;
+      // ★ 纹理检查：回退到 FALLBACK_TEXTURE_KEY
+      const useKey = scene.textures.exists(textureKey) ? textureKey : FALLBACK_TEXTURE_KEY;
+      const sprite = scene.physics.add.sprite(data.x, data.y, useKey);
       sprite.setScale(cfg.scale);
       sprite.setData('npcId', data.npcId);
       sprite.setData('name', data.name);
