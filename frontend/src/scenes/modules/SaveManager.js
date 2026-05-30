@@ -27,6 +27,7 @@ export class SaveManager {
     overlay.fillStyle(0x000000, 0.6);
     overlay.fillRect(0, 0, width, height);
     overlay.setInteractive(new Phaser.Geom.Rectangle(0, 0, width, height), Phaser.Geom.Rectangle.Contains);
+    overlay.on('pointerdown', () => {}); // 消费事件但不做操作，防止穿透到下层
     ui.pauseContainer.add(overlay);
 
     const cx = width / 2, cy = height / 2;
@@ -172,8 +173,8 @@ export class SaveManager {
     const knobZone = ui.add.zone(cx, y + 8, sliderW + knobR * 2, knobR * 3)
       .setInteractive({ draggable: true, useHandCursor: true });
     ui.pauseContainer.add(knobZone);
-    knobZone.on('drag', (_p, dragX) => {
-      const rel = Phaser.Math.Clamp(dragX, left, left + sliderW) - left;
+    knobZone.on('drag', (_gameObject, pointer) => {
+      const rel = Phaser.Math.Clamp(pointer.x, left, left + sliderW) - left;
       const vol = Math.round((rel / sliderW) * 10) / 10;
       this._setVolume(vol, drawTrackFill, drawKnob);
     });

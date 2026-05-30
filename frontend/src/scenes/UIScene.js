@@ -841,6 +841,7 @@ export class UIScene extends Phaser.Scene {
 
     if (this.pauseMenuVisible) { this.togglePauseMenu(); return; }
     if (this.dialogActive) { this.closeDialog(); return; }
+    if (this._taskPanelUI?.visible) { this.taskPanel.hide(); return; }
     if (this.backpackPanelVisible) {
       if (this.showItemMode) this.cancelShowItemMode();
       else this.toggleBackpackPanel();
@@ -849,6 +850,16 @@ export class UIScene extends Phaser.Scene {
     if (this._storyPanelUI?.visible) { this.storyPanel.hide(); return; }
     if (this.historyPanelVisible) { this.historyPanel.toggle(); return; }
     this.togglePauseMenu();
+  }
+
+  // =========================== 面板互斥 ===========================
+
+  /** 关闭所有非对话面板（用于快捷键互斥） */
+  _closeAllPanels() {
+    if (this.backpackPanelVisible) this.toggleBackpackPanel();
+    if (this._storyPanelUI?.visible) this.storyPanel.hide();
+    if (this.historyPanelVisible) this.historyPanel.toggle();
+    if (this._taskPanelUI?.visible) this.taskPanel.hide();
   }
 
   // =========================== 更新循环 ============================
@@ -869,7 +880,8 @@ export class UIScene extends Phaser.Scene {
         else this.toggleBackpackPanel();
         return;
       }
-      if (!this.dialogActive && !this.pauseMenuVisible && !this.historyPanelVisible) {
+      if (!this.dialogActive && !this.pauseMenuVisible) {
+        this._closeAllPanels();
         this.toggleBackpackPanel();
         return;
       }
@@ -893,23 +905,26 @@ export class UIScene extends Phaser.Scene {
         this.confirmShowItem();
         return;
       }
-      return;
+      // W/S/Enter 之外的按键（如 T/H/J/ESC）不在此拦截，让后续逻辑处理
     }
 
-    // 历史面板 — 编辑模式下禁用
-    if (!editing && !this.dialogActive && Phaser.Input.Keyboard.JustDown(this.keyH)) {
+    // 历史面板 H 键 — 互斥：打开前关闭其他面板
+    if (!editing && !this.dialogActive && !this.pauseMenuVisible && Phaser.Input.Keyboard.JustDown(this.keyH)) {
+      if (!this.historyPanelVisible) this._closeAllPanels();
       this.historyPanel.toggle();
     }
-    // 剧本面板快捷键 J
+    // 剧本面板 J 键 — 互斥
     if (!editing && !this.dialogActive && !this.pauseMenuVisible && Phaser.Input.Keyboard.JustDown(this.keyJ)) {
+      if (!this._storyPanelUI?.visible) this._closeAllPanels();
       this.storyPanel.toggle();
     }
     if (this.historyPanelVisible && Phaser.Input.Keyboard.JustDown(this.keyF)) {
       this.historyPanel.toggle();
     }
 
-    // 任务面板
-    if (!this.dialogActive && !this.pauseMenuVisible && Phaser.Input.Keyboard.JustDown(this.keyT)) {
+    // 任务面板 T 键 — 互斥
+    if (!this.dialogActive && !this.pauseMenuVisible && !editing && Phaser.Input.Keyboard.JustDown(this.keyT)) {
+      if (!this._taskPanelUI?.visible) this._closeAllPanels();
       this.taskPanel.toggle();
     }
 
