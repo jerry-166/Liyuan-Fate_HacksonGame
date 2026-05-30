@@ -298,6 +298,14 @@ export class GameScene extends Phaser.Scene {
     this.input.on('pointerdown', unlockAudio);
     this.input.keyboard?.on('keydown', unlockAudio);
 
+    // ★ 场景停止时销毁音乐管理器（返回主菜单等）
+    this.events.on('shutdown', () => {
+      if (this.musicManager) {
+        this.musicManager.destroy();
+        console.log('[GameScene] 音乐管理器已销毁');
+      }
+    });
+
     // 控制提示
     this._showControlsHint();
 
@@ -625,6 +633,9 @@ export class GameScene extends Phaser.Scene {
       this._restorePlayerFromState(gameState);
       this._removeStartupOverlay();
 
+      // ★ 恢复主地图背景音乐
+      this.events.emit('music:scene', null);
+
       if (gameState.npcs) {
         this.time.delayedCall(300, () => this.refreshNPCsFromState(gameState));
       }
@@ -734,6 +745,8 @@ export class GameScene extends Phaser.Scene {
       this._reloadSubSceneFromState(gameState, savedSubSceneId);
     } else {
       this._reloadMainMapFromState(gameState);
+      // ★ 恢复主地图背景音乐
+      this.events.emit('music:scene', null);
     }
 
     // 解锁输入

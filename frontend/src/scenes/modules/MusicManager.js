@@ -61,11 +61,10 @@ export class MusicManager {
   }
 
   /**
-   * 播放指定场景的音乐
+   * 播放指定场景的音乐（_switchTo 内部已有同 key 去重）
    * @param {string|null} subSceneId - 子场景ID，null 表示主地图
    */
   playForScene(subSceneId = null) {
-    if (subSceneId === this._currentScene) return;
     this._currentScene = subSceneId;
 
     const key = subSceneId ? SUB_SCENE_MUSIC[subSceneId] : MAIN_THEME_KEY;
