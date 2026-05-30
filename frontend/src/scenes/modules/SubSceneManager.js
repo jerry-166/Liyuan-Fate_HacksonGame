@@ -19,7 +19,7 @@ import {
   generateBorderCollision, getCollisionKey, getNPCPositionsKey,
   SUB_MAP_SCALE,
 } from './SubSceneConfig.js';
-import { FALLBACK_NPC_SPRITE, NPC_SPRITES } from './GameUIHelpers.js';
+import { FALLBACK_NPC_SPRITE, NPC_SPRITES, addItemSparkle, loadImagesOnDemand, isTextureLoaded } from './GameUIHelpers.js';
 
 const TILE = GAME.TILE_SIZE;
 
@@ -204,6 +204,9 @@ export class SubSceneManager {
     // 3. 摄像机淡出
     await this._fadeOut();
 
+    // ★ 确保子场景地图图片已加载（懒加载：首次进入时自动下载）
+    await this._ensureSubSceneMapLoaded(config);
+
     // 4. 销毁当前NPC/物品精灵
     this._destroyAllEntities();
 
@@ -375,7 +378,7 @@ export class SubSceneManager {
         }
       } catch (_) { /* ignore */ }
       if (!placed) {
-        let spawnCol = 44, spawnRow = 28;
+        let spawnCol = 7, spawnRow = 5;
         try {
           const saved = localStorage.getItem('editor_player_start_position');
           if (saved) {
@@ -482,7 +485,33 @@ export class SubSceneManager {
     scene.currentNearbyNPC = null;
   }
 
+  /** 仅清理子场景 UI（地图图、边框、背景），不销毁实体，不恢复主地图 */
+  _cleanSubSceneUI() {
+    if (this._subSceneBg) { this._subSceneBg.destroy(); this._subSceneBg = null; }
+    if (this._subSceneBorder) { this._subSceneBorder.destroy(); this._subSceneBorder = null; }
+    this._subSceneOffset = null;
+    this.currentSubSceneId = null;
+    this._transitioning = false;
+    this._subMapArea = null;
+    this.nearbyBuilding = null;
+  }
+
   // ==================== 地图切换 ====================
+
+  /**
+   * 确保子场景地图图片已加载（首次进入时按需下载）
+   * @param {Object} config - 子场景配置
+   */
+  async _ensureSubSceneMapLoaded(config) {
+    const assets = [{ key: config.imageKey, path: config.imagePath }];
+    if (config.hasStateSwitch && config.altImageKey) {
+      assets.push({ key: config.altImageKey, path: config.altImagePath });
+    }
+    const pending = assets.filter(a => !isTextureLoaded(a.key));
+    if (pending.length === 0) return;
+    console.log(`[SubSceneManager] 按需加载子场景地图: ${pending.map(a => a.key).join(', ')}`);
+    await loadImagesOnDemand(this.scene, pending);
+  }
 
   /** 切换到子场景地图 */
   _switchToSubSceneMap(config) {
@@ -772,6 +801,10 @@ export class SubSceneManager {
           duration: 1200, yoyo: true, repeat: -1,
           ease: 'Sine.easeInOut',
         });
+
+        // ★ 添加闪光效果
+        addItemSparkle(scene, sprite);
+
         scene.sceneItems.push(sprite);
       });
       console.log(`[SubSceneManager] 子场景物品已加载: ${items.length} 个` + (skipped ? ` (跳过${skipped}个已收集)` : ''));
@@ -829,7 +862,7 @@ export class SubSceneManager {
       } catch (_) { /* ignore */ }
       if (!restored) {
         // 最后兜底：编辑器出生点或默认位置
-        let spawnCol = 44, spawnRow = 28;
+        let spawnCol = 7, spawnRow = 5;
         try {
           const saved = localStorage.getItem('editor_player_start_position');
           if (saved) {
@@ -1202,6 +1235,7 @@ export class SubSceneManager {
     } else {
       // 在主地图中：检查是否接近建筑入口
       if (this.nearbyBuilding) {
+        // 不传 playerPos，由 _placePlayerAtSpawn 使用编辑器保存的出生位置
         this.enterSubScene(this.nearbyBuilding.subSceneId);
         return true;
       }

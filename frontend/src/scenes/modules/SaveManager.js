@@ -30,7 +30,7 @@ export class SaveManager {
     ui.pauseContainer.add(overlay);
 
     const cx = width / 2, cy = height / 2;
-    const panelH = 370, panelW = 320;
+    const panelH = 520, panelW = 340;
 
     const panelBg = ui.add.graphics();
     panelBg.fillStyle(0x1a1820, 0.95);
@@ -73,9 +73,36 @@ export class SaveManager {
     _makeBtn('继续游戏', startY, () => this.togglePause());
     _makeBtn('保存存档', startY + gap, () => this.showSlots('save'));
     _makeBtn('加载存档', startY + gap * 2, () => this.showSlots('load'));
+    _makeBtn('⏭ 跳章 (调试)', startY + gap * 3, () => {
+      this.togglePause();
+      ui._handleSkipChapter();
+    });
 
-    this._createVolumeSlider(cx, startY + gap * 3, panelW, cy, panelH);
-    _makeBtn('返回主菜单', startY + gap * 4, () => ui.onReturnToMenu());
+    this._createVolumeSlider(cx, startY + gap * 4, panelW, cy, panelH);
+    _makeBtn('返回主菜单', startY + gap * 5, () => ui.onReturnToMenu());
+
+    // —— 操作说明 ——
+    const guideY = startY + gap * 5 + 38;
+    const guideDiv = ui.add.graphics();
+    guideDiv.lineStyle(1, 0xc4a882, 0.2);
+    guideDiv.lineBetween(cx - 140, guideY, cx + 140, guideY);
+    ui.pauseContainer.add(guideDiv);
+
+    const guideLines = [
+      '操作说明',
+      'WASD / 方向键  移动',
+      'F  拾取物品 / 场景交互',
+      'T / J  任务 / 剧本',
+      'B / H  背包 / 对话历史',
+    ];
+    guideLines.forEach((line, i) => {
+      const isTitle = i === 0;
+      ui.pauseContainer.add(ui.add.text(cx, guideY + 8 + i * 18, line, {
+        fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+        fontSize: isTitle ? '13px' : '11px',
+        color: isTitle ? '#d4b896' : '#777766',
+      }).setOrigin(0.5));
+    });
 
     ui.pauseContainer.add(ui.add.text(cx, cy + panelH / 2 - 20, '[ESC] 关闭 · 点击操作', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '11px', color: '#666655',

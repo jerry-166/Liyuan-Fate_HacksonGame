@@ -25,6 +25,8 @@ import { CollisionEditor } from './modules/CollisionEditor.js';
 import {
   PROTAGONIST, NPC_SPRITES, FALLBACK_NPC_SPRITE, DIRS,
   showToast as _showToast, showLoadingHint as _showLoadingHint, hideLoadingHint as _hideLoadingHint,
+  addItemSparkle as _addItemSparkle,
+  loadImagesOnDemand, isTextureLoaded, markTextureLoaded,
 } from './modules/GameUIHelpers.js';
 import { SUBSCENES, SUB_MAP_SCALE } from './modules/SubSceneConfig.js';
 import { SubSceneManager } from './modules/SubSceneManager.js';
@@ -86,33 +88,26 @@ export class GameScene extends Phaser.Scene {
   }
 
   preload() {
-    // 加载主角精灵（四方向 idle + walk 各一张）
+    // ★ 主角精灵已由 BootScene 加载，这里标记避免重复
     for (const dir of DIRS) {
-      this.load.image(`${PROTAGONIST.prefix}_idle_${dir}`, `${PROTAGONIST.baseDir}/${PROTAGONIST.prefix}_idle_${dir}.png`);
-      this.load.image(`${PROTAGONIST.prefix}_walk_${dir}`, `${PROTAGONIST.baseDir}/${PROTAGONIST.prefix}_walk_${dir}.png`);
+      markTextureLoaded(`${PROTAGONIST.prefix}_idle_${dir}`);
+      markTextureLoaded(`${PROTAGONIST.prefix}_walk_${dir}`);
     }
-    // 加载 NPC 精灵图
+    markTextureLoaded('town_worldmap');
+    markTextureLoaded('transition_1');
+
+    // 加载所有 NPC 精灵（5个NPC × 8帧 = 40个文件，~2MB，文件小影响不大）
     for (const cfg of Object.values(NPC_SPRITES)) {
       for (const dir of DIRS) {
         this.load.image(`${cfg.prefix}_idle_${dir}`, `${cfg.baseDir}/${cfg.prefix}_idle_${dir}.png`);
         this.load.image(`${cfg.prefix}_walk_${dir}`, `${cfg.baseDir}/${cfg.prefix}_walk_${dir}.png`);
       }
     }
-    // 加载大地图素材
-    this.load.image('town_worldmap', '/assets/images/maps/town_worldmap.png');
 
-    // 加载子场景地图图片
-    for (const config of Object.values(SUBSCENES)) {
-      this.load.image(config.imageKey, config.imagePath);
-      if (config.hasStateSwitch && config.altImageKey) {
-        this.load.image(config.altImageKey, config.altImagePath);
-      }
-    }
+    // ★ 只预加载序章立即使用的子场景（墓地），其余按需懒加载
+    this.load.image('subscene_graveyard', '/assets/images/maps/graveyard.png');
 
-    // 加载章节过渡背景图
-    for (const [stageId, path] of Object.entries(CHAPTER_IMAGES)) {
-      this.load.image(`transition_${stageId}`, path);
-    }
+    // ★ 其余子场景地图和过渡图由 SubSceneManager / StageTransition 按需加载
   }
 
   create() {
@@ -137,6 +132,11 @@ export class GameScene extends Phaser.Scene {
 
     // 子场景管理器
     this.subSceneManager = new SubSceneManager(this);
+
+    // ★ 黑色遮罩：覆盖主地图加载过程，进入游戏后根据流程移除
+    const { width: sw, height: sh } = this.cameras.main;
+    this._startupOverlay = this.add.rectangle(sw / 2, sh / 2, sw, sh, 0x000000, 1)
+      .setDepth(200).setScrollFactor(0).setOrigin(0.5);
 
     // 从后端文件系统加载编辑器配置（如果localStorage中没有数据）
     // 必须等配置加载完再创建 NPC，否则首次打开时NPC位置会回退到硬编码默认值
@@ -287,15 +287,50 @@ export class GameScene extends Phaser.Scene {
 
   // ==================== 游戏初始化 ====================
 
+  /** 移除启动黑屏遮罩 — 在进入墓地或存档恢复完成后调用 */
+  _removeStartupOverlay() {
+    if (this._startupOverlay) {
+      this._startupOverlay.destroy();
+      this._startupOverlay = null;
+    }
+  }
+
+  /**
+   * 将主地图玩家位置设置到建筑入口区域中心（用于新游戏等场景）
+   * @param {string} subSceneId - 子场景ID
+   */
+  _setPlayerToBuildingEntrance(subSceneId) {
+    try {
+      const saved = localStorage.getItem('editor_entry_zones');
+      if (!saved) return;
+      const zones = JSON.parse(saved);
+      const entry = zones.find(z => z.subSceneId === subSceneId);
+      if (!entry || !entry.zone) return;
+      const z = entry.zone;
+      const cc = z.col + Math.floor(z.w / 2);
+      const rr = z.row + Math.floor(z.h / 2) + 1; // 入口区域中心偏南1格
+      const pos = COORD.toPixel(cc, rr);
+      this.player.x = pos.x * MAP_SCALE;
+      this.player.y = pos.y * MAP_SCALE;
+    } catch (_) { /* ignore */ }
+  }
+
   /**
    * 初始化新游戏 — POST /api/game/start → 自动开始第一章
    */
   async initGame() {
     try {
       const { startGame, saveGameState, startChapter } = await import('../api/client.js');
-      this._loadingHint = _showLoadingHint(this, '正在创建新的故事……');
+      // ★ 延迟显示加载提示：只在服务器响应超过400ms时才显示，避免一闪而过
+      let loadingHintShown = false;
+      const hintTimer = setTimeout(() => {
+        loadingHintShown = true;
+        this._loadingHint = _showLoadingHint(this, '正在创建新的故事……');
+      }, 400);
 
       const gameState = await startGame('玩家');
+      clearTimeout(hintTimer);
+      if (loadingHintShown) _hideLoadingHint(this._loadingHint);
       if (!gameState || !gameState.session_id) throw new Error('创建游戏失败');
 
       let stage = gameState.current_stage || 1;
@@ -304,8 +339,6 @@ export class GameScene extends Phaser.Scene {
         chapterId = gameState.current_chapter.chapter_id;
         chapterName = gameState.current_chapter.chapter_name;
       }
-
-      _hideLoadingHint(this._loadingHint);
       this.currentStage = stage;
 
       localStorage.setItem('__active_session__', gameState.session_id);
@@ -364,13 +397,13 @@ export class GameScene extends Phaser.Scene {
         }
       }
 
-      // 序章过渡动画（新游戏时展示）
-      this.time.delayedCall(1000, () => {
+      // 序章过渡动画（新游戏时展示）：提前启动 timer，与 startChapter 并行
+      this.time.delayedCall(300, async () => {
         const ui = this.scene.get('UIScene');
         if (ui && ui.stageTransition) {
           const firstCh = gameState.first_chapter || {};
           const chDesc = firstCh.description || '';
-          ui.stageTransition.play({
+          await ui.stageTransition.play({
             id: CHAPTER_MAP[firstCh.chapter_id] || 1,
             chapterId: firstCh.chapter_id || 'ch_prologue',
             name: firstCh.name || '归乡',
@@ -389,6 +422,13 @@ export class GameScene extends Phaser.Scene {
             }
             if (ui.taskPanel) ui.taskPanel.refreshContent();
           });
+
+          // ★ 将主地图玩家位置设为墓地入口区域中心，确保离开墓地时出现在入口处
+          this._setPlayerToBuildingEntrance('graveyard');
+          // 点击后：进入墓地（黑色遮罩覆盖过渡过程，避免主地图闪现）
+          await this.subSceneManager.enterSubScene('graveyard');
+          // 墓地加载完成，移除遮罩露出子场景
+          this._removeStartupOverlay();
         }
       });
 
@@ -404,9 +444,7 @@ export class GameScene extends Phaser.Scene {
    * 恢复存档游戏
    */
   async restoreGame(sessionId) {
-    // ★ 防御性：如果当前在子场景中，强制退出避免状态残留
-    this.subSceneManager.forceExitSubScene();
-
+    // ★ create() 时已在主地图初始状态，无需 forceExitSubScene
     try {
       const { getGameState, saveGameState } = await import('../api/client.js');
       this._loadingHint = _showLoadingHint(this, '正在加载存档……');
@@ -465,6 +503,7 @@ export class GameScene extends Phaser.Scene {
       if (gameState._sub_scene_id) {
         console.log('[GameScene] restoreGame: 检测到子场景存档', gameState._sub_scene_id);
         saveGameState(sessionId, gameState);
+        this._removeStartupOverlay();
         this.time.delayedCall(300, () => {
           this._reloadSubSceneFromState(gameState, gameState._sub_scene_id);
         });
@@ -476,6 +515,7 @@ export class GameScene extends Phaser.Scene {
 
       // ★ 主地图路径：同步恢复主角位置（不等 NPC 异步加载完成）
       this._restorePlayerFromState(gameState);
+      this._removeStartupOverlay();
 
       if (gameState.npcs) {
         this.time.delayedCall(300, () => this.refreshNPCsFromState(gameState));
@@ -517,16 +557,25 @@ export class GameScene extends Phaser.Scene {
     const sessionId = gameState.session_id;
     if (!sessionId) return;
 
-    // ★ 强制退出当前子场景（如果正在某子场景中，确保 UI 清理干净）
-    this.subSceneManager.forceExitSubScene();
-
     const savedSubSceneId = gameState._sub_scene_id;
     console.log('[GameScene] reloadFromState: stage=', gameState.current_stage,
       'npcs=', gameState.npcs?.length,
-      'subSceneId=', savedSubSceneId);
+      'subSceneId=', savedSubSceneId, 'currentSubScene=', this.subSceneManager.currentSubSceneId);
 
-    // ★ 从 localStorage 合并位置数据（仅主地图场景使用）
-    if (!savedSubSceneId) {
+    // ★ 根据目标场景类型决定清理策略
+    if (savedSubSceneId) {
+      // ★★★ 子场景存档：清理当前实体但不恢复主地图实体（enterSubScene 的 fadeOut 会遮住过渡）
+      this.subSceneManager._destroyAllEntities();
+      // 销毁子场景UI（如果当前在子场景中），避免残留
+      this.subSceneManager._cleanSubSceneUI();
+    } else {
+      // ★★★ 主地图存档：退出子场景并恢复主地图 ★★★
+      if (this.subSceneManager.isInSubScene()) {
+        this.subSceneManager.forceExitSubScene();
+      } else {
+        this.subSceneManager._destroyAllEntities();
+      }
+      // 从 localStorage 合并位置数据
       _mergeLocalPositionState(sessionId, gameState);
     }
 
@@ -543,7 +592,6 @@ export class GameScene extends Phaser.Scene {
       chapterId = gameState.current_chapter.chapter_id;
       chapterName = gameState.current_chapter.chapter_name;
     }
-    // ★ 构建 NPC 名称映射 + 转换 dialogue_history 为前端格式
     const npcNames = _buildNpcNameMap(gameState.npcs);
     const dialogueHistory = _convertDialogueHistory(gameState.dialogue_history || [], npcNames);
 
@@ -572,13 +620,11 @@ export class GameScene extends Phaser.Scene {
       });
     }
 
-    // ====== 分路径处理 ======
+    // ====== 分路径恢复 ======
     if (savedSubSceneId) {
-      // ★★★ 子场景存档：跳过主地图 NPC/主角/物品加载，直接进入子场景 ★★★
       console.log(`[GameScene] 检测到子场景存档: ${savedSubSceneId}，直接恢复子场景`);
       this._reloadSubSceneFromState(gameState, savedSubSceneId);
     } else {
-      // ★★★ 主地图存档：正常加载主地图实体 ★★★
       this._reloadMainMapFromState(gameState);
     }
 
@@ -590,7 +636,7 @@ export class GameScene extends Phaser.Scene {
    * 从子场景存档恢复 — 直接进入子场景，不加载主地图实体
    */
   _reloadSubSceneFromState(gameState, subSceneId) {
-    // ★ 同步恢复主角可见性（forceExitSubScene 已放到主地图兜底位置）
+    // ★ 确保主角可见（可能在之前的子场景中被隐藏）
     if (this.player) {
       this.player.setVisible(true);
       this.player.setAlpha(1);
@@ -723,6 +769,9 @@ export class GameScene extends Phaser.Scene {
       ease: 'Sine.easeInOut',
     });
 
+    // ★ 添加闪光效果（alpha呼吸 + 缩放脉冲）
+    _addItemSparkle(this, sprite);
+
     this.sceneItems.push(sprite);
     return sprite;
   }
@@ -819,7 +868,7 @@ export class GameScene extends Phaser.Scene {
     });
     const playerTile = this.player
       ? COORD.toTile((this.player.x - off.x) / effectiveScale, (this.player.y - off.y) / effectiveScale)
-      : { col: 44, row: 28 };
+      : { col: 7, row: 5 };
 
     return { storyNpcs, townNpcs, player: playerTile, subSceneId: this.subSceneManager.currentSubSceneId };
   }
@@ -1237,35 +1286,55 @@ export class GameScene extends Phaser.Scene {
       const tile = COORD.toTile((npc.x - off.x) / effectiveScale, (npc.y - off.y) / effectiveScale);
       npcPositions[npc.getData('npcId')] = { col: tile.col, row: tile.row };
     }
-    // 收集物品位置（按 editorIdx 排序保证顺序稳定）
-    const itemPositions = this.sceneItems
-      .map((sp, idx) => {
-        const tile = COORD.toTile((sp.x - off.x) / effectiveScale, (sp.y - off.y) / effectiveScale);
-        return {
-          _editorIdx: idx,
-          item_id: sp.getData('itemId'),
-          name: sp.getData('name'),
-          emoji: sp.text,
-          size: parseInt(sp.style.fontSize, 10) / effectiveScale,
-          col: tile.col,
-          row: tile.row,
-        };
-      })
-      .sort((a, b) => (a._editorIdx - b._editorIdx));
+    // ★ 合并模式：已有物品更新位置，新物品追加，互不干扰
+    const subId = this.subSceneManager.currentSubSceneId;
+    const itemKey = subId
+      ? `editor_item_positions_${subId}`
+      : 'editor_item_positions';
+    // 1. 读取已持久化的物品位置
+    let existingItems = [];
+    try {
+      const saved = localStorage.getItem(itemKey);
+      if (saved) existingItems = JSON.parse(saved);
+      if (!Array.isArray(existingItems)) existingItems = [];
+    } catch (_) { existingItems = []; }
+    // 2. 按 item_id 建立映射
+    const itemMap = {};
+    existingItems.forEach((item, idx) => {
+      if (item.item_id) itemMap[item.item_id] = { ...item, _editorIdx: idx };
+    });
+    // 3. 当前场景中的物品 → 更新或新增到映射
+    this.sceneItems.forEach((sp) => {
+      const itemId = sp.getData('itemId');
+      if (!itemId) return;
+      const tile = COORD.toTile((sp.x - off.x) / effectiveScale, (sp.y - off.y) / effectiveScale);
+      const entry = {
+        item_id: itemId,
+        name: sp.getData('name'),
+        emoji: sp.text,
+        size: parseInt(sp.style.fontSize, 10) / effectiveScale,
+        col: tile.col,
+        row: tile.row,
+      };
+      if (itemMap[itemId]) {
+        // 已有 → 更新位置信息
+        Object.assign(itemMap[itemId], entry);
+      } else {
+        // 没有 → 记录新物品
+        itemMap[itemId] = entry;
+      }
+    });
+    const itemPositions = Object.values(itemMap);
     // 注意：出生点由 setPlayerSpawnPoint() 显式保存，这里不再自动覆盖，
     // 避免退出编辑时用玩家当前位置覆写掉设计者手动指定的出生位置。
     try {
       // 区分主地图和子场景的碰撞 data key
-      const subId = this.subSceneManager.currentSubSceneId;
       const collisionKey = subId
         ? `editor_collision_map_${subId}`
         : 'editor_collision_map';
       const npcKey = subId
         ? `editor_npc_positions_${subId}`
         : 'editor_npc_positions';
-      const itemKey = subId
-        ? `editor_item_positions_${subId}`
-        : 'editor_item_positions';
       localStorage.setItem(collisionKey, JSON.stringify(this._collisionMap));
       localStorage.setItem(npcKey, JSON.stringify(npcPositions));
       localStorage.setItem(itemKey, JSON.stringify(itemPositions));
@@ -1386,14 +1455,34 @@ export class GameScene extends Phaser.Scene {
     _showToast(this, `已放置: ${item.name} [${item.col},${item.row}]`, 1500);
   }
 
+  /** 从 localStorage 中移除指定物品（辅助方法） */
+  _removeItemFromStorage(itemSprite) {
+    const itemId = itemSprite.getData('itemId');
+    if (!itemId) return;
+    const subId = this.subSceneManager.currentSubSceneId;
+    const itemKey = subId
+      ? `editor_item_positions_${subId}`
+      : 'editor_item_positions';
+    try {
+      const saved = localStorage.getItem(itemKey);
+      if (!saved) return;
+      let items = JSON.parse(saved);
+      if (!Array.isArray(items)) return;
+      items = items.filter(it => it.item_id !== itemId);
+      localStorage.setItem(itemKey, JSON.stringify(items));
+    } catch (_) { /* ignore */ }
+  }
+
   /** 编辑器: 删除当前拖拽中的或最近的物品 */
   _editorDeleteItem() {
     const ed = this._editor;
     // 优先删除正在拖拽的物品
     if (ed.draggedItem) {
+      const itemId = ed.draggedItem.getData('itemId');
       const idx = this.sceneItems.indexOf(ed.draggedItem);
       if (idx >= 0) this.sceneItems.splice(idx, 1);
       this.tweens.killTweensOf(ed.draggedItem);
+      this._removeItemFromStorage(ed.draggedItem);
       ed.draggedItem.destroy();
       ed.draggedItem = null;
       this._saveToLocalStorage();
@@ -1415,6 +1504,7 @@ export class GameScene extends Phaser.Scene {
       const idx = this.sceneItems.indexOf(nearest);
       if (idx >= 0) this.sceneItems.splice(idx, 1);
       this.tweens.killTweensOf(nearest);
+      this._removeItemFromStorage(nearest);
       nearest.destroy();
       this._saveToLocalStorage();
       ed.drawGrid();
@@ -1487,7 +1577,7 @@ export class GameScene extends Phaser.Scene {
 
   createPlayer() {
     // 优先加载编辑器默认起始位置
-    let col = 44, row = 28;
+    let col = 7, row = 5;  // 墓地入口附近（序章起点）
     try {
       const saved = localStorage.getItem('editor_player_start_position');
       if (saved) {
@@ -1598,6 +1688,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   _showNPCActionButtons(npc) {
+    this.interactHint.setVisible(false);
     const cam = this.cameras.main;
     const effectiveScale = this.subSceneManager.getEffectiveScale();
     const relX = npc.x - cam.scrollX;
@@ -1867,21 +1958,12 @@ export class GameScene extends Phaser.Scene {
     // 子场景入口/出口接近检测
     this.subSceneManager.updateProximityHints();
 
-    // F 键交互
+    // F 键交互 — 仅用于子场景切换和物品拾取；NPC 交互已自动弹出
     if (!this.inputLocked && Phaser.Input.Keyboard.JustDown(this.wasd.F)) {
-      // 如果 NPC 按钮已显示，F 键关闭按钮
-      if (this.npcActionContainer.visible) {
-        this._hideNPCActionButtons();
-        this.interactHint.setVisible(true); // 恢复提示
-      }
       // 优先处理子场景交互
-      else if (!this.subSceneManager.handleFKeyInteraction()) {
+      if (!this.subSceneManager.handleFKeyInteraction()) {
         if (this.currentNearbyItem) {
           this.pickupItem(this.currentNearbyItem);
-        } else if (this.currentNearbyNPC) {
-          // 弹出 NPC 交互按钮（对话 / 展示物品）
-          this._showNPCActionButtons(this.currentNearbyNPC);
-          this.interactHint.setVisible(false); // 隐藏提示，按钮已显示
         }
       }
     }
@@ -1972,21 +2054,28 @@ export class GameScene extends Phaser.Scene {
       if (dist < 64) this.currentNearbyNPC = npc;
     }
 
-    // NPC 交互：提示文字出现在 NPC 头上；F键弹出选择按钮
+    // NPC 交互：靠近自动弹出选项按钮
+    this.interactHint.setVisible(false); // NPC优先，清除物品拾取提示
     if (this.currentNearbyNPC && !this.inputLocked) {
       if (!this.npcActionContainer.visible) {
-        const npc = this.currentNearbyNPC;
-        this.interactHint.setText(`按 [F] 与 ${npc.getData('name')} 交互`);
-        this.interactHint.setPosition(npc.x, npc.y - 40);
-        this.interactHint.setVisible(true);
+        this._showNPCActionButtons(this.currentNearbyNPC);
+      } else {
+        // 如果当前NPC和弹窗指向的不是同一个，切换
+        const currentTargetId = this._npcActionTarget?.getData('npcId');
+        const nearbyId = this.currentNearbyNPC.getData('npcId');
+        if (currentTargetId !== nearbyId) {
+          this._showNPCActionButtons(this.currentNearbyNPC);
+        } else {
+          this._updateNPCActionPosition(this.currentNearbyNPC);
+        }
       }
-      // 按钮可见时更新位置跟随 NPC
-      if (this.npcActionContainer.visible) {
-        this._updateNPCActionPosition(this.currentNearbyNPC);
-      }
+      this._npcActionTarget = this.currentNearbyNPC;
     } else {
-      // NPC 离开范围时关闭按钮
-      if (this.npcActionContainer.visible) this._hideNPCActionButtons();
+      // NPC 离开范围时关闭按钮；没有NPC且inputLocked时也关闭
+      if (this.npcActionContainer.visible) {
+        this._hideNPCActionButtons();
+        this._npcActionTarget = null;
+      }
     }
   }
 

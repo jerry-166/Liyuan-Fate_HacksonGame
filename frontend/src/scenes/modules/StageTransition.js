@@ -5,6 +5,7 @@
  */
 
 import { STAGE_TONES, CHAPTER_IMAGES, getChapterLabel } from '../../config.js';
+import { loadImagesOnDemand, isTextureLoaded } from './GameUIHelpers.js';
 
 export class StageTransition {
   /**
@@ -26,30 +27,34 @@ export class StageTransition {
       .setDisplaySize(width, height);
     ui.transitionContainer.add(ui.transitionBg);
 
-    // 半透明暗色遮罩
+    // 半透明暗色遮罩（加深以提高文字对比度）
     ui.transitionDim = ui.add.graphics();
-    ui.transitionDim.fillStyle(0x000000, 0.45);
+    ui.transitionDim.fillStyle(0x000000, 0.58);
     ui.transitionDim.fillRect(0, 0, width, height);
     ui.transitionContainer.add(ui.transitionDim);
 
-    // 章节标题
+    // 章节标题 — 大号醒目
     ui.transitionTitle = ui.add.text(width / 2, height / 2 - 60, '', {
-      fontFamily: '"KaiTi","SimSun",serif', fontSize: '36px', color: '#d4b896',
-      stroke: '#000000', strokeThickness: 4,
+      fontFamily: '"KaiTi","SimSun",serif', fontSize: '48px', color: '#f5dca0',
+      stroke: '#000000', strokeThickness: 5,
+      shadow: { offsetX: 0, offsetY: 2, color: '#000000aa', blur: 8, fill: true },
     }).setOrigin(0.5, 0).setAlpha(0);
     ui.transitionContainer.add(ui.transitionTitle);
 
-    // 章节描述
+    // 章节描述 — 清晰易读
     ui.transitionDesc = ui.add.text(width / 2, height / 2, '', {
-      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '16px', color: '#998866',
-      stroke: '#000000', strokeThickness: 3,
-      wordWrap: { width: 400 }, align: 'center',
+      fontFamily: '"Microsoft YaHei","PingFang SC","SimHei",sans-serif',
+      fontSize: '22px', color: '#e0d0b0',
+      stroke: '#000000', strokeThickness: 4,
+      wordWrap: { width: 500 }, align: 'center',
     }).setOrigin(0.5, 0).setAlpha(0);
     ui.transitionContainer.add(ui.transitionDesc);
 
+    // 点击提示
     ui.transitionHint = ui.add.text(width / 2, height / 2, '', {
-      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '13px', color: '#888878',
-      stroke: '#000000', strokeThickness: 2,
+      fontFamily: '"Microsoft YaHei","PingFang SC","SimHei",sans-serif',
+      fontSize: '18px', color: '#c8c0a0',
+      stroke: '#000000', strokeThickness: 3,
     }).setOrigin(0.5, 0).setAlpha(0);
     ui.transitionContainer.add(ui.transitionHint);
 
@@ -76,19 +81,30 @@ export class StageTransition {
   }
 
   /** 播放阶段过渡动画
-   *  @param {Object} newStage - { id, chapterId, name, description, color_tone?, bgm_mood? }
-   *  @param {Function} [onContinue] - 点击"继续下一章"按钮的回调
+   *  @param {Object} newStage - 阶段数据 { id, chapterId, name, description }
+   *  @param {Object} [options] - 可选配置
+   *  @param {boolean} [options.clickToDismiss=false] - 是否点击后关闭（序章用）
    */
-  async play(newStage, onContinue) {
+  async play(newStage, options = {}) {
     const ui = this.ui;
     const { width, height } = ui.cameras.main;
     const stageId = newStage.id;
-    this._onContinue = onContinue || null;
+    const clickToDismiss = options.clickToDismiss === true;
 
     // 选择背景图：优先当前章节，无则 fallback 到默认（stageId=1）
     const textureKey = `transition_${stageId}`;
     const fallbackKey = 'transition_1';
-    const key = ui.textures.exists(textureKey) ? textureKey : fallbackKey;
+    let key = ui.textures.exists(textureKey) ? textureKey : fallbackKey;
+
+    // ★ 按需加载当前章节过渡图（首次进入该章节时触发）
+    if (!ui.textures.exists(textureKey) && CHAPTER_IMAGES[stageId]) {
+      try {
+        await loadImagesOnDemand(ui, [{ key: textureKey, path: CHAPTER_IMAGES[stageId] }]);
+        if (ui.textures.exists(textureKey)) key = textureKey;
+      } catch (e) {
+        console.warn(`[StageTransition] 按需加载过渡图失败 (${textureKey}):`, e);
+      }
+    }
 
     ui.transitionBg.setTexture(key);
     ui.transitionBg.setPosition(width / 2, height / 2);
@@ -122,38 +138,43 @@ export class StageTransition {
       ui.tweens.add({ targets: ui.transitionDesc, alpha: 1, duration: 600, ease: 'Sine.easeIn' });
     });
 
-    // 显示继续按钮
-    ui.time.delayedCall(800, () => {
-      ui.tweens.add({ targets: ui.transitionContinueBtn, alpha: 1, duration: 400, ease: 'Sine.easeIn' });
-      if (ui.transitionContinueBtn.list) {
-        const zone = ui.transitionContinueBtn.list.find(c => c.type === 'Zone');
-        if (zone) {
-          zone.off('pointerdown');
-          zone.on('pointerdown', () => this._continueClicked());
-        }
-      }
-    });
+    if (clickToDismiss) {
+      // ★ 点击播放模式：显示提示，等待点击
+      ui.time.delayedCall(1000, () => {
+        ui.transitionHint.setText('—— 点击任意位置继续 ——');
+        ui.tweens.add({
+          targets: ui.transitionHint, alpha: 1, duration: 500,
+          onComplete: () => {
+            // 提示文字呼吸效果
+            ui.tweens.add({
+              targets: ui.transitionHint, alpha: 0.4, duration: 1200,
+              yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
+            });
+          },
+        });
+      });
 
-    // 提示
-    ui.transitionHint.setText('点击右下角按钮继续');
-    ui.transitionHint.setY(height - 36);
-    ui.time.delayedCall(800, () => {
-      ui.tweens.add({ targets: ui.transitionHint, alpha: 1, duration: 400 });
-    });
-  }
+      // ★ 使用 scene 级 input 监听全屏点击，比 container 级更可靠
+      await new Promise(resolve => {
+        const onAnyClick = () => {
+          ui.input.off('pointerdown', onAnyClick);
+          resolve();
+        };
+        ui.input.on('pointerdown', onAnyClick);
+      });
 
-  _continueClicked() {
-    const ui = this.ui;
-    ui.transitionContinueBtn.setAlpha(0);
-    ui.transitionHint.setAlpha(0);
+      // 停掉呼吸动画
+      ui.tweens.killTweensOf(ui.transitionHint);
+      ui.transitionHint.setAlpha(1);
+      // ★ 点击模式：快速淡出（300ms），让后续子场景切换更流畅
+      await this._fadeOut(ui.transitionContainer, 300);
+    } else {
+      // ★ 自动播放模式（章节过渡）：等待后淡出
+      await this._wait(2200);
+      await this._fadeOut(ui.transitionContainer, 600);
+    }
 
-    this._fadeOut(ui.transitionContainer, 600).then(() => {
-      ui.transitionContainer.setVisible(false);
-      if (this._onContinue) {
-        this._onContinue();
-        this._onContinue = null;
-      }
-    });
+    ui.transitionContainer.setVisible(false);
   }
 
   _fadeIn(container, duration) {

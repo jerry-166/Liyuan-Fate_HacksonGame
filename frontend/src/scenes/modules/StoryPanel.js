@@ -23,6 +23,11 @@ export class StoryPanel {
     bg.fillRect(0, 0, width, height);
     ui._storyPanelUI.add(bg);
 
+    // 全屏遮罩阻挡点击穿透
+    const clickBlocker = ui.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0)
+      .setInteractive({ useHandCursor: false });
+    ui._storyPanelUI.add(clickBlocker);
+
     ui._storyTitle = ui.add.text(width / 2, 24, '—— 剧本纲要 ——', {
       fontFamily: '"KaiTi","SimSun",serif', fontSize: '26px', color: '#d4b896',
     }).setOrigin(0.5, 0);
@@ -39,7 +44,7 @@ export class StoryPanel {
     ui._storyContent.setMask(maskGfx.createGeometryMask());
     ui._storyContentArea = { height: contentH };
 
-    ui._storyPanelUI.add(ui.add.text(width / 2, height - 28, '[ESC] 关闭  |  滚轮滚动', {
+    ui._storyPanelUI.add(ui.add.text(width / 2, height - 28, '[ESC / J] 关闭  |  滚轮滚动', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '14px', color: '#666655',
     }).setOrigin(0.5, 0));
 
@@ -84,6 +89,28 @@ export class StoryPanel {
     try {
       const { getStoryStatus } = await import('../../api/client.js');
       this._storyData = await getStoryStatus(ui.sessionId);
+
+      // ★ 序章阶段：确保序章数据在章节列表中
+      const gameScene = ui.scene.get('GameScene');
+      if (gameScene && gameScene._isProloguePhase) {
+        const chapters = this._storyData.chapters || [];
+        const hasPrologue = chapters.some(ch => ch.chapter_id === 'ch_prologue');
+        if (!hasPrologue) {
+          // API 未返回序章条目，手动插入到列表头部
+          chapters.unshift({
+            chapter_id: 'ch_prologue',
+            name: '归乡',
+            description: '从墓地苏醒，回到小镇寻找记忆的线索',
+          });
+          this._storyData.chapters = chapters;
+        }
+        // 修正 API 返回的 current_chapter_id（序章阶段应为序章）
+        this._storyData.current_chapter_id = 'ch_prologue';
+        // 序章未完成，从已完成列表移除
+        const completed = this._storyData.completed_chapters || [];
+        this._storyData.completed_chapters = completed.filter(id => id !== 'ch_prologue');
+        // ★ current_task 保留不动 --- _renderContent() 中通过 ch.chapter_id !== 'ch_prologue' 守卫跳过子任务渲染
+      }
     } catch (e) {
       console.warn('[StoryPanel] fetch failed:', e);
     }
@@ -114,13 +141,13 @@ export class StoryPanel {
 
     const currentChapterId = data.current_chapter_id;
     const completedSet = new Set(data.completed_chapters || []);
-    let reachedCurrent = false;
 
     for (const ch of data.chapters) {
       const isCompleted = completedSet.has(ch.chapter_id);
       const isCurrent = ch.chapter_id === currentChapterId;
-      if (isCurrent) reachedCurrent = true;
-      const isFuture = !isCompleted && !isCurrent && !reachedCurrent;
+      // ★ 只显示已完成和当前章节，未完成的全部隐藏
+      const isFuture = !isCompleted && !isCurrent;
+      if (isFuture) continue;
 
       // 分隔线
       if (y > 0) {
@@ -129,17 +156,6 @@ export class StoryPanel {
         sep.lineBetween(padX, y, width - padX, y);
         ui._storyContent.add(sep);
         y += 10;
-      }
-
-      if (isFuture) {
-        // 未到达：显示 ???
-        const chLabel = getChapterLabel(ch.chapter_id);
-        const hidden = ui.add.text(padX, y, `${chLabel}  ???: ???`, {
-          fontFamily: '"KaiTi","SimSun",serif', fontSize: '20px', color: '#333322',
-        });
-        ui._storyContent.add(hidden);
-        y += hidden.height + 16;
-        continue;
       }
 
       // 已完成 或 当前章节
@@ -193,8 +209,8 @@ export class StoryPanel {
         y += descText.height + 4;
       }
 
-      // 当前章节：显示任务子任务进度
-      if (isCurrent && data.current_task) {
+      // 当前章节：显示任务子任务进度（序章无子任务，跳过）
+      if (isCurrent && data.current_task && ch.chapter_id !== 'ch_prologue') {
         const task = data.current_task;
         y += 4;
         const taskLabel = ui.add.text(padX + 20, y, '当前任务进度：', {
