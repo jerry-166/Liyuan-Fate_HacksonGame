@@ -2,7 +2,7 @@
 
 > AI Agent 驱动的 2D 开放探索叙事游戏 —— 每一局都是独一无二的故事。
 
-![菜单](frontend/public/assets/images/maps/menu_background.png)
+![海报](frontend/public/assets/images/poster.png)
 
 ## 作品背景
 
@@ -25,15 +25,13 @@
 | 父亲故居 | 尘封往事的起点 |
 | 墓地 | 故事的开始，也是归宿 |
 
-![大地图](frontend/public/assets/images/maps/town_worldmap.png)
+![游戏地图](frontend/public/assets/images/map_scene.png)
 
 ### AI 对话
 
 5 个核心 NPC 由 AI 实时扮演，根据章节进度、历史事件、与玩家的关系值动态生成对话。支持流式输出和物品展示交互——同一个 NPC 在不同对局中会表现出完全不同的行为。
 
-![NPC 立绘](frontend/public/assets/images/characters/npc-chenshifu/portraits/chenshifu_gentle.png)
-![NPC 立绘](frontend/public/assets/images/characters/npc-xiaohua/portraits/xiaohua_friendly.png)
-![NPC 立绘](frontend/public/assets/images/characters/npc-meiyi/portraits/meiyi_curious.png)
+![角色介绍](frontend/public/assets/images/e9e8458d2066558c412dc91fafc994a2.png)
 
 ### 章节推进
 
