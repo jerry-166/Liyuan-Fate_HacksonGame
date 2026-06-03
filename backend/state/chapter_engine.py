@@ -175,19 +175,23 @@ class ChapterEngine:
         return next_ch
 
     def fill_skipped_state(self, session: GameSession, target_chapter: dict) -> int:
-        """补齐所有已完成章节中缺失的状态（事件、物品、关系值）。
+        """补齐所有已完成章节中缺失的状态（事件、物品、关系值），并持久化到DB。
 
         不只是检查 current→target 之间的跳跃，而是遍历所有 completed_chapters，
         为其中缺失状态（事件/物品）的章节自动注入。
 
         这样无论是逐章跳（skip_chapter）还是一次性跳（start_chapter+chapter_id），
         都能正确补齐。
+        退出重进后数据也不会丢失（会写入 DB 对应的表）。
 
         Returns:
             被补齐的章节数
         """
         if not session.chapter_defs or not session.completed_chapters:
             return 0
+
+        from state.manager import get_session_manager
+        manager = get_session_manager()
 
         filled = 0
         for ch_def in sorted(session.chapter_defs,
@@ -214,12 +218,19 @@ class ChapterEngine:
             logger.info(f"[ChapterEngine] Filling state for {ch_def.get('name', cid)} "
                        f"(event_missing={event_missing}, items_missing={len(items_missing)})")
 
-            # 1. 注入关键事件
+            # 1. 注入关键事件 + 持久化到 events 表
             if event_missing:
                 session.events_triggered.add(key_event)
+                try:
+                    manager.persist_event(
+                        session, key_event,
+                        description=f"跳章补齐：{ch_def.get('name', cid)}的关键事件",
+                    )
+                except Exception as e:
+                    logger.warning(f"[ChapterEngine] 持久化事件失败: {e}")
                 logger.info(f"[ChapterEngine]   + event: {key_event}")
 
-            # 2. 注入缺少的物品
+            # 2. 注入缺少的物品 + 持久化到 narrative_items 表
             for item_id in items_missing:
                 item_def = None
                 for idef in session.item_defs:
@@ -241,7 +252,22 @@ class ChapterEngine:
                         npc_knowledge=item_def.get("npc_knowledge", {}),
                     )
                     session.add_to_inventory(narrative_item)
+                    # 持久化到 DB
+                    try:
+                        manager._db.save_narrative_item(
+                            session.session_id, narrative_item.to_dict()
+                        )
+                    except Exception as e:
+                        logger.warning(f"[ChapterEngine] 持久化物品失败: {e}")
                     logger.info(f"[ChapterEngine]   + item: {item_id} ({narrative_item.name})")
+
+            # 持久化章节进度（确保 completed_chapters 被写回 chapter_progress 表）
+            try:
+                manager._db.save_chapter_progress(
+                    session.session_id, cid, "", "completed",
+                )
+            except Exception:
+                pass
 
             filled += 1
 

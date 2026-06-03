@@ -465,7 +465,10 @@ export class UIScene extends Phaser.Scene {
     if (this.dialogActive || !this.sessionId) return;
     try {
       console.log('[UIScene] skipChapter...');
-      this._showChapterLoading();
+      this._showChapterLoading(
+        '补全剧情，加载新篇章……',
+        '物品与记忆正在复位……'
+      );
       const chapterResult = await skipChapter(this.sessionId);
       this._hideChapterLoading();
 
@@ -606,7 +609,7 @@ export class UIScene extends Phaser.Scene {
 
   // =========================== 章节加载过渡动画 ============================
 
-  _showChapterLoading() {
+  _showChapterLoading(title = '整理记忆，进入下一章……', hint = '故事正在推进……') {
     this._hideChapterLoading(true); // 先清理旧的
     const { width, height } = this.cameras.main;
 
@@ -615,16 +618,16 @@ export class UIScene extends Phaser.Scene {
       width / 2, height / 2, width, height, 0x000000, 0.4
     ).setDepth(540);
 
-    // 标题文字（参考 EndingScreen 命运齿轮的风格）
+    // 标题文字
     this._chapterLoadingText = this.add.text(width / 2, height / 2 - 20,
-      '整理记忆，进入下一章……', {
+      title, {
       fontFamily: '"KaiTi","SimSun",serif', fontSize: '36px',
       color: '#e8e0d0', stroke: '#1a1a1a', strokeThickness: 3,
     }).setOrigin(0.5).setDepth(550).setAlpha(0);
 
     // 小提示
     this._chapterLoadingHint = this.add.text(width / 2, height / 2 + 30,
-      '故事正在推进……', {
+      hint, {
       fontFamily: '"KaiTi","SimSun",serif', fontSize: '20px',
       color: '#bba080', stroke: '#1a1a1a', strokeThickness: 2,
     }).setOrigin(0.5).setDepth(550).setAlpha(0);
