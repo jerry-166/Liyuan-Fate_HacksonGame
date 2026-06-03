@@ -3,7 +3,7 @@
 
 规则：
   1. 规则检测（O(1) 内存查表）— 确定性护栏，命中立即切换
-  2. LLM 独立判定 — 需连续 2 轮一致才执行切换（防幻觉）
+  2. LLM 独立判定 — 单轮即可推进，每次对话后 LLM 独立判断
 """
 
 import logging
@@ -35,7 +35,7 @@ class StageEngine:
         """
         双模阶段判定，按优先级：
           1. 规则检测 → 命中立即返回
-          2. LLM 判定 → 需连续 2 轮一致
+          2. LLM 判定 → 单轮即可推进
           3. 否则不切换
         """
         if session.game_ended:
@@ -107,8 +107,8 @@ class StageEngine:
         else:
             session.stage_llm_consecutive = 0
 
-        if session.stage_llm_consecutive >= 2 and next_stage in STAGES:
-            reason = result.get("reason", "LLM 判定连续 2 轮推进")
+        if session.stage_llm_consecutive >= 1 and next_stage in STAGES:
+            reason = result.get("reason", "LLM 判定单轮推进")
             logger.info(f"[StageEngine] LLM triggered: {reason}")
             return StageCheckResult(
                 stage_changed=True,
