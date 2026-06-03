@@ -94,7 +94,7 @@ class TaskPlanner:
             return self._parse_result(session, chapter_def, result)
 
         messages = [
-            {"role": "system", "content": "你是叙事规划引擎，始终输出合法 JSON。"},
+            {"role": "system", "content": "你是叙事规划引擎，只输出合法 JSON，不要任何 markdown 标记或额外文字。"},
             {"role": "user", "content": prompt},
         ]
 

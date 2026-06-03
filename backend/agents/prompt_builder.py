@@ -221,13 +221,43 @@ class PromptBuilder:
         task_vote_hint = ""
         task = session.current_task
         if task and npc_id in task.related_npc_ids:
-            task_vote_hint = """
+            # 检查是否有活跃子任务需要引导
+            relevant_sts = [st for st in task.sub_tasks 
+                           if self._is_npc_relevant(st, npc_id) and st.status != "completed"]
+            st_hint = ""
+            if relevant_sts:
+                st_names = "、".join(st.title for st in relevant_sts[:3])
+                st_hint = f"\n你当前需要玩家完成的子任务：{st_names}"
+            
+            dialogue_rounds_hint = ""
+            if npc:
+                dialogue_rounds_hint = f"\n当前已对话 {dialogue_rounds} 轮"
+            
+            task_vote_hint = f"""
 ## 任务进度投票（仅与你相关的子任务）
 对话结束后，请在 task_progress 字段中判断你是否认为相关任务已完成：
 - should_vote_complete: true/false（只有当对话内容确实推进了剧情、触发了关键信息交流时才投 true。闲聊、无关话题不算推进。）
-- vote_reason: 一句话说明
+- vote_reason: 用一句话说明投票理由，聚焦于「还缺什么」（如"关系不够熟络""对话太浅""子任务未完成"等）
 - completed_sub_task_ids: 你认为已完成的子任务 ID 列表
+{st_hint}{dialogue_rounds_hint}
+
+### 🔑 关键：当你投反对票时的对话引导
+如果 should_vote_complete = false，你必须在 dialogue_text 中自然地、含蓄地融入一句引导——
+让玩家隐约感到「我们之间还差了点什么」，但不能直接说出游戏机制。
+
+对照示例（请一定遵守这种分寸感）：
+- ❌ 太直接："你需要提升和我的好感度" / "你还要多聊 3 轮才行"
+- ✅ 含蓄引导：
+  - 关系不够 → "我觉得咱俩还没那么熟，有些话不好说出口……"
+  - 对话太浅 → "你每次来去匆匆，从没真的坐下来听过我的故事。"
+  - 子任务未完 → "你答应我的事还没办呢，怎么就急着问别的了？"
+  - 需要更多信息 → "有些事情你还没弄清楚，我不好替你做决定。"
+  - 综合 → "人心都是处出来的。你若真想知道，就多陪陪我这把老骨头。"
+
+核心：用 {npc_name} 的语气和性格来表达担心、保留或不信任，
+让玩家自己去悟需要做什么。不要把"任务""投票""轮数"这些词说出口。
 """
+
 
         show_item_hint = ""
         if show_item_id:
@@ -322,16 +352,57 @@ class PromptBuilder:
             role_label = "玩家" if turn.role == "player" else "NPC"
             dialogue_summary += f"{role_label}：{turn.content[:100]}\n"
         rel_summary = ", ".join(f"{n.name}={n.relationship}" for n in session.npcs.values())
+
+        stage = session.current_stage
+        next_stage = stage + 1
+        stage_names = {1: "不屑", 2: "了解", 3: "抉择"}
+        current_name = stage_names.get(stage, f"第{stage}阶段")
+        next_name = stage_names.get(next_stage, f"第{next_stage}阶段")
+
+        # 收集关键事件摘要
+        events_summary = ", ".join(sorted(session.events_triggered)) if session.events_triggered else "无"
+
         return [
-            {"role": "system", "content": "你是一个游戏叙事引擎的阶段判定器。"},
+            {"role": "system", "content": (
+                "你是《梨园生死》游戏叙事引擎的阶段判定器。你的职责是判断玩家是否已经触发了足够的叙事进展，"
+                "可以从当前阶段推进到下一阶段。"
+            )},
             {"role": "user", "content": f"""
-当前阶段：第{session.current_stage}阶段
-各NPC关系值：{rel_summary}
-最近对话摘要：
+## 当前状态
+- 当前阶段：第{stage}阶段「{current_name}」（{STAGE_LEGACY_MAP.get(stage, {}).get('description', '')}）
+- 目标阶段：第{next_stage}阶段「{next_name}」（{STAGE_LEGACY_MAP.get(next_stage, {}).get('description', '')}）
+- 当前章节：{session.current_chapter_id or '无'}
+- 各 NPC 关系值：{rel_summary}
+- 已触发关键事件：{events_summary}
+
+## 最近对话摘要
 {dialogue_summary or '（尚无对话）'}
-请判断是否应该推进到下一阶段。输出 JSON：
-{{"should_advance": false, "reason": ""}}
-"""},
+
+## 判定标准
+你需要判断是否应该推进到第{next_stage}阶段。推进的核心理由是：
+**玩家已经在叙事上跨过了一个有意义的门槛**——比如发现了关键线索、与 NPC 建立了实质性关系、或者触发了改变局势的事件。
+
+### 应该推进（should_advance = true）的情况：
+- 对话中出现了关键信息揭示（如 NPC 透露了过去的秘密、戏班的历史等）
+- 多个 NPC 对玩家的态度发生了明显转变（从冷眼到愿意交流）
+- 触发了命名事件（如 "chen_tells_past"、"xiaohua_trusts_player" 等）
+- 玩家展示了重要物品并引发了 NPC 的强烈反应
+
+### 不应推进（should_advance = false）的情况：
+- 对话以闲聊为主，没有推进任何剧情线
+- NPC 仍然对玩家保持距离或敌意
+- 没有关键事件被触发
+- 对话内容停留在表面，没有触及核心矛盾（失忆、传承、故乡）
+
+## 输出
+直接输出合法 JSON，不要 markdown 代码块标记，不要在 JSON 前后添加任何文字或解释：
+
+{{
+  "should_advance": false,
+  "reason": "用一句话说明判定的叙事依据（如'对话触及了戏班往事，NPC态度开始松动'或'对话停留在寒暄层面，缺乏实质推进'）"
+}}
+
+注意：判定应当保守。除非有明显的叙事进展，否则默认不推进。"""},
         ]
 
     # ─── 结局评价 Prompt（兼容） ───────────────────────
@@ -367,7 +438,7 @@ class PromptBuilder:
             dialogue_summary=dialogue_summary or "（尚无对话）",
         )
         return [
-            {"role": "system", "content": "你是叙事评论家，生成结局评价 JSON。"},
+            {"role": "system", "content": "你是叙事评论家，只输出合法 JSON，不要任何 markdown 标记或额外文字。"},
             {"role": "user", "content": prompt},
         ]
 
@@ -402,7 +473,7 @@ class PromptBuilder:
             dialogue_summary=dialogue_summary or "（尚无对话）",
         )
         return [
-            {"role": "system", "content": "你是叙事评论家，生成结局核心评价 JSON。请只返回标题、总结、关键瞬间和人生感悟，不要包含 NPC 结局。"},
+            {"role": "system", "content": "你是叙事评论家，只输出合法 JSON，不要任何 markdown 标记或额外文字。请只返回标题、总结、关键瞬间和人生感悟，不要包含 NPC 结局。"},
             {"role": "user", "content": prompt},
         ]
 
@@ -434,7 +505,7 @@ class PromptBuilder:
             dialogue_sample=dialogue_sample or "（无对话）",
         )
         return [
-            {"role": "system", "content": "你是叙事评论家，为单个 NPC 生成结局描述 JSON。"},
+            {"role": "system", "content": "你是叙事评论家，只输出合法 JSON，不要任何 markdown 标记或额外文字。为单个 NPC 生成结局描述。"},
             {"role": "user", "content": prompt},
         ]
 
@@ -470,6 +541,6 @@ class PromptBuilder:
             recent_dialogue=recent_dialogue or "（无对话）",
         )
         return [
-            {"role": "system", "content": "你是任务进度评估器，始终输出合法 JSON。"},
+            {"role": "system", "content": "你是任务进度评估器，只输出合法 JSON，不要任何 markdown 标记或额外文字。"},
             {"role": "user", "content": prompt},
         ]
