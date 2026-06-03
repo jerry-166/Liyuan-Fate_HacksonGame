@@ -5,6 +5,9 @@
  * - 标题画面（"梨园生死" + 粒子动画）
  * - "开始游戏" / "继续游戏" 按钮
  * - 存档列表面板（列出所有已保存的游戏会话）
+ * - 全屏切换按钮
+ *
+ * ★ 支持窗口 resize / 全屏切换时自动重建 UI 布局
  *
  * 通过 GameScene(savedSessionId) 传递存档 ID 来区分新游戏 vs 继续游戏
  *
@@ -21,21 +24,10 @@ import { isMobileDevice, toggleFullscreen, isFullscreen } from '../utils/DeviceD
 
 /**
  * 创建菜单按钮容器
- * @param {Phaser.Scene} scene
- * @param {number} x - 中心 X
- * @param {number} y - 中心 Y
- * @param {number} w - 按钮宽度
- * @param {number} h - 按钮高度
- * @param {string} label - 按钮文字
- * @param {function} callback - 点击回调
- * @param {boolean} [disabled=false]
- * @returns {Phaser.GameObjects.Container}
  */
 function createMenuButton(scene, x, y, w, h, label, callback, disabled = false) {
   const container = scene.add.container(x, y);
-
-  // ★ 按键宽高缩放字号
-  const textSize = Math.round(h * 0.54); // 26/48 ≈ 0.54
+  const textSize = Math.round(h * 0.54);
 
   const bg = scene.add.graphics();
   const drawBg = (hover) => {
@@ -78,7 +70,7 @@ function createMenuButton(scene, x, y, w, h, label, callback, disabled = false) 
  */
 function createSmallButton(scene, x, y, w, h, label, color, callback) {
   const container = scene.add.container(x, y);
-  const textSize = Math.round(h * 0.48); // 按高度缩放
+  const textSize = Math.round(h * 0.48);
   const bg = scene.add.graphics();
   const drawBtn = (hover) => {
     bg.clear();
@@ -111,30 +103,86 @@ export class MenuScene extends Phaser.Scene {
     super({ key: 'MenuScene' });
   }
 
-  create() {
-    const { width, height } = this.cameras.main;
-    const cx = width / 2;
-    const isMobile = isMobileDevice();
+  // ==================== 生命周期 ====================
 
-    // ★ 根据屏幕缩放标题字号
+  create() {
+    this._portraitsLoaded = false;
+    this._archiveVisible = false;
+    this._archiveSessionData = null;
+    this.isMobile = isMobileDevice();
+
+    // 立绘异步预加载（仅首次，resize 不重复加载）
+    this._preloadPortraits();
+
+    // 全屏状态监听（只绑定一次文档级事件）
+    this._bindFullscreenListener();
+
+    // 构建首次 UI
+    const { width, height } = this.cameras.main;
+    this._buildAll(width, height);
+
+    // ★ 核心修复：监听画布 resize（窗口缩放 / 全屏切换），自动重建 UI
+    this.scale.on('resize', this._onResize, this);
+  }
+
+  /**
+   * 场景 shutdown 时解绑事件
+   */
+  shutdown() {
+    this.scale.off('resize', this._onResize, this);
+  }
+
+  // ==================== 完整重建 ====================
+
+  /**
+   * 画布 resize 回调 —— 销毁旧 UI 并重新构建
+   */
+  _onResize(gameSize) {
+    const { width, height } = gameSize;
+    const wasArchiveVisible = this.archivePanel ? this.archivePanel.visible : this._archiveVisible;
+    const savedSessionData = this._archiveSessionData;
+
+    // 销毁所有旧 UI（保留事件绑定）
+    this._destroyUI();
+
+    // 重新构建
+    this._buildAll(width, height);
+
+    // 恢复存档面板状态
+    if (wasArchiveVisible && savedSessionData) {
+      this._archiveSessionData = savedSessionData;
+      this.archivePanel.setVisible(true);
+      this._renderArchiveList(savedSessionData);
+      this.archiveHint.setText(`共 ${savedSessionData.length} 个存档`);
+    }
+  }
+
+  /**
+   * 销毁场景中所有 UI 子对象
+   */
+  _destroyUI() {
+    this.input.removeAllListeners('wheel');
+    this.input.keyboard.removeAllListeners('keydown');
+    this.tweens.killAll();
+
+    const allChildren = this.children.getAll().slice();
+    for (const child of allChildren) {
+      if (child && child.destroy) child.destroy();
+    }
+  }
+
+  /**
+   * 构建全部 UI 元素
+   */
+  _buildAll(width, height) {
+    const cx = width / 2;
+
+    // ★ 统一缩放因子（基于设计分辨率 1280x800）
     const scale = Math.min(width / GAME.WIDTH, height / GAME.HEIGHT);
     const titleFS = Math.round(72 * scale);
     const subFS = Math.round(20 * scale);
-    const btnFS = Math.round(26 * scale);
     const enFS = Math.round(15 * scale);
     const hintFS = Math.round(15 * scale);
-
-    // ★ 立绘异步预加载（不阻塞菜单显示，后台加载）
-    const allPortraits = getAllPortraitAssets();
-    if (allPortraits.length > 0) {
-      for (const asset of allPortraits) {
-        this.load.image(asset.key, asset.path);
-      }
-      this.load.once('complete', () => {
-        console.log(`[MenuScene] 立绘后台加载完成 (${allPortraits.length} 张)`);
-      });
-      this.load.start();
-    }
 
     // 背景
     this.cameras.main.setBackgroundColor('#0d0d1a');
@@ -153,22 +201,7 @@ export class MenuScene extends Phaser.Scene {
     botDeco.lineBetween(0, height - 56, width, height - 56);
 
     // 飘落粒子
-    this.fallingParticles = [];
-    for (let i = 0; i < 14; i++) {
-      const petal = this.add.text(
-        Math.random() * width, Math.random() * height,
-        ['◆', '◇', '❋', '·', '♢'][Math.floor(Math.random() * 5)],
-        {
-          fontFamily: 'serif',
-          fontSize: `${6 + Math.random() * 8}px`,
-          color: ['#887766', '#776655', '#997766', '#665544'][Math.floor(Math.random() * 4)],
-        }
-      ).setAlpha(0.15 + Math.random() * 0.2).setDepth(0);
-      petal.speed = 0.3 + Math.random() * 0.5;
-      petal.wobble = Math.random() * 2;
-      petal.wobbleSpeed = 0.005 + Math.random() * 0.01;
-      this.fallingParticles.push(petal);
-    }
+    this._createParticles(width, height);
 
     // 标题
     this.add.text(cx, Math.round(100 * scale), '—— 一段关于传承与选择的故事 ——', {
@@ -188,7 +221,7 @@ export class MenuScene extends Phaser.Scene {
     title.setAlpha(0).setScale(1.2);
     this.tweens.add({ targets: title, alpha: 1, scaleX: 1, scaleY: 1, duration: 1200, ease: 'Sine.easeOut' });
 
-    // 按钮（响应式尺寸）
+    // 按钮
     const btnW = Math.round(220 * scale), btnH = Math.round(48 * scale);
     const btnGap = Math.round(62 * scale);
     const btnY1 = Math.round(height / 2 + 40 * scale), btnY2 = btnY1 + btnGap;
@@ -201,12 +234,16 @@ export class MenuScene extends Phaser.Scene {
       createMenuButton(this, cx, btnY2, btnW, btnH, '继 续 游 戏', () => this._showArchives())
     );
 
+    // 按钮淡入
+    const btnContainer = this.add.container(0, 0).setDepth(2).setAlpha(0);
+    this.allButtons.forEach(b => btnContainer.add(b));
+    this.tweens.add({ targets: btnContainer, alpha: 1, duration: 800, delay: 600, ease: 'Sine.easeIn' });
+
     // 存档列表面板
-    this.keyEsc = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
-    this._createArchivePanel();
+    this._createArchivePanel(width, height, scale);
 
     // 底部信息
-    const mobileTip = isMobile ? '左半屏摇杆移动  ·  右下按钮互动' : 'WASD 移动  ·  F 交互  ·  H 对话历史  ·  数字键选择';
+    const mobileTip = this.isMobile ? '左半屏摇杆移动  ·  右下按钮互动' : 'WASD 移动  ·  F 交互  ·  H 对话历史  ·  数字键选择';
     this.add.text(cx, height - Math.round(80 * scale), mobileTip, {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
       fontSize: `${hintFS}px`, color: '#555544',
@@ -220,16 +257,69 @@ export class MenuScene extends Phaser.Scene {
       fontFamily: 'monospace', fontSize: `${Math.round(13 * scale)}px`, color: '#333322',
     }).setOrigin(1, 1).setDepth(1);
 
-    // 按钮淡入
-    const btnContainer = this.add.container(0, 0).setDepth(2).setAlpha(0);
-    this.allButtons.forEach(b => btnContainer.add(b));
-    this.tweens.add({ targets: btnContainer, alpha: 1, duration: 800, delay: 600, ease: 'Sine.easeIn' });
+    // 全屏切换按钮
+    this._createFullscreenBtn(width, scale);
 
-    // ★ 全屏切换按钮（右上角）
-    this._createFullscreenBtn(width, height, scale, hintFS);
+    // ESC 键
+    this.keyEsc = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
   }
 
-  _createFullscreenBtn(width, height, scale, hintFS) {
+  // ==================== 粒子系统 ====================
+
+  _createParticles(width, height) {
+    this.fallingParticles = [];
+    for (let i = 0; i < 14; i++) {
+      const petal = this.add.text(
+        Math.random() * width, Math.random() * height,
+        ['◆', '◇', '❋', '·', '♢'][Math.floor(Math.random() * 5)],
+        {
+          fontFamily: 'serif',
+          fontSize: `${6 + Math.random() * 8}px`,
+          color: ['#887766', '#776655', '#997766', '#665544'][Math.floor(Math.random() * 4)],
+        }
+      ).setAlpha(0.15 + Math.random() * 0.2).setDepth(0);
+      petal.speed = 0.3 + Math.random() * 0.5;
+      petal.wobble = Math.random() * 2;
+      petal.wobbleSpeed = 0.005 + Math.random() * 0.01;
+      this.fallingParticles.push(petal);
+    }
+  }
+
+  // ==================== 立绘预加载 ====================
+
+  _preloadPortraits() {
+    if (this._portraitsLoaded) return;
+    this._portraitsLoaded = true;
+
+    const allPortraits = getAllPortraitAssets();
+    if (allPortraits.length > 0) {
+      for (const asset of allPortraits) {
+        this.load.image(asset.key, asset.path);
+      }
+      this.load.once('complete', () => {
+        console.log(`[MenuScene] 立绘后台加载完成 (${allPortraits.length} 张)`);
+      });
+      this.load.start();
+    }
+  }
+
+  // ==================== 全屏按钮 ====================
+
+  _bindFullscreenListener() {
+    if (this._fsListenerBound) return;
+    this._fsListenerBound = true;
+
+    this._onFsChangeHandler = () => {
+      if (this._fsBtn && this._fsBtn.scene) {
+        this._fsBtn.setText(isFullscreen() ? '⛶ 退出全屏' : '⛶ 全屏');
+      }
+    };
+    document.addEventListener('fullscreenchange', this._onFsChangeHandler);
+    document.addEventListener('webkitfullscreenchange', this._onFsChangeHandler);
+    document.addEventListener('msfullscreenchange', this._onFsChangeHandler);
+  }
+
+  _createFullscreenBtn(width, scale) {
     const label = isFullscreen() ? '⛶ 退出全屏' : '⛶ 全屏';
     const btnFS = Math.round(15 * scale);
     this._fsBtn = this.add.text(width - 16, 16, label, {
@@ -242,31 +332,31 @@ export class MenuScene extends Phaser.Scene {
     this._fsBtn.on('pointerdown', () => {
       toggleFullscreen().then(() => this._updateFSBtnLabel());
     });
-
-    // 监听全屏状态变化
-    const onFsChange = () => {
-      if (this._fsBtn) this._fsBtn.setText(isFullscreen() ? '⛶ 退出全屏' : '⛶ 全屏');
-    };
-    document.addEventListener('fullscreenchange', onFsChange);
-    document.addEventListener('webkitfullscreenchange', onFsChange);
-    document.addEventListener('msfullscreenchange', onFsChange);
   }
 
   _updateFSBtnLabel() {
-    if (!this._fsBtn) return;
+    if (!this._fsBtn || !this._fsBtn.scene) return;
     this._fsBtn.setText(isFullscreen() ? '⛶ 退出全屏' : '⛶ 全屏');
   }
 
   // ==================== 存档面板 ====================
 
-  _createArchivePanel() {
-    const { width, height } = this.cameras.main;
+  /**
+   * 创建存档列表面板（尺寸基于当前画布缩放）
+   */
+  _createArchivePanel(width, height, scale) {
+    // ★ 面板尺寸随窗口缩放（设计基准 780x520）
+    const panelW = Math.min(Math.round(780 * scale), width - 40);
+    const panelH = Math.min(Math.round(520 * scale), height - 40);
+    const panelX = (width - panelW) / 2;
+    const panelY = (height - panelH) / 2 - Math.round(20 * scale);
+
+    const titleFS = Math.round(28 * scale);
+    const hintFS = Math.round(16 * scale);
+    const tipFS = Math.round(14 * scale);
+
     this.archivePanel = this.add.container(0, 0).setDepth(100).setVisible(false);
     this.archiveScrollY = 0;
-
-    const panelW = 780, panelH = 520;
-    const panelX = (width - panelW) / 2;
-    const panelY = (height - panelH) / 2 - 20;
 
     // 遮罩
     const mask = this.add.graphics();
@@ -288,23 +378,34 @@ export class MenuScene extends Phaser.Scene {
     panelBg.strokeRoundedRect(panelX, panelY, panelW, panelH, 12);
     this.archivePanel.add(panelBg);
 
-    this.archivePanel.add(this.add.text(width / 2, panelY + 32, '—— 戏梦存档 ——', {
-      fontFamily: '"KaiTi","SimSun",serif', fontSize: '28px', color: '#d4b896',
+    this.archivePanel.add(this.add.text(width / 2, panelY + Math.round(32 * scale), '—— 戏梦存档 ——', {
+      fontFamily: '"KaiTi","SimSun",serif', fontSize: `${titleFS}px`, color: '#d4b896',
     }).setOrigin(0.5));
 
+    const divTopY = panelY + Math.round(60 * scale);
     const divGfx = this.add.graphics();
     divGfx.lineStyle(1, 0x887766, 0.3);
-    divGfx.lineBetween(panelX + 40, panelY + 60, panelX + panelW - 40, panelY + 60);
+    divGfx.lineBetween(panelX + Math.round(40 * scale), divTopY, panelX + panelW - Math.round(40 * scale), divTopY);
     this.archivePanel.add(divGfx);
 
-    this.archiveListContent = this.add.container(0, panelY + 72);
+    const listTopY = panelY + Math.round(72 * scale);
+    this.archiveListContent = this.add.container(0, listTopY);
     this.archivePanel.add(this.archiveListContent);
 
-    this._archiveListArea = { x: panelX + 16, y: panelY + 66, w: panelW - 32, h: panelH - 130, baseY: panelY + 72 };
+    const listAreaH = panelH - Math.round(130 * scale);
+    this._archiveListArea = {
+      x: panelX + Math.round(16 * scale),
+      y: panelY + Math.round(66 * scale),
+      w: panelW - Math.round(32 * scale),
+      h: listAreaH,
+      baseY: listTopY,
+    };
 
     // 列表遮罩
+    const maskTop = panelY + Math.round(56 * scale);
     const listMaskGfx = this.add.graphics();
-    listMaskGfx.fillRect(panelX + 10, panelY + 56, panelW - 20, panelH - 110);
+    listMaskGfx.fillRect(panelX + Math.round(10 * scale), maskTop,
+      panelW - Math.round(20 * scale), listAreaH + Math.round(16 * scale));
     listMaskGfx.setVisible(false);
     this.archiveListContent.setMask(listMaskGfx.createGeometryMask());
 
@@ -318,20 +419,21 @@ export class MenuScene extends Phaser.Scene {
       this.archiveListContent.setY(area.baseY + this.archiveScrollY);
     });
 
-    this.archiveHint = this.add.text(width / 2, panelY + panelH - 36, '', {
+    this.archiveHint = this.add.text(width / 2, panelY + panelH - Math.round(36 * scale), '', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '16px', color: '#887766',
+      fontSize: `${hintFS}px`, color: '#887766',
     }).setOrigin(0.5);
     this.archivePanel.add(this.archiveHint);
 
-    this.add.text(width / 2, panelY + panelH - 12, '[ESC] 关闭  |  [Del] 删除选中  |  点击继续', {
+    this.add.text(width / 2, panelY + panelH - Math.round(12 * scale), '[ESC] 关闭  |  [Del] 删除选中  |  点击继续', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '14px', color: '#665544',
+      fontSize: `${tipFS}px`, color: '#665544',
     }).setOrigin(0.5).setDepth(101);
   }
 
   async _showArchives() {
     this.archivePanel.setVisible(true);
+    this._archiveVisible = true;
     this.archiveListContent.removeAll(true);
     this.archiveScrollY = 0;
     this.archiveListContentHeight = 0;
@@ -344,6 +446,7 @@ export class MenuScene extends Phaser.Scene {
     try {
       const data = await getSessions();
       const sessions = data.sessions || [];
+      this._archiveSessionData = sessions; // ★ 保存以便 resize 恢复
       if (sessions.length === 0) {
         this.archiveHint.setText('没有存档记录');
         this._displayEmptyArchive();
@@ -360,29 +463,42 @@ export class MenuScene extends Phaser.Scene {
 
   _hideArchivePanel() {
     this.archivePanel.setVisible(false);
+    this._archiveVisible = false;
     this.allButtons.forEach(btn => {
       if (btn.list) btn.list.forEach(child => { if (child.input) child.setInteractive({ useHandCursor: true }); });
     });
   }
 
   _displayEmptyArchive() {
-    const emptyText = this.add.text(this.cameras.main.width / 2, 120, '还没有存档，请先开始新游戏', {
+    const { width, height } = this.cameras.main;
+    const scale = Math.min(width / GAME.WIDTH, height / GAME.HEIGHT);
+    const emptyFS = Math.round(18 * scale);
+    const emptyText = this.add.text(width / 2, Math.round(120 * scale), '还没有存档，请先开始新游戏', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '18px', color: '#666655',
+      fontSize: `${emptyFS}px`, color: '#666655',
     }).setOrigin(0.5);
     this.archiveListContent.add(emptyText);
   }
 
   _renderArchiveList(sessions) {
-    const { width } = this.cameras.main;
-    const panelW = 580, panelX = (width - panelW) / 2;
+    const { width, height } = this.cameras.main;
+    const scale = Math.min(width / GAME.WIDTH, height / GAME.HEIGHT);
+    const panelW = Math.min(Math.round(780 * scale), width - 40);
+    const panelX = (width - panelW) / 2;
+
+    const nameFS = Math.round(18 * scale);
+    const dateFS = Math.round(14 * scale);
+    const rowH = Math.round(58 * scale);
+    const rowGap = Math.round(62 * scale);
+    const btnW = Math.round(52 * scale);
+    const btnH = Math.round(26 * scale);
 
     const sorted = [...sessions].sort((a, b) =>
       (b.updated_at || b.created_at || '').localeCompare(a.updated_at || a.created_at || '')
     );
 
-    const colW = panelW - 60;
-    let y = 8;
+    const colW = panelW - Math.round(60 * scale);
+    let y = Math.round(8 * scale);
 
     sorted.forEach((s) => {
       const chLabel = getChapterLabel(s.chapter_id);
@@ -392,40 +508,43 @@ export class MenuScene extends Phaser.Scene {
 
       const rowBg = this.add.graphics();
       rowBg.fillStyle(0x1a1a28, 1);
-      rowBg.fillRoundedRect(panelX + 28, y - 4, colW - 28, 58, 6);
+      rowBg.fillRoundedRect(panelX + Math.round(28 * scale), y - Math.round(4 * scale),
+        colW - Math.round(28 * scale), rowH, Math.round(6 * scale));
       rowBg.lineStyle(1, 0x443322, 0.4);
-      rowBg.strokeRoundedRect(panelX + 28, y - 4, colW - 28, 58, 6);
+      rowBg.strokeRoundedRect(panelX + Math.round(28 * scale), y - Math.round(4 * scale),
+        colW - Math.round(28 * scale), rowH, Math.round(6 * scale));
       this.archiveListContent.add(rowBg);
 
-      this.archiveListContent.add(this.add.text(panelX + 42, y + 6, label, {
+      this.archiveListContent.add(this.add.text(panelX + Math.round(42 * scale), y + Math.round(6 * scale), label, {
         fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-        fontSize: '18px', color: s.game_ended ? '#886644' : '#d4b896',
+        fontSize: `${nameFS}px`, color: s.game_ended ? '#886644' : '#d4b896',
       }));
 
-      this.archiveListContent.add(this.add.text(panelX + 42, y + 30, date || '未知时间', {
-        fontFamily: 'monospace', fontSize: '14px', color: '#665544',
+      this.archiveListContent.add(this.add.text(panelX + Math.round(42 * scale), y + Math.round(30 * scale), date || '未知时间', {
+        fontFamily: 'monospace', fontSize: `${dateFS}px`, color: '#665544',
       }));
 
-      // 继续 / 查看结局按钮
       if (s.game_ended) {
         this.archiveListContent.add(
-          createSmallButton(this, panelX + colW - 130, y + 12, 52, 26, '结局', '#669988',
+          createSmallButton(this, panelX + colW - Math.round(130 * scale), y + Math.round(12 * scale),
+            btnW, btnH, '结局', '#669988',
             () => this._showEndingViewer(s.session_id))
         );
       } else {
         this.archiveListContent.add(
-          createSmallButton(this, panelX + colW - 130, y + 12, 52, 26, '继续', '#889966',
+          createSmallButton(this, panelX + colW - Math.round(130 * scale), y + Math.round(12 * scale),
+            btnW, btnH, '继续', '#889966',
             () => this._loadArchive(s.session_id))
         );
       }
 
-      // 删除按钮
       this.archiveListContent.add(
-        createSmallButton(this, panelX + colW - 68, y + 12, 52, 26, '删除', '#aa6655',
+        createSmallButton(this, panelX + colW - Math.round(68 * scale), y + Math.round(12 * scale),
+          btnW, btnH, '删除', '#aa6655',
           () => this._confirmDelete(s.session_id, s.player_name))
       );
 
-      y += 62;
+      y += rowGap;
     });
 
     this.archiveListContentHeight = y;
@@ -464,7 +583,6 @@ export class MenuScene extends Phaser.Scene {
     const { width, height } = this.cameras.main;
     this.endingViewer = this.add.container(0, 0).setDepth(200).setVisible(false);
 
-    // 遮罩
     const dimBg = this.add.graphics();
     dimBg.fillStyle(0x000000, 1);
     dimBg.fillRect(0, 0, width, height);
@@ -472,12 +590,9 @@ export class MenuScene extends Phaser.Scene {
     dimBg.on('pointerdown', () => this._hideEndingViewer());
     this.endingViewer.add(dimBg);
 
-    // 内容框 — 全部按比例
     const margin = Math.round(Math.min(width, height) * 0.04);
-    const bx = margin;
-    const by = margin;
-    const bw = width - margin * 2;
-    const bh = height - margin * 2;
+    const bx = margin, by = margin;
+    const bw = width - margin * 2, bh = height - margin * 2;
 
     this._evBox = { x: bx, y: by, w: bw, h: bh };
 
@@ -488,7 +603,6 @@ export class MenuScene extends Phaser.Scene {
     boxBg.strokeRoundedRect(bx, by, bw, bh, 8);
     this.endingViewer.add(boxBg);
 
-    // 底部提示
     const hintFontSize = Math.max(12, Math.round(bh * 0.025));
     const hintY = by + bh - hintFontSize - 8;
     this.endingViewerHint = this.add.text(width / 2, hintY, '[ ESC 或点击空白处关闭 ]', {
@@ -499,7 +613,6 @@ export class MenuScene extends Phaser.Scene {
   }
 
   async _showEndingViewer(sessionId) {
-    // 每次销毁重建，彻底避免缓存重叠
     if (this.endingViewer) {
       this.endingViewer.destroy(true);
       this.endingViewer = null;
@@ -508,7 +621,6 @@ export class MenuScene extends Phaser.Scene {
     this.endingViewer.setVisible(true);
     this.archivePanel.setVisible(false);
 
-    // 加载提示
     const { width, height } = this.cameras.main;
     const loadingText = this.add.text(width / 2, height / 2, '加载结局……', {
       fontFamily: '"KaiTi","SimSun",serif', fontSize: '24px', color: '#887766',
@@ -524,7 +636,6 @@ export class MenuScene extends Phaser.Scene {
       loadingText.setText('无法加载结局数据');
     }
 
-    // ESC 关闭
     this._endingEscHandler = (event) => {
       if (event.key === 'Escape') this._hideEndingViewer();
     };
@@ -547,7 +658,6 @@ export class MenuScene extends Phaser.Scene {
     const pad = Math.round(Math.min(bw, bh) * 0.06);
     const wrapW = bw - pad * 2;
 
-    // 字号按窗口缩放
     const titleFS = Math.max(18, Math.round(bh * 0.05));
     const subFS = Math.max(11, Math.round(bh * 0.028));
     const bodyFS = Math.max(11, Math.round(bh * 0.024));
@@ -557,13 +667,11 @@ export class MenuScene extends Phaser.Scene {
 
     const v = this.endingViewer;
 
-    // 标题
     v.add(this.add.text(cx, by + pad + 8, data.title || '梨园余韵', {
       fontFamily: '"KaiTi","SimSun",serif', fontSize: `${titleFS}px`, color: '#d4b896',
       align: 'center', wordWrap: { width: wrapW },
     }).setOrigin(0.5, 0));
 
-    // 副标题
     const titleH = Math.round(titleFS * 1.4);
     const typeLabel = data.type === 'accept_leader' ? '—— 梨园传承线 ——' : '—— 遗憾离别线 ——';
     v.add(this.add.text(cx, by + pad + 8 + titleH + 6, typeLabel, {
@@ -571,7 +679,6 @@ export class MenuScene extends Phaser.Scene {
       fontSize: `${subFS}px`, color: '#998866',
     }).setOrigin(0.5, 0));
 
-    // 分隔线
     const divY = by + pad + 8 + titleH + 6 + Math.round(subFS * 1.4) + lineGap;
     const divGfx = this.add.graphics();
     divGfx.lineStyle(1, 0xc4a882, 0.3);
@@ -580,7 +687,6 @@ export class MenuScene extends Phaser.Scene {
 
     let y = divY + lineGap;
 
-    // 关键瞬间
     if (data.key_moments && data.key_moments.length > 0) {
       for (const m of data.key_moments) {
         const t = this.add.text(cx, y, `「${m.description}」`, {
@@ -594,7 +700,6 @@ export class MenuScene extends Phaser.Scene {
       y += lineGap;
     }
 
-    // 人生感悟
     if (data.life_lesson) {
       const lessonText = this.add.text(cx, y, `"${data.life_lesson}"`, {
         fontFamily: '"KaiTi","SimSun",serif',
@@ -605,7 +710,6 @@ export class MenuScene extends Phaser.Scene {
       y += lessonText.height + lineGap * 2;
     }
 
-    // NPC 结局
     if (data.npc_endings && data.npc_endings.length > 0) {
       const npcSep = this.add.graphics();
       npcSep.lineStyle(1, 0xc4a882, 0.15);
@@ -632,7 +736,6 @@ export class MenuScene extends Phaser.Scene {
   }
 
   _startNewGame() {
-    // 清除旧会话标记，防止残留数据干扰新游戏
     const oldSession = localStorage.getItem('__active_session__');
     if (oldSession) {
       try { localStorage.removeItem(`__dialogue_history_${oldSession}`); } catch (_) {}
@@ -647,13 +750,13 @@ export class MenuScene extends Phaser.Scene {
   update() {
     if (!this.fallingParticles) return;
 
-    const { height } = this.cameras.main;
+    const { width, height } = this.cameras.main;
     for (const p of this.fallingParticles) {
       p.y += p.speed;
       p.x += Math.sin(this.time.now * p.wobbleSpeed) * p.wobble * 0.3;
       if (p.y > height + 20) {
         p.y = -20;
-        p.x = Math.random() * this.cameras.main.width;
+        p.x = Math.random() * width;
       }
     }
 
