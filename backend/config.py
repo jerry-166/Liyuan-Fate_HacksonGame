@@ -25,19 +25,19 @@ LLM_SSE_TIMEOUT: float = float(os.getenv("LLM_SSE_TIMEOUT", "120.0"))
 NPC_DEFS = [
     {"id": "npc_chen", "name": "陈师傅", "role": "老琴师",
      "scene": "teahouse", "position": {"col": 38, "row": 14},
-     "sprite_key": "npc_chen_idle", "relationship_default": 20},
+     "sprite_key": "npc_chen_idle", "relationship_default": 0},
     {"id": "npc_xiaohua", "name": "小华", "role": "年轻学徒",
      "scene": "stage", "position": {"col": 15, "row": 12},
      "sprite_key": "npc_xiaohua_idle", "relationship_default": 0},
     {"id": "npc_laozhou", "name": "老周", "role": "老艺人",
      "scene": "stage", "position": {"col": 10, "row": 8},
-     "sprite_key": "npc_laozhou_idle", "relationship_default": 10},
+     "sprite_key": "npc_laozhou_idle", "relationship_default": 0},
     {"id": "npc_meiyi", "name": "梅姨", "role": "茶馆老板娘",
      "scene": "teahouse", "position": {"col": 40, "row": 16},
-     "sprite_key": "npc_meiyi_idle", "relationship_default": 15},
+     "sprite_key": "npc_meiyi_idle", "relationship_default": 0},
     {"id": "npc_laoli", "name": "老李", "role": "船夫",
      "scene": "dock", "position": {"col": 60, "row": 22},
-     "sprite_key": "npc_laoli_idle", "relationship_default": 10},
+     "sprite_key": "npc_laoli_idle", "relationship_default": 0},
 ]
 
 # 章节到旧阶段的映射（兼容前端色调/BGM 切换）

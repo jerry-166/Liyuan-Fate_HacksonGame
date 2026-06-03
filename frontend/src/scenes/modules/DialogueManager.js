@@ -8,6 +8,7 @@ import { COLORS } from '../../config.js';
 import { startDialogueStream, parseSSEStream, showItemToNpcStream } from '../../api/client.js';
 import { createGlobalInput, globalInputValues } from '../../main.js';
 import { CHARACTER_PORTRAITS, detectPortraitEmotion } from './GameUIHelpers.js';
+import { isMobileDevice } from '../../utils/DeviceDetector.js';
 
 /**
  * 对话管理器
@@ -40,13 +41,15 @@ export class DialogueManager {
 
     ui.dialogContainer = ui.add.container(0, 0).setDepth(300).setVisible(false);
 
-    // ★ 全屏透明点击区（对话框外部点击关闭对话）
-    const outsideClickZone = ui.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0)
-      .setInteractive({ useHandCursor: false });
-    outsideClickZone.on('pointerdown', () => {
-      if (ui.dialogActive) ui.closeDialog();
-    });
-    ui.dialogContainer.add(outsideClickZone);
+    // ★ 全屏透明点击区（移动端：对话框外部点击关闭对话，桌面端禁用）
+    if (isMobileDevice()) {
+      const outsideClickZone = ui.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0)
+        .setInteractive({ useHandCursor: false });
+      outsideClickZone.on('pointerdown', () => {
+        if (ui.dialogActive) ui.closeDialog();
+      });
+      ui.dialogContainer.add(outsideClickZone);
+    }
 
     // ★ 立绘图片（左侧，朝向右侧，对话框覆盖其下半身）
     const portraitW = Math.round(width * 0.28);
@@ -117,7 +120,7 @@ export class DialogueManager {
     ui.dialogContainer.add(ui.pageHint);
 
     // 提示文字
-    ui.dialogHint = ui.add.text(panelX + panelW - 150, panelY + panelH - 52, '[F] 关闭  |  点击外部关闭', {
+    ui.dialogHint = ui.add.text(panelX + panelW - 150, panelY + panelH - 52, isMobileDevice() ? '[F] 关闭  |  点击外部关闭' : '[F] 关闭', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
       fontSize: '15px', color: '#888878',
     });

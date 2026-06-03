@@ -6,6 +6,7 @@
  */
 
 import { getChapterLabel } from '../../config.js';
+import { isMobileDevice } from '../../utils/DeviceDetector.js';
 
 const PANEL_W = 320;
 const PANEL_H = 280;
@@ -39,11 +40,13 @@ export class TaskPanel {
     dimBg.fillRect(0, 0, width, height);
     ui._taskPanelUI.add(dimBg);
 
-    // 点击遮罩：全屏阻挡穿透，点击外部关闭面板
-    const clickBlocker = ui.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0)
-      .setInteractive({ useHandCursor: false });
-    clickBlocker.on('pointerdown', () => this.hide());
-    ui._taskPanelUI.add(clickBlocker);
+    // 点击遮罩：移动端点击外部关闭面板，桌面端禁用
+    if (isMobileDevice()) {
+      const clickBlocker = ui.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0)
+        .setInteractive({ useHandCursor: false });
+      clickBlocker.on('pointerdown', () => this.hide());
+      ui._taskPanelUI.add(clickBlocker);
+    }
 
     // 面板背景
     const panelBg = ui.add.graphics();
@@ -85,7 +88,7 @@ export class TaskPanel {
     ui._taskContent.setMask(maskGfx.createGeometryMask());
     ui._taskContentArea = { height: contentH };
 
-    ui._taskPanelUI.add(ui.add.text(cx, pTop + this._panelH - 24, '[T / ESC] 关闭  |  滚轮滚动  |  点击外部关闭', {
+    ui._taskPanelUI.add(ui.add.text(cx, pTop + this._panelH - 24, isMobileDevice() ? '[T / ESC] 关闭  |  滚轮滚动  |  点击外部关闭' : '[T / ESC] 关闭  |  滚轮滚动', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '13px', color: '#666655',
     }).setOrigin(0.5, 0));
 

@@ -30,6 +30,7 @@ import { getTownNPCDialogue } from './modules/TownNPCDialogue.js';
 import { SaveManager } from './modules/SaveManager.js';
 import { EndingScreen } from './modules/EndingScreen.js';
 import { StageTransition } from './modules/StageTransition.js';
+import { RelationshipPanel } from './modules/RelationshipPanel.js';
 import { toggleFullscreen, isFullscreen } from '../utils/DeviceDetector.js';
 
 export class UIScene extends Phaser.Scene {
@@ -80,6 +81,7 @@ export class UIScene extends Phaser.Scene {
     this.saveManager = new SaveManager(this);
     this.endingScreen = new EndingScreen(this);
     this.stageTransition = new StageTransition(this);
+    this.relationshipPanel = new RelationshipPanel(this);
 
     // ========== 构建 UI ==========
     this.dialogue.createPanel();
@@ -92,6 +94,7 @@ export class UIScene extends Phaser.Scene {
     this.stageTransition.createOverlay();
     this.endingScreen.createScreen();
     this.saveManager.createPauseMenu();
+    this.relationshipPanel.createPanel();
 
     // ========== 响应式适配：窗口缩放时重定位所有 UI ==========
     this.scale.on('resize', this._onResize, this);
@@ -137,6 +140,7 @@ export class UIScene extends Phaser.Scene {
     this.keyT = this.input.keyboard.addKey('T');
     this.keyB = this.input.keyboard.addKey('B');
     this.keyJ = this.input.keyboard.addKey('J');
+    this.keyR = this.input.keyboard.addKey('R');
     this.keyW = this.input.keyboard.addKey('W');
     this.keyS = this.input.keyboard.addKey('S');
     this.keyESC = this.input.keyboard.addKey('ESC');
@@ -210,7 +214,10 @@ export class UIScene extends Phaser.Scene {
         ref: 'taskBtn' },
       { y: 144, label: '📖 剧本 [J]', color: '#c4a882', hover: '#e8d4a0',
         action: () => this.storyPanel.toggle(), ref: 'storyBtn' },
-      { y: 176, label: isFullscreen() ? '⛶ 退出全屏' : '⛶ 全屏', color: '#887766', hover: '#c4a882',
+      { y: 176, label: '💞 关系 [R]', color: '#c4a882', hover: '#e8d4a0',
+        action: () => { if (!this.dialogActive && !this.pauseMenuVisible) this.relationshipPanel.toggle(); },
+        ref: 'relationshipBtn' },
+      { y: 208, label: isFullscreen() ? '⛶ 退出全屏' : '⛶ 全屏', color: '#887766', hover: '#c4a882',
         action: () => { toggleFullscreen().then(() => this._updateFullscreenBtnLabel()); },
         ref: 'fullscreenBtn' },
     ];
@@ -419,6 +426,13 @@ export class UIScene extends Phaser.Scene {
 
     // 对话结束后刷新任务面板数据（不自动弹出）
     this.taskPanel.refreshContent();
+
+    // ★ 对话结束后同步 NPC 状态（关系值等），确保精灵数据和面板数据一致
+    if (this.sessionId) {
+      getGameState(this.sessionId).then(state => {
+        if (state) gs.events.emit('state:refresh', state);
+      }).catch(() => {});
+    }
 
     // 章节完成：玩家关闭对话后再跳转
     if (this.pendingChapterChange && this.pendingChapterChange.chapterCompleted) {
@@ -731,11 +745,12 @@ export class UIScene extends Phaser.Scene {
     // 右上角 HUD 位置更新（纵向排列）
     const x = width - 16;
     const btnPositions = {
-      historyBtn:    { x, y: 48 },
-      backpackBtn:   { x, y: 80 },
-      taskBtn:       { x, y: 112 },
-      storyBtn:      { x, y: 144 },
-      fullscreenBtn: { x, y: 176 },
+      historyBtn:      { x, y: 48 },
+      backpackBtn:     { x, y: 80 },
+      taskBtn:         { x, y: 112 },
+      storyBtn:        { x, y: 144 },
+      relationshipBtn: { x, y: 176 },
+      fullscreenBtn:   { x, y: 208 },
     };
     for (const [ref, pos] of Object.entries(btnPositions)) {
       if (this[ref]) this[ref].setPosition(pos.x, pos.y);
@@ -761,6 +776,7 @@ export class UIScene extends Phaser.Scene {
       { name: 'saveManager',    inst: this.saveManager },
       { name: 'stageTransition',inst: this.stageTransition },
       { name: 'endingScreen',   inst: this.endingScreen },
+      { name: 'relationshipPanel', inst: this.relationshipPanel },
     ];
     for (const m of modules) {
       try {
@@ -887,6 +903,7 @@ export class UIScene extends Phaser.Scene {
       else this.toggleBackpackPanel();
       return;
     }
+    if (this._relationshipPanelUI?.visible) { this.relationshipPanel.hide(); return; }
     if (this._storyPanelUI?.visible) { this.storyPanel.hide(); return; }
     if (this.historyPanelVisible) { this.historyPanel.toggle(); return; }
     this.togglePauseMenu();
@@ -900,6 +917,7 @@ export class UIScene extends Phaser.Scene {
     if (this._storyPanelUI?.visible) this.storyPanel.hide();
     if (this.historyPanelVisible) this.historyPanel.toggle();
     if (this._taskPanelUI?.visible) this.taskPanel.hide();
+    if (this._relationshipPanelUI?.visible) this.relationshipPanel.hide();
   }
 
   // =========================== 更新循环 ============================
@@ -948,6 +966,11 @@ export class UIScene extends Phaser.Scene {
       // W/S/Enter 之外的按键（如 T/H/J/ESC）不在此拦截，让后续逻辑处理
     }
 
+    // 关系面板 R 键 — 互斥
+    if (!editing && !this.dialogActive && !this.pauseMenuVisible && Phaser.Input.Keyboard.JustDown(this.keyR)) {
+      if (!this._relationshipPanelUI?.visible) this._closeAllPanels();
+      this.relationshipPanel.toggle();
+    }
     // 历史面板 H 键 — 互斥：打开前关闭其他面板
     if (!editing && !this.dialogActive && !this.pauseMenuVisible && Phaser.Input.Keyboard.JustDown(this.keyH)) {
       if (!this.historyPanelVisible) this._closeAllPanels();

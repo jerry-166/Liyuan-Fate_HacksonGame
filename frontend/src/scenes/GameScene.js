@@ -204,7 +204,6 @@ export class GameScene extends Phaser.Scene {
       K: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.K),   // 保存（避免与WASD的S冲突）
       B: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.B),   // 设置出生点
       C: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C),
-      R: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.R),
       I: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.I),
       X: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.X),
       Z: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Z),
@@ -1208,6 +1207,8 @@ export class GameScene extends Phaser.Scene {
       if (sprite) {
         sprite.setData('greeting', stateNpc.current_greeting);
         sprite.setData('name', stateNpc.name);
+        sprite.setData('role', stateNpc.role);
+        sprite.setData('relationship', stateNpc.relationship ?? 0);
         sprite.setVisible(stateNpc.is_available !== false);
         // ★ 恢复 NPC 位置：编辑器位置优先于后端位置
         //    章节推进或阶段切换时 UIScene 会发 state:refresh 携带后端原始位置，
@@ -1956,12 +1957,6 @@ export class GameScene extends Phaser.Scene {
   // ==================== 更新循环 ====================
 
   update() {
-    // R 键硬重置 — 永远可用
-    if (this.editKeys && Phaser.Input.Keyboard.JustDown(this.editKeys.R)) {
-      this._hardReset();
-      return;
-    }
-
     try {
       this._updateInner();
     } catch (e) {
@@ -1970,7 +1965,7 @@ export class GameScene extends Phaser.Scene {
         console.error('[GameScene] update 崩溃:', e);
         const { width } = this.cameras.main;
         this._errorMsg = this.add.text(width / 2, 120,
-          `⚠️ 游戏出错: ${e.message}\n按 [R] 重置  |  按 F12 查看控制台`, {
+          `⚠️ 游戏出错: ${e.message}\n按 F12 查看控制台`, {
             fontSize: '18px', color: '#ff6666', backgroundColor: '#330000dd',
             padding: { x: 16, y: 10 }, align: 'center',
           }).setOrigin(0.5).setDepth(9999).setScrollFactor(0);

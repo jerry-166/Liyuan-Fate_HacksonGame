@@ -5,6 +5,7 @@
  */
 
 import { getChapterLabel } from '../../config.js';
+import { isMobileDevice } from '../../utils/DeviceDetector.js';
 
 export class HistoryPanel {
   /**
@@ -27,8 +28,11 @@ export class HistoryPanel {
     const bg = ui.add.graphics();
     bg.fillStyle(0x0a0a12, 0.93);
     bg.fillRect(0, 0, width, height);
-    bg.setInteractive(new Phaser.Geom.Rectangle(0, 0, width, height), Phaser.Geom.Rectangle.Contains);
-    bg.on('pointerdown', () => this.toggle());
+    // 移动端：点击外部关闭面板
+    if (isMobileDevice()) {
+      bg.setInteractive(new Phaser.Geom.Rectangle(0, 0, width, height), Phaser.Geom.Rectangle.Contains);
+      bg.on('pointerdown', () => this.toggle());
+    }
     ui._historyPanelUI.add(bg);
 
     ui._historyPanelUI.add(ui.add.text(width / 2, 20, '—— 记忆回响 ——', {
@@ -44,7 +48,7 @@ export class HistoryPanel {
     histMaskGfx.setVisible(false);
     ui.historyContent.setMask(histMaskGfx.createGeometryMask());
 
-    ui._historyPanelUI.add(ui.add.text(width / 2, height - 30, '[H / F] 关闭  |  滚轮滚动  |  点击外部关闭', {
+    ui._historyPanelUI.add(ui.add.text(width / 2, height - 30, isMobileDevice() ? '[H / F] 关闭  |  滚轮滚动  |  点击外部关闭' : '[H / F] 关闭  |  滚轮滚动', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '16px', color: '#666655',
     }).setOrigin(0.5, 0));
 
