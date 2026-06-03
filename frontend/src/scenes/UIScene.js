@@ -465,7 +465,9 @@ export class UIScene extends Phaser.Scene {
     if (this.dialogActive || !this.sessionId) return;
     try {
       console.log('[UIScene] skipChapter...');
+      this._showChapterLoading();
       const chapterResult = await skipChapter(this.sessionId);
+      this._hideChapterLoading();
 
       if (chapterResult.game_ended) {
         this.time.delayedCall(500, () => this.triggerEndingSequence());
@@ -498,6 +500,7 @@ export class UIScene extends Phaser.Scene {
       }
     } catch (e) {
       console.error('[UIScene] 跳章失败:', e);
+      this._hideChapterLoading();
     }
   }
 
@@ -512,7 +515,9 @@ export class UIScene extends Phaser.Scene {
     if (!this.sessionId) return;
 
     try {
+      this._showChapterLoading();
       const chapterResult = await startChapter(this.sessionId);
+      this._hideChapterLoading();
 
       if (chapterResult.game_ended) {
         this.time.delayedCall(500, () => this.triggerEndingSequence());
@@ -589,6 +594,7 @@ export class UIScene extends Phaser.Scene {
       console.error('[UIScene] 章节推进失败:', e);
       this.dialogActive = false;
       this.pendingChapterChange = null;
+      this._hideChapterLoading();
     }
   }
 
@@ -596,6 +602,74 @@ export class UIScene extends Phaser.Scene {
     if (!chapterInfo || !chapterInfo.chapter_id) return;
     const mapped = CHAPTER_MAP[chapterInfo.chapter_id];
     if (mapped && mapped > this.currentStage) this.currentStage = mapped;
+  }
+
+  // =========================== 章节加载过渡动画 ============================
+
+  _showChapterLoading() {
+    this._hideChapterLoading(true); // 先清理旧的
+    const { width, height } = this.cameras.main;
+
+    // 半透明背景遮罩
+    this._chapterLoadingOverlay = this.add.rectangle(
+      width / 2, height / 2, width, height, 0x000000, 0.4
+    ).setDepth(540);
+
+    // 标题文字（参考 EndingScreen 命运齿轮的风格）
+    this._chapterLoadingText = this.add.text(width / 2, height / 2 - 20,
+      '整理记忆，进入下一章……', {
+      fontFamily: '"KaiTi","SimSun",serif', fontSize: '36px',
+      color: '#e8e0d0', stroke: '#1a1a1a', strokeThickness: 3,
+    }).setOrigin(0.5).setDepth(550).setAlpha(0);
+
+    // 小提示
+    this._chapterLoadingHint = this.add.text(width / 2, height / 2 + 30,
+      '故事正在推进……', {
+      fontFamily: '"KaiTi","SimSun",serif', fontSize: '20px',
+      color: '#bba080', stroke: '#1a1a1a', strokeThickness: 2,
+    }).setOrigin(0.5).setDepth(550).setAlpha(0);
+
+    // 淡入动画
+    this.tweens.add({
+      targets: [this._chapterLoadingText, this._chapterLoadingHint],
+      alpha: 1, duration: 600, ease: 'Sine.easeIn',
+    });
+
+    // 呼吸闪烁
+    this.tweens.add({
+      targets: this._chapterLoadingText,
+      alpha: 0.5, duration: 1200, yoyo: true, repeat: -1,
+      ease: 'Sine.easeInOut', delay: 600,
+    });
+  }
+
+  _hideChapterLoading(immediate = false) {
+    if (!this._chapterLoadingText && !this._chapterLoadingOverlay) return;
+
+    if (immediate) {
+      if (this._chapterLoadingOverlay) { this._chapterLoadingOverlay.destroy(); this._chapterLoadingOverlay = null; }
+      if (this._chapterLoadingText) { this._chapterLoadingText.destroy(); this._chapterLoadingText = null; }
+      if (this._chapterLoadingHint) { this._chapterLoadingHint.destroy(); this._chapterLoadingHint = null; }
+      return;
+    }
+
+    // 淡出
+    this.tweens.killTweensOf(this._chapterLoadingText);
+    this.tweens.killTweensOf(this._chapterLoadingHint);
+
+    const targets = [];
+    if (this._chapterLoadingText) targets.push(this._chapterLoadingText);
+    if (this._chapterLoadingHint) targets.push(this._chapterLoadingHint);
+    if (this._chapterLoadingOverlay) targets.push(this._chapterLoadingOverlay);
+
+    this.tweens.add({
+      targets, alpha: 0, duration: 400,
+      onComplete: () => {
+        if (this._chapterLoadingOverlay) { this._chapterLoadingOverlay.destroy(); this._chapterLoadingOverlay = null; }
+        if (this._chapterLoadingText) { this._chapterLoadingText.destroy(); this._chapterLoadingText = null; }
+        if (this._chapterLoadingHint) { this._chapterLoadingHint.destroy(); this._chapterLoadingHint = null; }
+      },
+    });
   }
 
   // =========================== 结局（委托给 EndingScreen）===========================

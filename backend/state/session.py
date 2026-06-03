@@ -305,6 +305,10 @@ class GameSession:
     # ─── AI 生成的章节大纲 ───────────────────────
     chapter_outlines: list[dict] = field(default_factory=list)
 
+    # ─── 对话压缩摘要（LLM 生成） ──────────────────
+    # key=npc_id, value=该 NPC 对话的叙事摘要
+    compressed_summaries: dict[str, str] = field(default_factory=dict)
+
     def get_current_chapter(self) -> Optional[dict]:
         """获取当前章节定义。"""
         if not self.current_chapter_id or not self.chapter_defs:

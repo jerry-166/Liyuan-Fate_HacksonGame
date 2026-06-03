@@ -53,22 +53,24 @@ function _mergeLocalPositionState(sessionId, gameState) {
     const local = JSON.parse(saved);
 
     // ★ 仅补全缺失字段，不覆盖后端/快照已返回的值
+    // 注意：null 也是后端明确设定的有效值（如 _sub_scene_id: null 表示主地图），
+    // 只有 undefined（字段未返回）时才从 localStorage 补全
     if (!gameState._town_npc_positions && local._town_npc_positions && Array.isArray(local._town_npc_positions)) {
       gameState._town_npc_positions = local._town_npc_positions;
     }
     if (!gameState._player_position && local._player_position) {
       gameState._player_position = local._player_position;
     }
-    if (!gameState._sub_scene_id && local._sub_scene_id) {
+    if (gameState._sub_scene_id === undefined && local._sub_scene_id) {
       gameState._sub_scene_id = local._sub_scene_id;
     }
-    if (!gameState._sub_scene_player_position && local._sub_scene_player_position) {
+    if (gameState._sub_scene_player_position === undefined && local._sub_scene_player_position) {
       gameState._sub_scene_player_position = local._sub_scene_player_position;
     }
-    if (!gameState._sub_scene_story_npc_positions && local._sub_scene_story_npc_positions) {
+    if (gameState._sub_scene_story_npc_positions === undefined && local._sub_scene_story_npc_positions) {
       gameState._sub_scene_story_npc_positions = local._sub_scene_story_npc_positions;
     }
-    if (!gameState._sub_scene_town_npc_positions && local._sub_scene_town_npc_positions) {
+    if (gameState._sub_scene_town_npc_positions === undefined && local._sub_scene_town_npc_positions) {
       gameState._sub_scene_town_npc_positions = local._sub_scene_town_npc_positions;
     }
     // 合并故事 NPC 位置（localStorage 中的可能比后端 DB 更新）

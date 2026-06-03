@@ -80,7 +80,9 @@
 | 后端 | Python + FastAPI + Uvicorn |
 | AI | 腾讯 MaaS LLM（SSE 流式输出） |
 | 数据 | SQLite + JSON 存档 |
-| 部署 | 前后端分离，单机运行 |
+| 部署 | 前后端分离，CloudBase 云托管 + 静态托管 |
+| 在线地址 | [https://trihack-d6gii8nizae1c0196-1381072107.tcloudbaseapp.com](https://trihack-d6gii8nizae1c0196-1381072107.tcloudbaseapp.com) |
+| 后端 API | [https://liyuan-shengsi-265764-5-1381072107.sh.run.tcloudbase.com](https://liyuan-shengsi-265764-5-1381072107.sh.run.tcloudbase.com) |
 
 ## 快速开始
 

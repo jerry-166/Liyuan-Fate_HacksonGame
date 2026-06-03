@@ -122,12 +122,31 @@ class PromptBuilder:
 - 背景故事：{personality.get('background', '')}
 """)
 
-        # 3. 章节上下文
+        # 3. 章节上下文（本章目标 + NPC 态度指引）
+        #    叙事进度（已完成章节+事件）由 _build_state_context 中的叙事总览统一提供
         if chapter:
-            parts.append(f"""
+            chapter_lines = [f"""
 ## 当前章节：{chapter.get('name', '')}
+
 {chapter.get('description', '')}
+"""]
+
+            # 章节核心目标（引导 NPC 行为方向）
+            sc = chapter.get('success_condition', '')
+            if sc:
+                chapter_lines.append(f"""
+### 本章目标
+{sc}
+
+⚠️ 对话和选项应服务于推进以上目标。如果玩家偏离主线，自然地引导（但不直接说出游戏机制）。
 """)
+
+            # NPC 态度指引
+            attitude = self._get_chapter_attitude_guidance(chapter.get("id", ""))
+            if attitude:
+                chapter_lines.append(attitude)
+
+            parts.append("\n".join(chapter_lines))
 
         # 4. 全局状态
         parts.append(self._build_state_context(session, npc_id))
@@ -148,56 +167,183 @@ class PromptBuilder:
 
         return "\n".join(parts)
 
-    def _build_state_context(self, session: GameSession, current_npc_id: str) -> str:
-        lines = ["\n## 游戏全局状态"]
+    # ─── 上下文长度控制常量 ─────────────────────────
+    _MAX_DIALOGUE_HISTORY = 5          # 当前章节保留最近 N 轮原始对话
+    _MAX_DIALOGUE_CONTENT_LEN = 80     # 单轮对话内容最大字符数（截断）
+    _MAX_EVENT_DISPLAY = 10            # 最多显示的事件数
 
-        # 关系值
-        lines.append("玩家与各NPC的关系：")
+    def _build_state_context(self, session: GameSession, current_npc_id: str) -> str:
+        """构建压缩版全局状态上下文。
+
+        分级策略：
+        - 跨章节叙事 → 压缩为「叙事总览」（自然语言摘要）
+        - 关键事件 → 压缩为可读描述（而非原始 event_id）
+        - 当前章节对话 → 保留最近 N 轮原始对话 + 内容截断
+        - 关系值/任务/物品 → 保持原样
+        """
+        parts = []
+
+        # ── 1. 叙事总览（压缩版：已完成章节 + 关键事件的人类可读描述）──
+        narrative = self._build_narrative_summary(session)
+        if narrative:
+            parts.append(narrative)
+
+        # ── 2. 关系值 ──────────────────────────────
+        parts.append("\n## 关系值")
         for npc in session.npcs.values():
             rel_desc = self._describe_relationship(npc.relationship)
-            lines.append(f"  - {npc.name}：{npc.relationship}（{rel_desc}）")
+            parts.append(f"  - {npc.name}：{npc.relationship}（{rel_desc}）")
 
-        # 当前任务
+        # ── 3. 当前任务 ────────────────────────────
         task = session.current_task
         if task:
-            lines.append(f"\n当前任务：{task.description}")
-            lines.append(f"任务进度：{int(task.completion_rate * 100)}%")
-            # 只显示与此 NPC 相关的子任务
+            parts.append(f"\n## 当前任务")
+            parts.append(f"{task.description}")
+            parts.append(f"进度：{int(task.completion_rate * 100)}%")
             relevant = [st for st in task.sub_tasks if self._is_npc_relevant(st, current_npc_id)]
             if relevant:
-                lines.append("你需要关注的子任务：")
+                parts.append("你需要关注的子任务：")
                 for st in relevant:
                     status_icon = {"locked": "🔒", "active": "⬜",
                                    "in_progress": "🔄", "completed": "✅"
                                    }.get(st.status, "?")
-                    lines.append(f"  [{status_icon}] {st.title}（{st.mode}）")
+                    parts.append(f"  [{status_icon}] {st.title}（{st.mode}）")
 
-        # 物品
+        # ── 4. 物品 ────────────────────────────────
         if session.inventory:
             inv_names = [i.name for i in session.inventory]
-            lines.append(f"\n玩家持有的物品：{', '.join(inv_names)}")
+            parts.append(f"\n## 玩家物品：{', '.join(inv_names)}")
             if session.active_item:
                 item = session.get_inventory_item(session.active_item)
                 if item:
-                    lines.append(f"\n>>> 玩家正在展示：{item.name} <<<")
-                    lines.append(f"物品描述：{item.get_display_text()}")
+                    parts.append(f">>> 玩家正在展示：{item.name}")
+                    parts.append(f"描述：{item.get_display_text()[:150]}")
                     if current_npc_id in item.npc_knowledge:
-                        lines.append(f"你对这个物品的认知：{item.npc_knowledge[current_npc_id]}")
+                        parts.append(f"你对它的认知：{item.npc_knowledge[current_npc_id][:100]}")
 
-        # 已触发事件
-        if session.events_triggered:
-            lines.append(f"\n已触发事件：{', '.join(sorted(session.events_triggered))}")
+        # ── 5. 当前章节对话历史 ────────────────────
+        dialogue_section = self._build_recent_dialogue(session, current_npc_id)
+        if dialogue_section:
+            parts.append(dialogue_section)
 
-        # 对话历史
-        if current_npc_id in session.npcs:
-            hist = session.npcs[current_npc_id].dialogue_history
-            if hist:
-                lines.append(f"\n与 {session.npcs[current_npc_id].name} 的最近对话：")
-                for turn in hist[-5:]:
-                    role_label = "玩家" if turn.role == "player" else session.npcs[current_npc_id].name
-                    lines.append(f"  {role_label}：{turn.content[:120]}")
+        return "\n".join(parts)
+
+    def _build_narrative_summary(self, session: GameSession) -> str:
+        """构建压缩版叙事总览。
+
+        将已完成章节 + 已触发事件压缩为自然语言摘要。
+        跨章节信息通过事件描述保留叙事连贯性（而非原始对话）。
+        """
+        if not session.chapter_defs or not session.current_chapter_id:
+            return ""
+
+        lines = ["## 📖 叙事总览"]
+        player = session.player_name or "玩家"
+
+        # 已完成章节（按 sort_order 排序）
+        completed = []
+        for ch_def in sorted(session.chapter_defs,
+                             key=lambda c: c.get("sort_order", 0)):
+            cid = ch_def.get("id", "")
+            if cid == session.current_chapter_id:
+                continue
+            if cid in session.completed_chapters:
+                completed.append(ch_def)
+
+        if completed:
+            parts = [f"「{player}」回到梨溪镇安葬父亲。"]
+            for ch_def in completed:
+                name = ch_def.get("name", "?")
+                key_event = ch_def.get("key_event", "")
+                # 用事件描述提供叙事锚点
+                event_desc = self._describe_event(key_event) if key_event else "完成"
+                parts.append(f"- {name}：{event_desc}")
+            lines.append("\n".join(parts))
+
+        # 关键事件（压缩：只显示有意义的描述，而非 raw event_id）
+        events = sorted(session.events_triggered) if session.events_triggered else []
+        if events:
+            described = []
+            for evt in events[:self._MAX_EVENT_DISPLAY]:
+                desc = self._describe_event(evt)
+                if desc != evt:
+                    described.append(desc)
+            if described:
+                lines.append(f"\n⚡ 已发生的关键事件：{'; '.join(described)}")
+            elif len(events) > 0:
+                # fallback：显示原始 event_id
+                excess = f"（共{len(events)}个）" if len(events) > self._MAX_EVENT_DISPLAY else ""
+                lines.append(f"\n⚡ 已触发事件：{', '.join(events[:self._MAX_EVENT_DISPLAY])}{excess}")
+
+        # LLM 压缩的对话摘要（章节结束时和超阈值时生成）
+        if session.compressed_summaries:
+            summaries = []
+            for npc_id, summary in session.compressed_summaries.items():
+                npc = session.npcs.get(npc_id)
+                npc_name = npc.name if npc else npc_id
+                summaries.append(f"- 与{npc_name}的过往对话摘要：{summary[:200]}")
+            if summaries:
+                lines.append(f"\n💬 历史对话摘要（AI 生成）：\n{chr(10).join(summaries)}")
 
         return "\n".join(lines)
+
+    def _build_recent_dialogue(self, session: GameSession, npc_id: str) -> str:
+        """构建当前章节的最近对话（内容截断 + 轮数控制）。
+
+        只取当前章节的对话，避免跨章节「陌生人」对话污染。
+        同时告知 LLM 如果前面还有更多轮对话。
+        """
+        if npc_id not in session.npcs:
+            return ""
+
+        npc = session.npcs[npc_id]
+        current_ch_id = session.current_chapter_id
+
+        # 过滤当前章节对话
+        if current_ch_id:
+            chapter_turns = [t for t in npc.dialogue_history
+                            if getattr(t, 'chapter_id', '') == current_ch_id]
+        else:
+            chapter_turns = list(npc.dialogue_history)
+
+        if not chapter_turns:
+            # fallback：没有任何当前章节对话，用全部
+            chapter_turns = list(npc.dialogue_history)[-self._MAX_DIALOGUE_HISTORY:]
+
+        total_turns = len(chapter_turns)
+        display_turns = chapter_turns[-self._MAX_DIALOGUE_HISTORY:]
+
+        lines = [f"\n## 与 {npc.name} 的最近对话"]
+        if total_turns > len(display_turns):
+            skipped = total_turns - len(display_turns)
+            lines.append(f"（前面还有 {skipped} 轮对话未显示）")
+
+        for turn in display_turns:
+            role_label = "玩家" if turn.role == "player" else npc.name
+            content = turn.content[:self._MAX_DIALOGUE_CONTENT_LEN]
+            if len(turn.content) > self._MAX_DIALOGUE_CONTENT_LEN:
+                content += "…"
+            lines.append(f"  {role_label}：{content}")
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _describe_event(event_id: str) -> str:
+        """将 event_id 映射为人类可读的叙事描述。
+
+        用于叙事总览中的压缩展示。只映射已知的关键事件。
+        """
+        mapping = {
+            "prologue_complete": "安葬父亲，离开墓地",
+            "first_resonance": "在戏台体验到身体共鸣",
+            "evidence_collected": "收集到关键证据和旧物",
+            "memory_awakened": "记忆觉醒，想起自己是戏班神童",
+            "decline_accepted": "认清戏班凋零的现实",
+            "inheritance_accepted": "接受传承，决定继承戏班",
+            "chen_tells_past": "陈师傅讲述了过去的故事",
+            "xiaohua_trusts_player": "小华对你产生了信任",
+        }
+        return mapping.get(event_id, event_id)
 
     def _build_user(
         self, npc_id, npc_name, stage, session, player_message=None,
@@ -272,9 +418,12 @@ class PromptBuilder:
 请在对话中自然地对这个物品做出反应。
 """
 
+        # 叙事进度总结
+        narrative_progress = self._build_narrative_progress(session, chapter)
+
         return f"""{intro}
 
-当前章节：{chapter.get('name', '') if chapter else '未知'}（第{stage}阶段）
+{narrative_progress}当前章节：{chapter.get('name', '') if chapter else '未知'}（第{stage}阶段）
 你与玩家的关系值：{relationship}
 本轮已对话数：{dialogue_rounds} 轮
 
@@ -307,6 +456,72 @@ class PromptBuilder:
     def _is_npc_relevant(self, st, npc_id: str) -> bool:
         return (st.target_npc_id == npc_id or
                 st.deliver_to_npc_id == npc_id)
+
+    @staticmethod
+    def _get_chapter_attitude_guidance(chapter_id: str) -> str:
+        """根据章节给出 NPC 对玩家的态度指引。
+
+        随着剧情推进，NPC 对玩家的态度应有显著变化。
+        这里提供硬编码的指引，确保跳章后 NPC 行为与叙事阶段匹配。
+        """
+        guidance_map = {
+            "ch_prologue": "",
+            "ch_01": """
+### 🎭 NPC 态度指引
+玩家刚来到小镇，是一个失去记忆的「外人」。戏班众人对你冷淡、疏离、略带警惕。
+- 老周/小华：冷漠但有好奇，话不多
+- 陈师傅：沉默寡言，但眼神复杂（他认识你父亲）
+- 梅姨：客气但保持距离
+- 老李：无所谓的态度""",
+            "ch_02": """
+### 🎭 NPC 态度指引
+玩家已体验过「身体共鸣」的异样感，开始主动探索。戏班众人开始注意到你身上有熟悉的东西。
+- 老周/小华：开始对你产生好奇，偶尔说漏嘴
+- 陈师傅：开始试探你，但有所保留
+- 梅姨：愿意和你聊聊镇上的往事
+- 老李：提及你父亲时会沉默""",
+            "ch_03": """
+### 🎭 NPC 态度指引
+这是关键转折章——玩家记忆觉醒，真相大白！NPC 的态度应发生根本性转变：
+- 陈师傅：终于可以放下三十年的隐忍，情感爆发。说话不再遮遮掩掩，直接讲述你父亲和你的往事
+- 老周：承认认识你，语气从敷衍变为愧疚和长辈的慈爱
+- 梅姨：热泪盈眶，把你当自己的孩子看待
+- 小华：对你的态度从"外人"变为"师兄/师姐"，语气尊重
+- 老李：郑重地向你致敬，提及你父亲对他的恩情""",
+            "ch_04": """
+### 🎭 NPC 态度指引
+记忆已恢复，你已是戏班「自己人」。NPC 不再对你隐瞒任何事，反而向你倾诉他们的困境。
+- 陈师傅：把你视为戏班的希望，言语间充满期盼和担忧
+- 老周：向你诉苦，讲述戏班如何一步步没落
+- 梅姨：关心你的感受，担心你承受不了
+- 小华：把你当作可以倾诉的知心人
+- 老李：鼓励你，但也担心你从此被困住""",
+            "ch_05": """
+### 🎭 NPC 态度指引
+终章！你决定继承戏班。所有 NPC 对你的态度应达到最高点：
+- 陈师傅：如释重负、老泪纵横，正式交付传承信物
+- 老周：欣慰、感动，表示愿意全力辅助你
+- 梅姨：骄傲、不舍，像送别自己孩子一样叮嘱
+- 小华：充满希望和干劲，愿意跟随你
+- 老李：庄严郑重，说出肺腑之言""",
+        }
+        return guidance_map.get(chapter_id, "")
+
+    @staticmethod
+    def _build_narrative_progress(session: GameSession, chapter: dict) -> str:
+        """构建一句简短的叙事提示（完整叙事总览在 System Prompt 中）。"""
+        if not chapter:
+            return ""
+        completed_count = len([c for c in session.completed_chapters if c != chapter.get("id", "")])
+        if completed_count == 0:
+            return ""
+        ch_names = []
+        for cid in session.completed_chapters:
+            for ch_def in session.chapter_defs:
+                if ch_def.get("id") == cid and cid != chapter.get("id", ""):
+                    ch_names.append(ch_def.get("name", cid))
+        progress_hint = " → ".join(ch_names) if ch_names else f"已完成{completed_count}章"
+        return f"📖 剧情已推进至「{chapter.get('name', '')}」（之前：{progress_hint}）。确保回应与当前阶段一致。\n"
 
     @staticmethod
     def _describe_relationship(value: int) -> str:

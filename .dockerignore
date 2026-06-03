@@ -1,0 +1,32 @@
+# 前端源码和构建产物
+frontend/
+
+# 文档
+docs/
+knowledge/
+
+# 比赛材料
+比赛提交内容/
+目前没用了/
+
+# Git
+.git/
+.gitignore
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+.codebuddy/
+
+# 其他
+README.md
+*.md
+start.bat
+CLAUDE.md

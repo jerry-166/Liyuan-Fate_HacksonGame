@@ -1,0 +1,64 @@
+# === IDE ===
+.claude/
+.codebuddy/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# === OS ===
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# === Build & Temp ===
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+*.egg
+dist/
+generated-images/
+generate-images/
+
+# === Python ===
+.venv/
+venv/
+env/
+backend/saves/
+
+# === Node.js ===
+node_modules/
+npm-debug.log*
+
+# === Environment Files ===
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+.env.staging
+
+# === Database ===
+*.db
+backend/game.db
+*.db-shm
+*.db-wal
+*.db-journal
+
+# === Cloud Deployment ===
+cloudrun/
+
+# === Project-specific ===
+比赛提交内容/
+目前没用了/
+
+# === Logs ===
+*.log
+logs/
+
+# === Config files that are generated or personal ===
+CLAUDE.md
+plan.md
+start.bat

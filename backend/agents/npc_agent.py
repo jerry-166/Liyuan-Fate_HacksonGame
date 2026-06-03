@@ -56,6 +56,9 @@ class NPCAgent:
         if not npc.is_available:
             raise ValueError(f"NPC not available: {npc_id}")
 
+        # ── 对话超阈值时触发增量压缩 ────────────────
+        await self._maybe_compress_dialogue(session, npc_id)
+
         is_ending = PromptBuilder.is_conversation_ending(player_message)
 
         messages = self.prompt_builder.build_dialogue_messages(
@@ -227,6 +230,39 @@ class NPCAgent:
             manager._db.save_task_instance(session.session_id, task.to_dict())
         except Exception as e:
             logger.error(f"[NPCAgent] 持久化任务投票失败: {e}")
+
+    async def _maybe_compress_dialogue(self, session: GameSession, npc_id: str) -> None:
+        """对话轮数超过阈值时，触发增量压缩（非阻塞，失败不影响主流程）。"""
+        npc = session.npcs.get(npc_id)
+        if not npc:
+            return
+
+        from agents.dialogue_compressor import DialogueCompressor, COMPRESS_ROUND_THRESHOLD
+        total_rounds = len(npc.dialogue_history) // 2
+        if total_rounds < COMPRESS_ROUND_THRESHOLD:
+            return
+
+        # 检查是否有该 NPC 的压缩结果（避免频繁压缩）
+        # 如果已有压缩摘要，每超过阈值10轮再压缩一次
+        if npc_id in session.compressed_summaries:
+            last_compress_rounds = getattr(self, f'_last_compress_{npc_id}', 0)
+            if total_rounds < last_compress_rounds + 10:
+                return
+
+        try:
+            compressor = DialogueCompressor()
+            summary = await compressor.compress_npc_old_dialogue(session, npc_id)
+            if summary:
+                # 合并到已有摘要
+                existing = session.compressed_summaries.get(npc_id, "")
+                if existing:
+                    session.compressed_summaries[npc_id] = f"{existing}\n{summary}"
+                else:
+                    session.compressed_summaries[npc_id] = summary
+                setattr(self, f'_last_compress_{npc_id}', total_rounds)
+                logger.info(f"[NPCAgent] Compressed {npc_id} dialogue at round {total_rounds}")
+        except Exception as e:
+            logger.warning(f"[NPCAgent] 压缩失败（非致命）: {e}")
 
 
 class AgentOrchestrator:

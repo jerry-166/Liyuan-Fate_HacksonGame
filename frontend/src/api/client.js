@@ -19,7 +19,8 @@ import {
 } from './mock-data.js';
 
 // ========== 基础常量 ==========
-const BASE = '/api';
+// 开发模式走 Vite proxy (/api → localhost:8000)，生产模式走 CloudRun 后端
+const BASE = import.meta.env.VITE_API_BASE || '/api';
 
 // ========== Mock 模式控制 ==========
 let USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false';

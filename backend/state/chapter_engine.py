@@ -6,7 +6,7 @@ import json
 import logging
 from typing import Optional
 
-from state.session import GameSession, TaskInstance, SubTaskStatus
+from state.session import GameSession, TaskInstance, SubTaskStatus, NarrativeItem
 from config import CHAPTER_TO_STAGE
 
 logger = logging.getLogger(__name__)
@@ -16,9 +16,20 @@ class ChapterEngine:
 
     async def start_chapter(self, session: GameSession,
                             chapter_def: dict) -> TaskInstance:
-        """开始一个新章节：优先用 StoryPlanner（含 AI 大纲），兜底用 TaskPlanner。"""
+        """开始一个新章节：优先用 StoryPlanner（含 AI 大纲），兜底用 TaskPlanner。
+
+        章节切换时，自动压缩上一章所有 NPC 的对话历史。
+        跳章时，自动补齐被跳过章节的状态（事件、物品、关系值）。
+        """
         from agents.story_planner import StoryPlanner
         planner = StoryPlanner()
+
+        # ── 跳章状态补齐（必须先于压缩，确保压缩时状态完整） ──
+        self.fill_skipped_state(session, chapter_def)
+
+        # ── 章节切换时压缩上一章的对话 ───────────────
+        if session.current_chapter_id and session.npcs:
+            await self._compress_previous_chapter(session)
 
         # 查找该章的 AI 大纲（如果有）
         outline = None
@@ -49,6 +60,18 @@ class ChapterEngine:
         self._persist_chapter_start(session, chapter_def, task)
 
         return task
+
+    async def _compress_previous_chapter(self, session: GameSession) -> None:
+        """章节切换时，异步压缩所有 NPC 的对话历史。"""
+        try:
+            from agents.dialogue_compressor import DialogueCompressor
+            compressor = DialogueCompressor()
+            results = await compressor.compress_all_for_chapter_end(session)
+            if results:
+                logger.info(f"[ChapterEngine] Compressed dialogue for {len(results)} NPCs "
+                           f"before chapter {session.current_chapter_id}")
+        except Exception as e:
+            logger.warning(f"[ChapterEngine] 对话压缩失败（非致命）: {e}")
 
     def check_chapter_completion(self, session: GameSession) -> bool:
         """检查当前章节是否完成（多 NPC 共识投票）。"""
@@ -150,6 +173,109 @@ class ChapterEngine:
             return None
 
         return next_ch
+
+    def fill_skipped_state(self, session: GameSession, target_chapter: dict) -> int:
+        """补齐所有已完成章节中缺失的状态（事件、物品、关系值）。
+
+        不只是检查 current→target 之间的跳跃，而是遍历所有 completed_chapters，
+        为其中缺失状态（事件/物品）的章节自动注入。
+
+        这样无论是逐章跳（skip_chapter）还是一次性跳（start_chapter+chapter_id），
+        都能正确补齐。
+
+        Returns:
+            被补齐的章节数
+        """
+        if not session.chapter_defs or not session.completed_chapters:
+            return 0
+
+        filled = 0
+        for ch_def in sorted(session.chapter_defs,
+                             key=lambda c: c.get("sort_order", 0)):
+            cid = ch_def.get("id", "")
+            # 只处理已完成章节
+            if cid not in session.completed_chapters:
+                continue
+            if ch_def.get("type") == "cinematic":
+                continue
+
+            # 检查是否需要填充（事件缺失 或 物品缺失）
+            key_event = ch_def.get("key_event", "")
+            event_missing = key_event and key_event not in session.events_triggered
+
+            items_missing = []
+            for item_id in ch_def.get("required_items", []):
+                if not session.get_inventory_item(item_id):
+                    items_missing.append(item_id)
+
+            if not event_missing and not items_missing:
+                continue  # 状态完整，跳过
+
+            logger.info(f"[ChapterEngine] Filling state for {ch_def.get('name', cid)} "
+                       f"(event_missing={event_missing}, items_missing={len(items_missing)})")
+
+            # 1. 注入关键事件
+            if event_missing:
+                session.events_triggered.add(key_event)
+                logger.info(f"[ChapterEngine]   + event: {key_event}")
+
+            # 2. 注入缺少的物品
+            for item_id in items_missing:
+                item_def = None
+                for idef in session.item_defs:
+                    iid = idef.get("id", idef.get("item_id", ""))
+                    if iid == item_id:
+                        item_def = idef
+                        break
+                if item_def:
+                    narrative_item = NarrativeItem(
+                        id=item_id,
+                        name=item_def.get("name", item_def.get("narrative_name", item_id)),
+                        item_type=item_def.get("item_type", item_def.get("category", "misc")),
+                        base_description=item_def.get("base_description",
+                                                       item_def.get("narrative_desc", "")),
+                        is_key=item_def.get("is_key", True),
+                        is_discovered=True,
+                        discovery_context=f"跳章自动获得（来自章节{ch_def.get('name', '')}）",
+                        related_npcs=item_def.get("related_npcs", []),
+                        npc_knowledge=item_def.get("npc_knowledge", {}),
+                    )
+                    session.add_to_inventory(narrative_item)
+                    logger.info(f"[ChapterEngine]   + item: {item_id} ({narrative_item.name})")
+
+            filled += 1
+
+        # 3. 调整 NPC 关系值到目标章节应有的水平
+        if filled > 0:
+            self._adjust_npc_relationships(session, target_chapter)
+
+        return filled
+
+    @staticmethod
+    def _adjust_npc_relationships(session: GameSession, target_chapter: dict) -> None:
+        """根据目标章节的阶段，将 NPC 关系值调整到合理水平。
+
+        阶段映射：
+          - 阶段1（ch_01/ch_02）：初始值 + 0~10（陌生人，初步接触）
+          - 阶段2（ch_03/ch_04）：初始值 + 25~40（记忆恢复，已是自己人）
+          - 阶段3（ch_05）：      初始值 + 50~65（信任，准备交接）
+        """
+        stage = CHAPTER_TO_STAGE.get(target_chapter.get("id", ""), 1)
+        if stage <= 1:
+            return
+
+        # 每个 stage 对应的最低关系值增量
+        stage_min_delta = {2: 25, 3: 50}
+        min_delta = stage_min_delta.get(stage, 0)
+
+        for npc in session.npcs.values():
+            target_relationship = npc.relationship_default + min_delta
+            if npc.relationship < target_relationship:
+                npc.relationship = max(npc.relationship, target_relationship)
+            npc.clamp_relationship()
+
+        logger.info(f"[ChapterEngine] Adjusted NPC relationships to stage {stage} "
+                   f"(min delta +{min_delta})")
 
     def _persist_chapter_start(self, session: GameSession,
                                chapter_def: dict, task: TaskInstance) -> None:

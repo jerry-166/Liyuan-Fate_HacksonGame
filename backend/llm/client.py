@@ -283,6 +283,44 @@ class LLMClient:
             content = data["choices"][0]["message"]["content"]
             return _parse_json_content(content)
 
+    async def chat_completion(
+        self,
+        messages: list[dict],
+        api_key: Optional[str] = None,
+        temperature: float = 0.5,
+        max_tokens: int = 300,
+    ) -> str:
+        """非流式纯文本调用 — 返回原始文本内容（不作 JSON 解析）。
+
+        用于对话摘要压缩等不需要 JSON 输出的场景。
+        """
+        key = self.resolve_api_key(api_key)
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": False,
+        }
+
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=10.0, read=LLM_HTTP_TIMEOUT, write=10.0, pool=10.0)
+        ) as client:
+            response = await client.post(
+                f"{self.base_url}/chat/completions",
+                headers=self._headers(key),
+                json=payload,
+            )
+            if response.status_code != 200:
+                raise LLMError(
+                    f"LLM API 返回错误 {response.status_code}",
+                    code="LLM_ERROR",
+                    detail=response.text[:500],
+                )
+
+            data = response.json()
+            return data["choices"][0]["message"]["content"]
+
 
 class LLMError(Exception):
     """LLM 调用异常。"""
