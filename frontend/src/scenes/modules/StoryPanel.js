@@ -23,9 +23,10 @@ export class StoryPanel {
     bg.fillRect(0, 0, width, height);
     ui._storyPanelUI.add(bg);
 
-    // 全屏遮罩阻挡点击穿透
+    // 全屏遮罩阻挡点击穿透，点击外部关闭面板
     const clickBlocker = ui.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0)
       .setInteractive({ useHandCursor: false });
+    clickBlocker.on('pointerdown', () => this.hide());
     ui._storyPanelUI.add(clickBlocker);
 
     ui._storyTitle = ui.add.text(width / 2, 24, '—— 剧本纲要 ——', {
@@ -44,7 +45,7 @@ export class StoryPanel {
     ui._storyContent.setMask(maskGfx.createGeometryMask());
     ui._storyContentArea = { height: contentH };
 
-    ui._storyPanelUI.add(ui.add.text(width / 2, height - 28, '[ESC / J] 关闭  |  滚轮滚动', {
+    ui._storyPanelUI.add(ui.add.text(width / 2, height - 28, '[ESC / J] 关闭  |  滚轮滚动  |  点击外部关闭', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '14px', color: '#666655',
     }).setOrigin(0.5, 0));
 

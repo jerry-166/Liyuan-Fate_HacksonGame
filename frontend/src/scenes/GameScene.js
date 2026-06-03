@@ -32,6 +32,8 @@ import {
 import { SUBSCENES, SUB_MAP_SCALE } from './modules/SubSceneConfig.js';
 import { SubSceneManager } from './modules/SubSceneManager.js';
 import { MusicManager } from './modules/MusicManager.js';
+import { TouchController } from '../utils/TouchController.js';
+import { isMobileDevice } from '../utils/DeviceDetector.js';
 
 const TILE = GAME.TILE_SIZE;
 
@@ -179,6 +181,10 @@ export class GameScene extends Phaser.Scene {
       D: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
       F: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F),
     };
+
+    // ★ 移动端：创建虚拟摇杆 + 触控按钮
+    this.touchController = new TouchController(this);
+    this._isMobile = isMobileDevice();
 
     // F键交互提示文字（跟随世界坐标，出现在目标头上方）
     this.interactHint = this.add.text(0, 0, '', {
@@ -1926,10 +1932,12 @@ export class GameScene extends Phaser.Scene {
 
   _showControlsHint() {
     const { width, height } = this.cameras.main;
-    const hint = this.add.text(width / 2, height - 50,
-      '[WASD/方向键] 移动  |  [F] 拾取/进出建筑  |  [E] 碰撞编辑器  |  [R] 硬重置  |  编辑模式:[B]出生点 [K]保存', {
+    const hintText = this._isMobile
+      ? '[左半屏] 虚拟摇杆移动  |  [右下] 互动按钮  |  [R] 重置'
+      : '[WASD/方向键] 移动  |  [F] 拾取/进出建筑  |  [E] 碰撞编辑器  |  [R] 硬重置  |  编辑模式:[B]出生点 [K]保存';
+    const hint = this.add.text(width / 2, height - 50, hintText, {
         fontFamily: '"Microsoft YaHei","Consolas",sans-serif',
-        fontSize: '13px', color: '#aabbcc',
+        fontSize: this._isMobile ? '14px' : '13px', color: '#aabbcc',
         backgroundColor: '#0a0a15dd',
         padding: { x: 12, y: 8 },
         align: 'center', lineSpacing: 3,
@@ -2100,7 +2108,10 @@ export class GameScene extends Phaser.Scene {
     this.subSceneManager.updateProximityHints();
 
     // F 键交互 — 仅用于子场景切换和物品拾取；NPC 交互已自动弹出
-    if (!this.inputLocked && Phaser.Input.Keyboard.JustDown(this.wasd.F)) {
+    const fKeyPressed = Phaser.Input.Keyboard.JustDown(this.wasd.F);
+    // ★ 移动端触控按钮也触发交互
+    const touchAction = this.touchController ? this.touchController.isActionJustPressed() : false;
+    if (!this.inputLocked && (fKeyPressed || touchAction)) {
       // 优先处理子场景交互
       if (!this.subSceneManager.handleFKeyInteraction()) {
         if (this.currentNearbyItem) {
@@ -2118,15 +2129,29 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
-  /** 玩家移动控制 */
+  /** 玩家移动控制（键盘 + 虚拟摇杆合并） */
   _updatePlayerMovement() {
     const speed = GAME.PLAYER_SPEED;
     let targetVX = 0, targetVY = 0;
 
+    // ★ 键盘输入
     if (this.wasd.A.isDown || this.cursors.left.isDown) targetVX = -speed;
     else if (this.wasd.D.isDown || this.cursors.right.isDown) targetVX = speed;
     if (this.wasd.W.isDown || this.cursors.up.isDown) targetVY = -speed;
     else if (this.wasd.S.isDown || this.cursors.down.isDown) targetVY = speed;
+
+    // ★ 移动端虚拟摇杆输入（与键盘合并，键盘优先）
+    if (this.touchController && this.touchController.enabled) {
+      const touch = this.touchController.getDirection();
+      if (touch.isMoving) {
+        if (targetVX === 0 && targetVY === 0) {
+          // 键盘无输入时使用摇杆
+          targetVX = touch.vx * speed;
+          targetVY = touch.vy * speed;
+        }
+        // 键盘和摇杆同时输入时保持键盘方向优先
+      }
+    }
 
     if (targetVX !== 0 && targetVY !== 0) { targetVX *= 0.707; targetVY *= 0.707; }
 
@@ -2233,7 +2258,9 @@ export class GameScene extends Phaser.Scene {
       const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, item.x, item.y);
       if (dist < 48) {
         this.currentNearbyItem = item;
-        this.interactHint.setText(`按 [F] 拾取 ${item.getData('name')}`);
+        this.interactHint.setText(this._isMobile
+          ? `点击右下按钮拾取 ${item.getData('name')}`
+          : `按 [F] 拾取 ${item.getData('name')}`);
         this.interactHint.setPosition(item.x, item.y - 30);
         this.interactHint.setVisible(true);
         break;

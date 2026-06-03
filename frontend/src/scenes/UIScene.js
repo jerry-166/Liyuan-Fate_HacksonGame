@@ -30,6 +30,7 @@ import { getTownNPCDialogue } from './modules/TownNPCDialogue.js';
 import { SaveManager } from './modules/SaveManager.js';
 import { EndingScreen } from './modules/EndingScreen.js';
 import { StageTransition } from './modules/StageTransition.js';
+import { toggleFullscreen, isFullscreen } from '../utils/DeviceDetector.js';
 
 export class UIScene extends Phaser.Scene {
   constructor() {
@@ -152,12 +153,23 @@ export class UIScene extends Phaser.Scene {
     this.add.text(16, 16, '《梨园生死》', {
       fontFamily: '"KaiTi","SimSun",serif', fontSize: '22px', color: '#d4b896',
     }).setDepth(200);
-    this.add.text(16, 42, '[T] 指引', {
+
+    // ★ 移动端菜单按钮（标题下方）
+    this.menuBtn = this.add.text(16, 44, '⚙ 菜单', {
+      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+      fontSize: '14px', color: '#aa9977',
+      backgroundColor: '#1a1a2ecc', padding: { x: 10, y: 5 },
+    }).setOrigin(0, 0).setInteractive({ useHandCursor: true }).setDepth(201);
+    this.menuBtn.on('pointerover', () => this.menuBtn.setColor('#d4b896'));
+    this.menuBtn.on('pointerout', () => this.menuBtn.setColor('#aa9977'));
+    this.menuBtn.on('pointerdown', () => { if (!this.dialogActive) this.togglePauseMenu(); });
+
+    this.add.text(16, 78, '[T] 指引', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '15px', color: '#665544',
     }).setDepth(200);
 
     // ★ 左侧指引提示：常驻显示当前活跃子任务
-    this._miniTaskHint = this.add.text(16, 72, '', {
+    this._miniTaskHint = this.add.text(16, 102, '', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
       fontSize: '15px', color: '#c4a882',
       backgroundColor: '#0d0c12cc',
@@ -173,57 +185,76 @@ export class UIScene extends Phaser.Scene {
       backgroundColor: '#1a1a2ecc', padding: { x: 10, y: 5 },
     }).setOrigin(1, 0);
 
-    // 历史对话按钮
-    this.historyBtn = this.add.text(width - 16, 48, '📜 历史 [H]', {
-      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '14px', color: '#887766',
-      backgroundColor: '#1a1a2ecc', padding: { x: 8, y: 4 },
-    }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
-    this.historyBtn.on('pointerdown', () => this.historyPanel.toggle());
-    this.hudContainer.add(this.historyBtn);
-
-    // 背包按钮
-    this.backpackBtn = this.add.text(width - 16, 80, '🎒 行囊 [B]', {
-      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '14px', color: '#c4a882',
-      backgroundColor: '#1a1a2ecc', padding: { x: 8, y: 4 },
-    }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
-    this.backpackBtn.on('pointerover', () => this.backpackBtn.setColor('#e8d4a0'));
-    this.backpackBtn.on('pointerout', () => this.backpackBtn.setColor('#c4a882'));
-    this.backpackBtn.on('pointerdown', () => {
-      if (!this.dialogActive && !this.pauseMenuVisible && !this.historyPanelVisible) {
-        this.toggleBackpackPanel();
-      }
-    });
-    this.hudContainer.add(this.backpackBtn);
-
-    // 任务按钮
-    this.taskBtn = this.add.text(width - 16, 112, '📋 任务 [T]', {
-      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '16px', color: '#c4a882',
-      backgroundColor: '#1a1a2ecc', padding: { x: 10, y: 5 },
-    }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
-    this.taskBtn.on('pointerover', () => this.taskBtn.setColor('#e8d4a0'));
-    this.taskBtn.on('pointerout', () => this.taskBtn.setColor('#c4a882'));
-    this.taskBtn.on('pointerdown', () => {
-      if (!this.dialogActive && !this.pauseMenuVisible) {
-        this.taskPanel.toggle();
-      }
-    });
-    this.hudContainer.add(this.taskBtn);
-
-    // 剧本按钮（与任务按钮风格一致）
-    this.storyBtn = this.add.text(width - 16, 144, '📜 剧本 [J]', {
-      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '16px', color: '#c4a882',
-      backgroundColor: '#1a1a2ecc', padding: { x: 10, y: 5 },
-    }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
-    this.storyBtn.on('pointerover', () => this.storyBtn.setColor('#e8d4a0'));
-    this.storyBtn.on('pointerout', () => this.storyBtn.setColor('#c4a882'));
-    this.storyBtn.on('pointerdown', () => this.storyPanel.toggle());
-    this.hudContainer.add(this.storyBtn);
-
     this.hudContainer.add(this.stageBadge);
+
+    // === 右上角纵向按钮栏 ===
+    this._buildNavButtons();
+  }
+
+  /** 构建右上角纵向导航按钮栏（含移动端菜单按钮） */
+  _buildNavButtons() {
+    const { width } = this.cameras.main;
+    const x = width - 16;
+    const btnPaddingX = 10;
+    const btnPaddingY = 5;
+    const fontSize = '14px';
+
+    const btnDefs = [
+      { y: 48, label: '📜 历史 [H]', color: '#887766', hover: '#c4a882',
+        action: () => this.historyPanel.toggle(), ref: 'historyBtn' },
+      { y: 80, label: '🎒 行囊 [B]', color: '#c4a882', hover: '#e8d4a0',
+        action: () => { if (!this.dialogActive && !this.pauseMenuVisible && !this.historyPanelVisible) this.toggleBackpackPanel(); },
+        ref: 'backpackBtn' },
+      { y: 112, label: '📋 任务 [T]', color: '#c4a882', hover: '#e8d4a0',
+        action: () => { if (!this.dialogActive && !this.pauseMenuVisible) this.taskPanel.toggle(); },
+        ref: 'taskBtn' },
+      { y: 144, label: '📖 剧本 [J]', color: '#c4a882', hover: '#e8d4a0',
+        action: () => this.storyPanel.toggle(), ref: 'storyBtn' },
+      { y: 176, label: isFullscreen() ? '⛶ 退出全屏' : '⛶ 全屏', color: '#887766', hover: '#c4a882',
+        action: () => { toggleFullscreen().then(() => this._updateFullscreenBtnLabel()); },
+        ref: 'fullscreenBtn' },
+    ];
+
+    for (const def of btnDefs) {
+      const btn = this.add.text(x, def.y, def.label, {
+        fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+        fontSize, color: def.color,
+        backgroundColor: '#1a1a2ecc',
+        padding: { x: btnPaddingX, y: btnPaddingY },
+      }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
+
+      if (def.ref !== 'historyBtn') {
+        btn.on('pointerover', () => btn.setColor(def.hover));
+        btn.on('pointerout', () => btn.setColor(def.color));
+      } else {
+        btn.on('pointerover', () => btn.setColor('#c4a882'));
+        btn.on('pointerout', () => btn.setColor(def.color));
+      }
+      btn.on('pointerdown', def.action);
+      this.hudContainer.add(btn);
+      this[def.ref] = btn;
+    }
+
+    // 监听全屏状态变化
+    if (!this._fsListenerAdded) {
+      const onFsChange = () => this._updateFullscreenBtnLabel();
+      document.addEventListener('fullscreenchange', onFsChange);
+      document.addEventListener('webkitfullscreenchange', onFsChange);
+      document.addEventListener('msfullscreenchange', onFsChange);
+      this._fsListenerAdded = true;
+    }
+  }
+
+  /** 更新全屏按钮文字 + 全屏切换后延迟重布局 */
+  _updateFullscreenBtnLabel() {
+    if (!this.fullscreenBtn) return;
+    this.fullscreenBtn.setText(isFullscreen() ? '⛶ 退出全屏' : '⛶ 全屏');
+    // 全屏/退出全屏后浏览器需要约 300-500ms 完成布局，延迟触发 resize
+    if (this._fsResizeTimer) this._fsResizeTimer.remove(false);
+    this._fsResizeTimer = this.time.delayedCall(400, () => {
+      this._fsResizeTimer = null;
+      this._doResize();
+    });
   }
 
   // =========================== 背包面板（委托给 InventoryPanel）===========================
@@ -697,12 +728,21 @@ export class UIScene extends Phaser.Scene {
   _doResize() {
     const { width, height } = this.cameras.main;
 
-    // 更新右上角 HUD 位置（仅更新坐标，不重建）
+    // 右上角 HUD 位置更新（纵向排列）
+    const x = width - 16;
+    const btnPositions = {
+      historyBtn:    { x, y: 48 },
+      backpackBtn:   { x, y: 80 },
+      taskBtn:       { x, y: 112 },
+      storyBtn:      { x, y: 144 },
+      fullscreenBtn: { x, y: 176 },
+    };
+    for (const [ref, pos] of Object.entries(btnPositions)) {
+      if (this[ref]) this[ref].setPosition(pos.x, pos.y);
+    }
+
+    // 右上角阶段指示器
     if (this.stageBadge) this.stageBadge.setPosition(width - 16, 16);
-    if (this.historyBtn) this.historyBtn.setPosition(width - 16, 48);
-    if (this.backpackBtn) this.backpackBtn.setPosition(width - 16, 80);
-    if (this.taskBtn) this.taskBtn.setPosition(width - 16, 112);
-    if (this.storyBtn) this.storyBtn.setPosition(width - 16, 144);
 
     // 重定位自由输入框（DOM 元素，需单独处理）
     try {
@@ -963,6 +1003,7 @@ export class UIScene extends Phaser.Scene {
   shutdown() {
     this.scale.off('resize', this._onResize, this);
     if (this._resizeTimer) { this._resizeTimer.remove(false); this._resizeTimer = null; }
+    if (this._fsResizeTimer) { this._fsResizeTimer.remove(false); this._fsResizeTimer = null; }
     if (this.freeInput) { this.freeInput.blur(); this.freeInput.style.display = 'none'; }
     if (this._domKeyHandler) { document.removeEventListener('keydown', this._domKeyHandler); this._domKeyHandler = null; }
   }

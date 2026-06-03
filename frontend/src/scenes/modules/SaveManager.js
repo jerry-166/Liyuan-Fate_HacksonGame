@@ -27,7 +27,7 @@ export class SaveManager {
     overlay.fillStyle(0x000000, 0.6);
     overlay.fillRect(0, 0, width, height);
     overlay.setInteractive(new Phaser.Geom.Rectangle(0, 0, width, height), Phaser.Geom.Rectangle.Contains);
-    overlay.on('pointerdown', () => {}); // 消费事件但不做操作，防止穿透到下层
+    overlay.on('pointerdown', () => this.togglePause()); // 点击菜单外关闭
     ui.pauseContainer.add(overlay);
 
     const cx = width / 2, cy = height / 2;
@@ -105,7 +105,7 @@ export class SaveManager {
       }).setOrigin(0.5));
     });
 
-    ui.pauseContainer.add(ui.add.text(cx, cy + panelH / 2 - 20, '[ESC] 关闭 · 点击操作', {
+    ui.pauseContainer.add(ui.add.text(cx, cy + panelH / 2 - 20, '[ESC] 关闭 · 点击菜单外关闭', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '11px', color: '#666655',
     }).setOrigin(0.5));
   }
@@ -258,9 +258,9 @@ export class SaveManager {
     backdrop.fillStyle(0x0a0a12, 0.82);
     backdrop.fillRect(0, 0, width, height);
     backdrop.setInteractive(new Phaser.Geom.Rectangle(0, 0, width, height), Phaser.Geom.Rectangle.Contains);
-    backdrop.on('pointerdown', (_p, _x, _y, event) => {
-      // 阻止事件穿透到下层
-      if (event) event.stopPropagation();
+    backdrop.on('pointerdown', () => {
+      // 点击外部关闭存档槽位
+      ui._closeSlots();
     });
     ui.saveSlotContainer.add(backdrop);
 

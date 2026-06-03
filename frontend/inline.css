@@ -1,0 +1,52 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 100%; height: 100%;
+  background: #1a1a2e;
+  overflow: hidden;
+}
+#game-container {
+  width: 100vw; height: 100vh;
+  display: block;
+}
+/* 自由文本输入框（对话时显示在游戏画面下方） */
+#free-input-wrapper {
+  display: none;           /* 默认隐藏 */
+  position: fixed;
+  bottom: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  width: 600px;
+  max-width: calc(100vw - 40px);
+}
+#free-input-wrapper.visible { display: flex; }
+#free-input {
+  flex: 1;
+  background: #1a1820ee;
+  border: 1px solid #88776688;
+  border-radius: 6px;
+  padding: 8px 14px;
+  color: #e8dcc8;
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-size: 18px;
+  outline: none;
+  caret-color: #d4b896;
+}
+#free-input:focus {
+  border-color: #d4b896;
+  box-shadow: 0 0 6px #88776644;
+}
+#free-input::placeholder { color: #665544; }
+#free-input-send {
+  margin-left: 6px;
+  background: #2a2820;
+  border: 1px solid #88776688;
+  border-radius: 6px;
+  padding: 8px 16px;
+  color: #d4b896;
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+#free-input-send:hover { background: #3a3830; border-color: #d4b896; }

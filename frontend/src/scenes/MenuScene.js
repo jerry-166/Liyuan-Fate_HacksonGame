@@ -12,9 +12,10 @@
  */
 
 import Phaser from 'phaser';
-import { getChapterLabel } from '../config.js';
+import { getChapterLabel, GAME } from '../config.js';
 import { getSessions, deleteSession, getEnding } from '../api/client.js';
 import { getAllPortraitAssets } from './modules/GameUIHelpers.js';
+import { isMobileDevice, toggleFullscreen, isFullscreen } from '../utils/DeviceDetector.js';
 
 // ========== UI 工具函数 ==========
 
@@ -33,6 +34,9 @@ import { getAllPortraitAssets } from './modules/GameUIHelpers.js';
 function createMenuButton(scene, x, y, w, h, label, callback, disabled = false) {
   const container = scene.add.container(x, y);
 
+  // ★ 按键宽高缩放字号
+  const textSize = Math.round(h * 0.54); // 26/48 ≈ 0.54
+
   const bg = scene.add.graphics();
   const drawBg = (hover) => {
     bg.clear();
@@ -48,7 +52,7 @@ function createMenuButton(scene, x, y, w, h, label, callback, disabled = false) 
 
   const text = scene.add.text(0, 0, label, {
     fontFamily: '"KaiTi","SimSun",serif',
-    fontSize: '26px', color: disabled ? '#555544' : '#d4b896',
+    fontSize: `${textSize}px`, color: disabled ? '#555544' : '#d4b896',
     letterSpacing: 8,
   }).setOrigin(0.5);
   container.add(text);
@@ -74,6 +78,7 @@ function createMenuButton(scene, x, y, w, h, label, callback, disabled = false) 
  */
 function createSmallButton(scene, x, y, w, h, label, color, callback) {
   const container = scene.add.container(x, y);
+  const textSize = Math.round(h * 0.48); // 按高度缩放
   const bg = scene.add.graphics();
   const drawBtn = (hover) => {
     bg.clear();
@@ -87,7 +92,7 @@ function createSmallButton(scene, x, y, w, h, label, color, callback) {
 
   container.add(scene.add.text(w / 2, h / 2, label, {
     fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-    fontSize: '13px', color: color,
+    fontSize: `${textSize}px`, color: color,
   }).setOrigin(0.5));
 
   const zone = scene.add.zone(w / 2, h / 2, w, h).setInteractive({ useHandCursor: true });
@@ -109,6 +114,15 @@ export class MenuScene extends Phaser.Scene {
   create() {
     const { width, height } = this.cameras.main;
     const cx = width / 2;
+    const isMobile = isMobileDevice();
+
+    // ★ 根据屏幕缩放标题字号
+    const scale = Math.min(width / GAME.WIDTH, height / GAME.HEIGHT);
+    const titleFS = Math.round(72 * scale);
+    const subFS = Math.round(20 * scale);
+    const btnFS = Math.round(26 * scale);
+    const enFS = Math.round(15 * scale);
+    const hintFS = Math.round(15 * scale);
 
     // ★ 立绘异步预加载（不阻塞菜单显示，后台加载）
     const allPortraits = getAllPortraitAssets();
@@ -157,24 +171,27 @@ export class MenuScene extends Phaser.Scene {
     }
 
     // 标题
-    this.add.text(cx, 100, '—— 一段关于传承与选择的故事 ——', {
-      fontFamily: '"KaiTi","SimSun",serif', fontSize: '20px', color: '#887766',
+    this.add.text(cx, Math.round(100 * scale), '—— 一段关于传承与选择的故事 ——', {
+      fontFamily: '"KaiTi","SimSun",serif', fontSize: `${subFS}px`, color: '#887766',
     }).setOrigin(0.5).setDepth(1).setAlpha(0);
 
-    const title = this.add.text(cx, 170, '梨园生死', {
-      fontFamily: '"KaiTi","SimSun",serif', fontSize: '72px', color: '#d4b896',
-      stroke: '#332a20', strokeThickness: 3,
+    const titleY = Math.round(170 * scale);
+    const title = this.add.text(cx, titleY, '梨园生死', {
+      fontFamily: '"KaiTi","SimSun",serif', fontSize: `${titleFS}px`, color: '#d4b896',
+      stroke: '#332a20', strokeThickness: Math.max(1, Math.round(3 * scale)),
     }).setOrigin(0.5).setDepth(1);
 
-    this.add.text(cx, 230, 'PEKING OPERA · LIFE & DEATH', {
-      fontFamily: 'serif', fontSize: '15px', color: '#886644', letterSpacing: 6,
+    this.add.text(cx, titleY + Math.round(60 * scale), 'PEKING OPERA · LIFE & DEATH', {
+      fontFamily: 'serif', fontSize: `${enFS}px`, color: '#886644', letterSpacing: 6,
     }).setOrigin(0.5).setDepth(1);
 
     title.setAlpha(0).setScale(1.2);
     this.tweens.add({ targets: title, alpha: 1, scaleX: 1, scaleY: 1, duration: 1200, ease: 'Sine.easeOut' });
 
-    // 按钮
-    const btnY1 = height / 2 + 40, btnY2 = btnY1 + 62, btnW = 220, btnH = 48;
+    // 按钮（响应式尺寸）
+    const btnW = Math.round(220 * scale), btnH = Math.round(48 * scale);
+    const btnGap = Math.round(62 * scale);
+    const btnY1 = Math.round(height / 2 + 40 * scale), btnY2 = btnY1 + btnGap;
     this.allButtons = [];
 
     this.allButtons.push(
@@ -189,23 +206,55 @@ export class MenuScene extends Phaser.Scene {
     this._createArchivePanel();
 
     // 底部信息
-    this.add.text(cx, height - 80, 'WASD 移动  ·  F 交互  ·  H 对话历史  ·  数字键选择', {
+    const mobileTip = isMobile ? '左半屏摇杆移动  ·  右下按钮互动' : 'WASD 移动  ·  F 交互  ·  H 对话历史  ·  数字键选择';
+    this.add.text(cx, height - Math.round(80 * scale), mobileTip, {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
-      fontSize: '15px', color: '#555544',
+      fontSize: `${hintFS}px`, color: '#555544',
     }).setOrigin(0.5).setDepth(1);
 
-    this.add.text(cx, height - 58, 'T-Hackathon 2026 · AI Narrative Game', {
-      fontFamily: 'monospace', fontSize: '14px', color: '#444433',
+    this.add.text(cx, height - Math.round(58 * scale), 'T-Hackathon 2026 · AI Narrative Game', {
+      fontFamily: 'monospace', fontSize: `${Math.round(14 * scale)}px`, color: '#444433',
     }).setOrigin(0.5).setDepth(1);
 
     this.add.text(width - 16, height - 16, 'v0.3', {
-      fontFamily: 'monospace', fontSize: '13px', color: '#333322',
+      fontFamily: 'monospace', fontSize: `${Math.round(13 * scale)}px`, color: '#333322',
     }).setOrigin(1, 1).setDepth(1);
 
     // 按钮淡入
     const btnContainer = this.add.container(0, 0).setDepth(2).setAlpha(0);
     this.allButtons.forEach(b => btnContainer.add(b));
     this.tweens.add({ targets: btnContainer, alpha: 1, duration: 800, delay: 600, ease: 'Sine.easeIn' });
+
+    // ★ 全屏切换按钮（右上角）
+    this._createFullscreenBtn(width, height, scale, hintFS);
+  }
+
+  _createFullscreenBtn(width, height, scale, hintFS) {
+    const label = isFullscreen() ? '⛶ 退出全屏' : '⛶ 全屏';
+    const btnFS = Math.round(15 * scale);
+    this._fsBtn = this.add.text(width - 16, 16, label, {
+      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+      fontSize: `${btnFS}px`, color: '#887766',
+      backgroundColor: '#1a1a2ecc', padding: { x: 8, y: 4 },
+    }).setOrigin(1, 0).setDepth(10).setInteractive({ useHandCursor: true });
+    this._fsBtn.on('pointerover', () => this._fsBtn.setColor('#c4a882'));
+    this._fsBtn.on('pointerout', () => this._fsBtn.setColor('#887766'));
+    this._fsBtn.on('pointerdown', () => {
+      toggleFullscreen().then(() => this._updateFSBtnLabel());
+    });
+
+    // 监听全屏状态变化
+    const onFsChange = () => {
+      if (this._fsBtn) this._fsBtn.setText(isFullscreen() ? '⛶ 退出全屏' : '⛶ 全屏');
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    document.addEventListener('webkitfullscreenchange', onFsChange);
+    document.addEventListener('msfullscreenchange', onFsChange);
+  }
+
+  _updateFSBtnLabel() {
+    if (!this._fsBtn) return;
+    this._fsBtn.setText(isFullscreen() ? '⛶ 退出全屏' : '⛶ 全屏');
   }
 
   // ==================== 存档面板 ====================

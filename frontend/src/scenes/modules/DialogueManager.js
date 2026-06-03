@@ -40,6 +40,14 @@ export class DialogueManager {
 
     ui.dialogContainer = ui.add.container(0, 0).setDepth(300).setVisible(false);
 
+    // ★ 全屏透明点击区（对话框外部点击关闭对话）
+    const outsideClickZone = ui.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0)
+      .setInteractive({ useHandCursor: false });
+    outsideClickZone.on('pointerdown', () => {
+      if (ui.dialogActive) ui.closeDialog();
+    });
+    ui.dialogContainer.add(outsideClickZone);
+
     // ★ 立绘图片（左侧，朝向右侧，对话框覆盖其下半身）
     const portraitW = Math.round(width * 0.28);
     const portraitDisplayH = Math.round((height - 32) * 0.75);
@@ -109,7 +117,7 @@ export class DialogueManager {
     ui.dialogContainer.add(ui.pageHint);
 
     // 提示文字
-    ui.dialogHint = ui.add.text(panelX + panelW - 150, panelY + panelH - 52, '[F] 关闭', {
+    ui.dialogHint = ui.add.text(panelX + panelW - 150, panelY + panelH - 52, '[F] 关闭  |  点击外部关闭', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
       fontSize: '15px', color: '#888878',
     });
@@ -447,7 +455,7 @@ export class DialogueManager {
     ui.freeInput.style.fontSize = `${14 * scaleY}px`;
     ui.freeInput.value = '';
     ui.freeInput.placeholder = '输入你想说的话……';
-    setTimeout(() => ui.freeInput.focus(), 100);
+    // ★ 不自动聚焦，避免移动端每次对话都弹出键盘；用户手动点击输入框时再输入
   }
 
   /** 隐藏自由输入框 */

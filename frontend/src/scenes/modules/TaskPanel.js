@@ -39,9 +39,10 @@ export class TaskPanel {
     dimBg.fillRect(0, 0, width, height);
     ui._taskPanelUI.add(dimBg);
 
-    // 点击遮罩：全屏阻挡穿透 + 面板可操作
+    // 点击遮罩：全屏阻挡穿透，点击外部关闭面板
     const clickBlocker = ui.add.rectangle(width / 2, height / 2, width, height, 0x000000, 0)
       .setInteractive({ useHandCursor: false });
+    clickBlocker.on('pointerdown', () => this.hide());
     ui._taskPanelUI.add(clickBlocker);
 
     // 面板背景
@@ -84,7 +85,7 @@ export class TaskPanel {
     ui._taskContent.setMask(maskGfx.createGeometryMask());
     ui._taskContentArea = { height: contentH };
 
-    ui._taskPanelUI.add(ui.add.text(cx, pTop + this._panelH - 24, '[T / ESC] 关闭  |  滚轮滚动', {
+    ui._taskPanelUI.add(ui.add.text(cx, pTop + this._panelH - 24, '[T / ESC] 关闭  |  滚轮滚动  |  点击外部关闭', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '13px', color: '#666655',
     }).setOrigin(0.5, 0));
 
@@ -108,6 +109,7 @@ export class TaskPanel {
     if (this._visible) {
       ui._taskPanelUI.setAlpha(0).setVisible(true);
       this.refreshContent();
+      this._fadeIn();
     } else {
       ui._taskPanelUI.setVisible(false);
     }
@@ -119,6 +121,7 @@ export class TaskPanel {
     this._visible = true;
     ui._taskPanelUI.setAlpha(0).setVisible(true);
     this.refreshContent();
+    this._fadeIn();
   }
 
   hide() {
@@ -151,10 +154,14 @@ export class TaskPanel {
       }
     }
 
-    if (!this._visible) this._visible = true;
-    ui._taskPanelUI.setVisible(true);
+    // ★ 同步左侧紧凑提示（不自动显示面板）
+    this._syncMiniHint();
+  }
 
-    // ★ 淡入动画：面板从透明渐显，0→1
+  /** 淡入动画 */
+  _fadeIn() {
+    const ui = this.ui;
+    if (!ui._taskPanelUI) return;
     ui._taskPanelUI.setAlpha(0);
     ui.tweens.add({
       targets: ui._taskPanelUI,
@@ -162,9 +169,6 @@ export class TaskPanel {
       duration: 400,
       ease: 'Sine.easeOut',
     });
-
-    // ★ 同步左侧紧凑提示
-    this._syncMiniHint();
   }
 
   refreshWithCachedData() {

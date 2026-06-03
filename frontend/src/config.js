@@ -20,6 +20,39 @@ export const GAME = {
   PLAYER_SPEED: 200,
 };
 
+/**
+ * UI 缩放因子辅助函数
+ * 根据当前画布实际尺寸计算相对于设计分辨率 (1280x800) 的缩放比例
+ * 用于移动端小屏幕上缩放 UI 元素字号
+ *
+ * @param {object} [camera] - Phaser 摄像机的 main 引用 (可选，优先使用)
+ * @returns {number} 缩放因子 (0.5 ~ 1.5)
+ */
+export function getUIScale(camera) {
+  let w, h;
+  if (camera) {
+    w = camera.width;
+    h = camera.height;
+  } else {
+    w = window.innerWidth;
+    h = window.innerHeight;
+  }
+  const scaleX = w / GAME.WIDTH;
+  const scaleY = h / GAME.HEIGHT;
+  return Math.min(1.5, Math.max(0.5, Math.min(scaleX, scaleY)));
+}
+
+/**
+ * 根据 UI 缩放因子计算字号
+ * @param {number} baseSize - 设计字号 (基于 1280x800)
+ * @param {number} [scale] - 缩放因子，不传则自动计算
+ * @returns {string} CSS 字号字符串 (如 "16px")
+ */
+export function scaleFontSize(baseSize, scale) {
+  const s = scale != null ? scale : getUIScale();
+  return `${Math.round(baseSize * s)}px`;
+}
+
 /** UI 配色常量 */
 export const COLORS = {
   BG_DARK: 0x1a1a2e,
