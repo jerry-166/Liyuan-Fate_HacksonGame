@@ -159,6 +159,9 @@ export class CollisionEditor {
     else this._saveExitZone(); // 子场景保存出口区域
     console.log('[Editor] 碰撞、NPC、物品和入口/出口区域已自动保存');
 
+    // ★ 自动同步到后端文件系统，确保换浏览器后编辑器配置不丢失
+    this.scene._syncEditorToBackend();
+
     const gs = this.scene;
 
     // 清理入口区域状态

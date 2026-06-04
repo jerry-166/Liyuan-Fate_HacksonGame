@@ -147,177 +147,187 @@ export class GameScene extends Phaser.Scene {
     this._npcPreloadPromise = preloadNPCSprites(this, allNPCs);
     console.log('[GameScene] 全部NPC精灵后台预加载已启动');
 
-    // 从后端文件系统加载编辑器配置（如果localStorage中没有数据）
-    // 必须等配置加载完再创建 NPC，否则首次打开时NPC位置会回退到硬编码默认值
+    // ★ 从后端加载编辑器配置到 localStorage（异步）
+    //   已有数据 → resolve(false)，已有数据 → resolve(true)
     this._editorConfigPromise = this._loadEditorFromBackend();
 
-    this.drawTileMap();
-
-    // 以图片实际渲染尺寸作为边界
-    const actualMapW = this.mapImage.displayWidth;
-    const actualMapH = this.mapImage.displayHeight;
-    this._mapBounds = { w: actualMapW, h: actualMapH };
-
-    this.createCollisionLayer();
-    this.createPlayer();
-
-    // 等编辑器配置就绪 + NPC纹理预加载完成后再创建 NPC
-    // （因为编辑器配置读取很快，纹理加载是网络IO，必须等两者都完成）
+    // ============================================================
+    // ★ 以下全部在 _editorConfigPromise.then() 中初始化，
+    //   确保核心配置（碰撞/坐标/角色/NPC）先于所有其他模块加载。
+    //   已有 localStorage → then 立即执行无延迟
+    //   无 localStorage → 后端拉取完成后执行
+    // ============================================================
     this._editorConfigPromise.then(async (restored) => {
       if (restored) {
-        console.log('[Editor] 配置已恢复，创建 NPC 使用编辑器出生点');
+        console.log('[Editor] 从后端恢复了编辑器配置到 localStorage');
       }
-      // ★ 等待 NPC 纹理预加载完成（否则精灵将不可见）
-      if (this._npcPreloadPromise) await this._npcPreloadPromise;
-      this.createNPCs();
-    });
 
-    this.cameras.main.removeBounds();
+      // =========================================
+      // 优先级 1：核心配置与坐标体系（最高）
+      // =========================================
 
-    // 键盘输入
-    this.cursors = this.input.keyboard.createCursorKeys();
-    this.wasd = {
-      W: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W),
-      A: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A),
-      S: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
-      D: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
-      F: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F),
-    };
+      // 1-1. 碰撞层（最优先，所有移动检测的基石）
+      this.createCollisionLayer();
 
-    // ★ 移动端：创建虚拟摇杆 + 触控按钮
-    this.touchController = new TouchController(this);
-    this._isMobile = isMobileDevice();
+      // 1-2. 碰撞编辑器实例（后续 loadEntryZones / init 依赖）
+      this._editor = new CollisionEditor(this);
 
-    // F键交互提示文字（跟随世界坐标，出现在目标头上方）
-    this.interactHint = this.add.text(0, 0, '', {
-      fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
-      fontSize: '17px', color: '#d4c4a0',
-      backgroundColor: '#2a2824ee',
-      padding: { x: 10, y: 5 },
-      border: 1, borderRadius: 4,
-    }).setOrigin(0.5).setDepth(100).setVisible(false);
+      // 1-3. 创建玩家（读取编辑器出生点坐标）
+      this.createPlayer();
 
-    // 碰撞编辑器
-    this._editor = new CollisionEditor(this);
-
-    // 编辑器快捷键
-    this.editKeys = {
-      E: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E),
-      K: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.K),   // 保存（避免与WASD的S冲突）
-      B: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.B),   // 设置出生点
-      C: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C),
-      I: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.I),
-      X: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.X),
-      Z: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Z),
-      ENTER: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER),
-      ESC: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC),
-      ONE: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ONE),
-      TWO: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.TWO),
-      THREE: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.THREE),
-      FOUR: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.FOUR),
-      FIVE: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.FIVE),
-      SIX: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SIX),
-      SEVEN: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SEVEN),
-      EIGHT: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.EIGHT),
-      NINE: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.NINE),
-      ZERO: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ZERO),
-    };
-
-    // 加载入口区域数据（供 SubSceneManager 使用，即使不在编辑模式也需加载）
-    this.time.delayedCall(100, () => {
+      // 1-4. 加载入口/出口区域（坐标体系，影响场景切换检测）
       this._editor.loadEntryZones();
       this.subSceneManager._reloadEntryZones();
-    });
 
-    // 延迟初始化编辑器
-    this.time.delayedCall(200, () => this._editor.init());
+      // 1-5. 初始化编辑器 HUD/网格（依赖碰撞数据和坐标）
+      this._editor.init();
 
-    // NPC 交互按钮
-    this._npcBtnParts = [];
-    this.npcActionContainer = this.add.container(0, 0).setDepth(102).setVisible(false).setScrollFactor(0);
-    this._createNPCActionButtons();
+      // 1-6. 创建 NPC（等待纹理预加载 → 读取编辑器 NPC 位置）
+      if (this._npcPreloadPromise) await this._npcPreloadPromise;
+      this.createNPCs();
 
-    // 事件监听
-    this.events.on('input:lock', (locked) => {
-      this.inputLocked = locked;
-      if (locked) {
-        // 对话开始：暂停所有 NPC 漫游
-        this._npcResumeDelay = -1;
-        this._pauseAllNPCWander();
-      } else {
-        // 对话结束：立即恢复 NPC 漫游
-        this._npcResumeDelay = 0;
-        this._resumeAllNPCWander();
-      }
-    });
-    this.events.on('game:restart', () => {
-      this.scene.stop('UIScene');
-      this.scene.restart();
-    });
-    this.events.on('state:refresh', (state) => {
-      // 子场景中有独立 NPC 生命周期，跳过主地图状态刷新
-      if (this.subSceneManager.isInSubScene()) return;
-      this.refreshNPCsFromState(state);
-      this.refreshSceneItems();
-    });
-    this.events.on('state:reload', this._reloadFromState, this);
-    this.events.on('stage:change', (newStage) => {
-      this.applyStageTone(newStage);
-    });
+      // =========================================
+      // 优先级 2：地图渲染与用户交互模块
+      // =========================================
 
-    // 子场景相关事件
-    this.events.on('subscene:stage-renewed', () => {
-      this.subSceneManager.triggerStageRenewed();
-    });
-    this.events.on('subscene:enter', (subSceneId) => {
-      this.subSceneManager.enterSubScene(subSceneId);
-    });
-    this.events.on('subscene:exit', () => {
-      this.subSceneManager.exitSubScene();
-    });
-    // ★ 离开子场景回调 — 序章阶段离开墓地时推进至第一章
-    this.events.on('subscene:exited', this._onSubSceneExited, this);
+      // 2-1. 瓦片地图渲染
+      this.drawTileMap();
+      const actualMapW = this.mapImage.displayWidth;
+      const actualMapH = this.mapImage.displayHeight;
+      this._mapBounds = { w: actualMapW, h: actualMapH };
+      this.cameras.main.removeBounds();
 
-    // ★ 音乐切换事件 — 子场景管理器发出
-    this.events.on('music:scene', (subSceneId) => {
-      if (this.musicManager) {
-        this.musicManager.playForScene(subSceneId || null);
-      }
-    });
+      // 2-2. 键盘输入
+      this.cursors = this.input.keyboard.createCursorKeys();
+      this.wasd = {
+        W: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.W),
+        A: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.A),
+        S: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
+        D: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
+        F: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.F),
+      };
 
-    // 阶段色调遮罩
-    this.tintOverlay = this.add.rectangle(
-      this.cameras.main.centerX, this.cameras.main.centerY,
-      this.cameras.main.width, this.cameras.main.height,
-      0xffffff, 0
-    );
-    this.tintOverlay.setScrollFactor(0).setDepth(999).setOrigin(0.5);
-    this.tintOverlay.setInteractive = () => this.tintOverlay;
+      // 编辑器快捷键
+      this.editKeys = {
+        E: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.E),
+        K: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.K),
+        B: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.B),
+        C: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C),
+        I: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.I),
+        X: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.X),
+        Z: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.Z),
+        ENTER: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ENTER),
+        ESC: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC),
+        ONE: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ONE),
+        TWO: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.TWO),
+        THREE: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.THREE),
+        FOUR: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.FOUR),
+        FIVE: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.FIVE),
+        SIX: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SIX),
+        SEVEN: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SEVEN),
+        EIGHT: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.EIGHT),
+        NINE: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.NINE),
+        ZERO: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ZERO),
+      };
 
-    this.scene.launch('UIScene');
+      // 2-3. 移动端触控
+      this.touchController = new TouchController(this);
+      this._isMobile = isMobileDevice();
 
-    // ★ 音频上下文解锁：首次用户交互后启动音乐播放
-    const unlockAudio = () => {
-      if (this.musicManager) this.musicManager.start();
-      this.input.off('pointerdown', unlockAudio);
-      this.input.keyboard?.off('keydown', unlockAudio);
-    };
-    this.input.on('pointerdown', unlockAudio);
-    this.input.keyboard?.on('keydown', unlockAudio);
+      // 2-4. UI 元素
+      this.interactHint = this.add.text(0, 0, '', {
+        fontFamily: '"Microsoft YaHei", "PingFang SC", sans-serif',
+        fontSize: '17px', color: '#d4c4a0',
+        backgroundColor: '#2a2824ee',
+        padding: { x: 10, y: 5 },
+        border: 1, borderRadius: 4,
+      }).setOrigin(0.5).setDepth(100).setVisible(false);
 
-    // ★ 场景停止时销毁音乐管理器（返回主菜单等）
-    this.events.on('shutdown', () => {
-      if (this.musicManager) {
-        this.musicManager.destroy();
-        console.log('[GameScene] 音乐管理器已销毁');
-      }
-    });
+      // NPC 交互按钮
+      this._npcBtnParts = [];
+      this.npcActionContainer = this.add.container(0, 0).setDepth(102).setVisible(false).setScrollFactor(0);
+      this._createNPCActionButtons();
 
-    // 控制提示
-    this._showControlsHint();
+      // 阶段色调遮罩
+      this.tintOverlay = this.add.rectangle(
+        this.cameras.main.centerX, this.cameras.main.centerY,
+        this.cameras.main.width, this.cameras.main.height,
+        0xffffff, 0
+      );
+      this.tintOverlay.setScrollFactor(0).setDepth(999).setOrigin(0.5);
+      this.tintOverlay.setInteractive = () => this.tintOverlay;
 
-    // 延迟通知 UI 游戏就绪
-    this.time.delayedCall(100, () => {
+      // 2-5. 事件监听（纯注册，不立即触发）
+      this.events.on('input:lock', (locked) => {
+        this.inputLocked = locked;
+        if (locked) {
+          this._npcResumeDelay = -1;
+          this._pauseAllNPCWander();
+        } else {
+          this._npcResumeDelay = 0;
+          this._resumeAllNPCWander();
+        }
+      });
+      this.events.on('game:restart', () => {
+        this.scene.stop('UIScene');
+        this.scene.restart();
+      });
+      this.events.on('state:refresh', (state) => {
+        if (this.subSceneManager.isInSubScene()) return;
+        this.refreshNPCsFromState(state);
+        this.refreshSceneItems();
+      });
+      this.events.on('state:reload', this._reloadFromState, this);
+      this.events.on('stage:change', (newStage) => {
+        this.applyStageTone(newStage);
+      });
+
+      // 子场景事件
+      this.events.on('subscene:stage-renewed', () => {
+        this.subSceneManager.triggerStageRenewed();
+      });
+      this.events.on('subscene:enter', (subSceneId) => {
+        this.subSceneManager.enterSubScene(subSceneId);
+      });
+      this.events.on('subscene:exit', () => {
+        this.subSceneManager.exitSubScene();
+      });
+      this.events.on('subscene:exited', this._onSubSceneExited, this);
+
+      // 音乐切换事件
+      this.events.on('music:scene', (subSceneId) => {
+        if (this.musicManager) {
+          this.musicManager.playForScene(subSceneId || null);
+        }
+      });
+
+      // 场景销毁事件
+      this.events.on('shutdown', () => {
+        if (this.musicManager) {
+          this.musicManager.destroy();
+          console.log('[GameScene] 音乐管理器已销毁');
+        }
+      });
+
+      // 2-6. 启动 UI 场景
+      this.scene.launch('UIScene');
+
+      // 2-7. 音频解锁（首次交互后播放）
+      const unlockAudio = () => {
+        if (this.musicManager) this.musicManager.start();
+        this.input.off('pointerdown', unlockAudio);
+        this.input.keyboard?.off('keydown', unlockAudio);
+      };
+      this.input.on('pointerdown', unlockAudio);
+      this.input.keyboard?.on('keydown', unlockAudio);
+
+      // 2-8. 控制提示
+      this._showControlsHint();
+
+      // =========================================
+      // 优先级 3：游戏启动
+      // =========================================
+
       if (savedSessionId) {
         this.restoreGame(savedSessionId);
       } else {
@@ -1520,8 +1530,17 @@ export class GameScene extends Phaser.Scene {
     this._syncEditorToBackend();
   }
 
-  /** 收集所有 localStorage 中的编辑器配置数据，同步到后端文件 */
+  /** 收集所有 localStorage 中的编辑器配置数据，同步到后端文件（带防抖，避免频繁请求） */
   _syncEditorToBackend() {
+    // 防抖：500ms 内多次调用只执行最后一次
+    if (this._syncEditorTimer) clearTimeout(this._syncEditorTimer);
+    this._syncEditorTimer = setTimeout(() => {
+      this._doSyncEditorToBackend();
+      this._syncEditorTimer = null;
+    }, 500);
+  }
+
+  _doSyncEditorToBackend() {
     import('../api/client.js').then(({ saveEditorConfig }) => {
       const config = {};
       // 收集所有 editor_ 前缀的 localStorage key
@@ -1562,8 +1581,11 @@ export class GameScene extends Phaser.Scene {
             resolve(false);
             return;
           }
+          // ★ 后端返回 { script_id, data: { editor_xxx: ... }, updated_at }
+          // 需要取 config.data 才包含真正的编辑器配置项
+          const editorData = config.data || config;
           let restored = 0;
-          for (const [key, value] of Object.entries(config)) {
+          for (const [key, value] of Object.entries(editorData)) {
             if (!key.startsWith('editor_')) continue;
             try {
               localStorage.setItem(key, typeof value === 'object' ? JSON.stringify(value) : String(value));
@@ -1753,6 +1775,37 @@ export class GameScene extends Phaser.Scene {
 
     this.player.setDepth(10);
     this.player.setData('facing', 'down');
+  }
+
+  /** 
+   * 根据编辑器出生点重定位玩家位置（用于异步加载编辑器配置后的修复）
+   * 当新浏览器首次打开时，createPlayer() 因 localStorage 为空使用了默认位置，
+   * 编辑器配置异步加载完成后需调用此方法修正。
+   */
+  _repositionPlayerFromEditorConfig() {
+    if (!this.player) return;
+    let col = null, row = null;
+    try {
+      const subId = this.subSceneManager.currentSubSceneId;
+      const posKey = subId
+        ? `editor_player_start_position_${subId}`
+        : 'editor_player_start_position';
+      const saved = localStorage.getItem(posKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.col != null && parsed.row != null) {
+          col = parsed.col; row = parsed.row;
+        }
+      }
+    } catch (_) { /* ignore */ }
+    if (col == null || row == null) {
+      console.log('[Editor] 无编辑器出生点配置，保持玩家当前位置');
+      return;
+    }
+    const pos = COORD.toPixel(col, row);
+    this.player.x = pos.x * MAP_SCALE;
+    this.player.y = pos.y * MAP_SCALE;
+    console.log(`[Editor] 玩家出生点已修正为编辑器位置 (${col}, ${row})`);
   }
 
   /**
@@ -1979,7 +2032,9 @@ export class GameScene extends Phaser.Scene {
     if (!this.player || !this.cursors) return;
 
     // 编辑器快捷键 — 仅在非锁定状态下可用（对话/背包/历史面板打开时禁止）
-    if (Phaser.Input.Keyboard.JustDown(this.editKeys.E) && !this.inputLocked) {
+    // ★ 生产环境（CloudBase 部署）禁用编辑功能
+    if (Phaser.Input.Keyboard.JustDown(this.editKeys.E) && !this.inputLocked
+        && !window.location.hostname.includes('tcloudbaseapp.com')) {
       this._editor.toggle();
       return;
     }
