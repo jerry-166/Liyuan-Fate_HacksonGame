@@ -143,6 +143,8 @@ export class MenuScene extends Phaser.Scene {
     if (this._resizeTimer) { clearTimeout(this._resizeTimer); this._resizeTimer = null; }
     if (this.editorPanel) { this.editorPanel.destroy(); this.editorPanel = null; }
     this._cleanupNameInput();
+    this._wheelHandler = null;  // ★ 清除旧 handler，让下次 create 时重新 bind
+    this._fsListenerBound = false;  // ★ 全屏监听同理
   }
 
   // ==================== Resize 处理（防抖） ====================
