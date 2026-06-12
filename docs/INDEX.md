@@ -42,8 +42,11 @@
 | [_shared/阶段系统.md](./_shared/阶段系统.md) | 阶段枚举、参数表、切换引擎架构 |
 | [_shared/关系值系统.md](./_shared/关系值系统.md) | 关系值范围表、Clamp 机制 |
 | [_shared/数据模型.md](./_shared/数据模型.md) | GameSession、NPCState 数据类 |
-| [_shared/API接口清单.md](./_shared/API接口清单.md) | 29 个接口总览表 |
+| [_shared/API接口清单.md](./_shared/API接口清单.md) | 38 个接口总览表 |
 | [_shared/SSE通信格式.md](./_shared/SSE通信格式.md) | 对话接口的 SSE 事件格式 |
+| [_shared/坐标体系.md](./_shared/坐标体系.md) | 瓦片坐标规范、前后端转换、实体位置表 |
+| [_shared/物品系统设计.md](./_shared/物品系统设计.md) | 世界先行架构、模板+实例两层设计、AI 约束注入 |
+| [_shared/场景系统设计.md](./_shared/场景系统设计.md) | 7 场景拓扑、氛围定义、扩展指南 |
 
 ---
 
