@@ -47,6 +47,16 @@ class ChapterEngine:
 
         task = await planner.generate_chapter_detail(session, chapter_def, outline=outline)
 
+        # ★ 动态生成本章完整叙事描述（基于前章上下文）
+        # 异步调用，失败时不阻塞游戏进程
+        try:
+            narrative = await planner.generate_chapter_narrative(session, chapter_def)
+            if narrative and len(narrative) > 30:
+                chapter_def["description"] = narrative
+                logger.info(f"[ChapterEngine] Generated narrative for {ch_id} ({len(narrative)} chars)")
+        except Exception as e:
+            logger.warning(f"[ChapterEngine] Narrative generation failed (non-fatal): {e}")
+
         # 设置 session 状态
         session.current_chapter_id = chapter_def.get("id")
         session.current_task = task

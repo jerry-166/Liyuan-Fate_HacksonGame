@@ -109,55 +109,68 @@ class GenerateScriptResponse(BaseModel):
 # AI 生成剧本的 Prompt
 # ═══════════════════════════════════════════════════════════════
 
-GENERATE_SCRIPT_PROMPT = """你是一位资深叙事游戏编剧。请根据以下信息创作一个完整的微剧本骨架，格式为严格的JSON，不要任何markdown标记。
+GENERATE_SCRIPT_PROMPT = """你是一位专精于「剧本杀·恐怖悬疑·规则怪谈」类型的叙事游戏编剧。请根据以下信息创作一个微剧本骨架，格式为严格的JSON，不要任何markdown标记。
 
 【主题】{theme}
-【风格】{style}
+【风格】{style}（强烈建议往悬疑、恐怖、怪谈方向深化）
 【章节数】{chapter_count}
 【主角背景】{protagonist_desc}
 【额外备注】{extra_notes}
 
-要求：
-1. 世界观描述100-200字，有画面感，有时代/地域特色
-2. 每章节有独特的情节钩子，章节间有因果推进
-3. NPC设计：3-5个，各有独特性格和在故事中的作用
-4. 剧本需有明确的核心冲突和至少两种可能的结局走向
-5. ★ 不要生成 sub_task_templates —— 子任务将在游戏中由 AI 根据上一章上下文动态生成，更贴合玩家行为
+## 叙事风格要求
+你的故事必须有"细思极恐"的质感。技法：
+- **信息不对称**：玩家知道的比NPC少，或者NPC说的和事实对不上
+- **渐进恐怖**：不要一上来就吓人，先日常→违和→异常→毛骨悚然
+- **规则怪谈**：如果有超自然元素，遵守一套自洽的"规则"（如：天黑后不能看镜子、第四个选项永远不存在）
+- **反转钩子**：每章结束留一个让玩家脊背发凉的问题或画面
+- **情感锚点**：恐怖中要有情感——遗憾、愧疚、执念、爱而不得——否则只是吓人不够动人
 
-输出JSON格式：
+## 章节设计
+1. 每章只需一个**叙事钩子**（20-30字），描述本章给玩家的核心悬念。不要写完整剧情——详细叙事将在游戏中根据前文上下文动态生成
+2. 章节间必须有**因果级联**：前一章的某个发现，引出下一章的某个疑问
+3. 整体形成"剥洋葱"式结构：表层谜题 → 中层反转 → 底层真相
+
+## 输出JSON格式
 {{
-  "name": "剧本名称（4-8字）",
-  "worldview": "世界观描述（100-200字）",
+  "name": "剧本名称（4-8字，有氛围感）",
+  "worldview": "世界观描述（100-200字，有画面感+让人不安的细节）",
+  "horror_core": "恐怖核心（一条让整个故事立起来的「细思极恐」设定，如：'所有人都不记得你的名字'/'镇上的镜子里照不出你的脸'）",
   "npcs": [
     {{
       "id": "npc_xxx",
       "name": "NPC名字",
-      "role": "角色定位（如：老医生、神秘向导）",
+      "role": "角色定位",
       "scene": "主要所在场景（town/stage/teahouse/dock之一）",
       "personality": "性格特点（30字内）",
-      "secret": "隐藏的秘密或动机（30字内）"
+      "secret": "隐藏的秘密或动机（30字内，最好令人不安）"
     }}
   ],
   "chapters": [
     {{
       "id": "ch_01",
-      "name": "章节名（4-8字）",
+      "name": "章节名（4-8字，有悬念感）",
       "sort_order": 1,
       "type": "normal",
-      "description": "章节概要（50-80字）",
-      "goal": "玩家目标（20字内）",
+      "description": "叙事钩子（20-30字，激起好奇心，如：'你推开虚掩的门，镜子里的人影没有跟着你一起回头'）",
+      "goal": "玩家目标（15字内）",
       "key_conflict": "核心冲突（30字内）",
-      "atmosphere": "氛围描述（20字内）",
+      "atmosphere": "氛围（2-3词，如：'雨夜，霉味，窃窃私语'）",
       "color_tone": "amber|crimson|teal|violet|slate 之一",
       "bgm_mood": "melancholy|tense|hopeful|mysterious|triumphant 之一",
       "required_npcs": ["npc_xxx"]
     }}
   ],
   "ending_directions": [
-    {{"type": "ending_A", "condition": "触发条件", "title": "结局名"}},
+    {{"type": "ending_A", "condition": "触发条件", "title": "结局名（有冲击力）"}},
     {{"type": "ending_B", "condition": "触发条件", "title": "结局名"}}
   ]
-}}"""
+}}
+
+## 质量约束
+- ★ 不要生成 sub_task_templates —— 子任务将在游戏中由AI根据上一章上下文动态生成
+- 每章 description 是"钩子"，不是完整剧情。详细叙事留给游戏时的动态生成
+- horror_core 是全剧的灵魂，必须让人起鸡皮疙瘩
+- NPC 的 secret 要互相矛盾或形成闭环，不能是孤立的"""
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -307,7 +320,7 @@ async def generate_script(req: GenerateScriptRequest):
             ch["id"] = f"ch_{i+1:02d}"
         ch.setdefault("sort_order", i + 1)
         ch.setdefault("type", "normal")
-        ch.setdefault("description", ch.get("goal", ""))
+        ch.setdefault("description", ch.get("name") or ch.get("goal", ""))
         ch.setdefault("color_tone", list(valid_color_tones)[i % len(valid_color_tones)])
         ch.setdefault("bgm_mood", list(valid_bgm_moods)[i % len(valid_bgm_moods)])
         ch.setdefault("required_npcs", [n["id"] for n in npcs_for_meta[:2]])
@@ -328,6 +341,7 @@ async def generate_script(req: GenerateScriptRequest):
         "version": "1.0",
         "author": f"AI Generated ({req.theme})",
         "worldview": result.get("worldview", ""),
+        "horror_core": result.get("horror_core", ""),  # ★ 恐怖核心设定
         "system_prompt_file": None,
         "persona_dir": "personas/",
         "chapters_file": "chapters.yaml",
