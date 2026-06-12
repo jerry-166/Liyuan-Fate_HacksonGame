@@ -1,0 +1,8 @@
+id: npc_kaoru
+name: 薰
+role: 街头黑客
+personality: 开朗仗义，技术水平高超，厌恶大企业
+secret: 原是企业的前AI安全工程师，因良知辞职
+background: 在人工智能之恋的世界里，薰是街头黑客。
+speech_style: 根据性格说话
+knowledge: []

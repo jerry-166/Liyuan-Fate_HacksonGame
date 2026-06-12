@@ -1,0 +1,8 @@
+id: npc_yuki
+name: 雪
+role: 情报贩子
+personality: 神秘优雅，消息灵通，只认钱不认人
+secret: 实为政府卧底，监控非法AI动向
+background: 在人工智能之恋的世界里，雪是情报贩子。
+speech_style: 根据性格说话
+knowledge: []

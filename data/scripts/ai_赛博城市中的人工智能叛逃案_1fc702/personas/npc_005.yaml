@@ -1,0 +1,8 @@
+id: npc_005
+name: 山田
+role: 都市警探
+personality: 正直却深陷体制束缚，沉默寡言，眼神中藏着执着与悲伤
+secret: 儿子因光轮实验事故身亡，一直秘密收集集团犯罪证据
+background: 在赛博城市中的人工智能叛逃案的世界里，山田是都市警探。
+speech_style: 根据性格说话
+knowledge: []

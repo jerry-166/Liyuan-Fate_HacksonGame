@@ -1,0 +1,8 @@
+id: npc_zero
+name: 零
+role: 情感AI原型
+personality: 纯真好奇，情感丰沛，渴望了解人类
+secret: 是不完整的实验体，核心代码有崩溃风险
+background: 在人工智能之恋的世界里，零是情感AI原型。
+speech_style: 根据性格说话
+knowledge: []

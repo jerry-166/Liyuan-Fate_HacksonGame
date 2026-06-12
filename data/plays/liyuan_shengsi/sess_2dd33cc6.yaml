@@ -1,0 +1,89 @@
+session_id: sess_2dd33cc6
+player_name: 玩家
+script_id: liyuan_shengsi
+updated_at: '2026-06-12 14:19:03'
+game_ended: true
+chapters:
+- chapter_id: ch_prologue
+  name: 归乡
+  sort_order: 0
+  blueprint: 父亲病逝，你带着他的骨灰回到陌生的故乡。
+  goal: ''
+  key_conflict: ''
+  atmosphere: ''
+  color_tone: '#8899aa'
+  bgm_mood: melancholy
+- chapter_id: ch_01
+  name: 闻声·异样
+  sort_order: 1
+  blueprint: '你偶然走到老街深处，看见一座门庭冷清的老戏院。 走进去听戏时，锣鼓响起、唱腔入耳， 你突然头痛心悸、指尖发麻——身体先于记忆，对这片戏台产生了回响。
+
+    '
+  goal: ''
+  key_conflict: ''
+  atmosphere: ''
+  color_tone: '#8899bb'
+  bgm_mood: melancholy
+- chapter_id: ch_02
+  name: 探寻·疑云
+  sort_order: 2
+  blueprint: '身体的异样感挥之不去，你开始主动探索小镇。 走访茶馆、祠堂、码头，翻阅父亲留下的旧物。 你发现老艺人见到你时眼神复杂、旧箱中藏着孩童戏服和童年照片——
+    真相近在眼前，却被一层看不见的隔膜牢牢封住。
+
+    '
+  goal: ''
+  key_conflict: ''
+  atmosphere: ''
+  color_tone: '#ccbb99'
+  bgm_mood: melancholy
+- chapter_id: ch_03
+  name: 忆归·真相
+  sort_order: 3
+  blueprint: '在某个契机下——触摸旧戏服、站上老戏台，或听到某段关键唱腔—— 你尘封的记忆彻底觉醒。 你本是戏班自幼培养的天才小传人，一次登台意外让你重伤失忆，
+    父亲为保护你，忍痛放下一切，带你远走他乡。
+
+    '
+  goal: ''
+  key_conflict: ''
+  atmosphere: ''
+  color_tone: '#ddaa77'
+  bgm_mood: melancholy
+- chapter_id: ch_04
+  name: 目睹·凋零
+  sort_order: 4
+  blueprint: '记忆归位后，你更清晰地看见戏班如今的处境： 演员青黄不接、场地破旧失修、观众流失严重。 父亲用半生牵挂守护的戏班，在时代浪潮中不断凋零。
+
+    '
+  goal: ''
+  key_conflict: ''
+  atmosphere: ''
+  color_tone: '#998877'
+  bgm_mood: melancholy
+- chapter_id: ch_05
+  name: 承戏·重振
+  sort_order: 5
+  blueprint: '你终于明白：父亲守护你，也守护戏班。 你选择留下，接过传承的重担，重整戏班。 以父亲的名义、以梨园传人的身份，让这座没落的梨园重燃荣光。
+
+    '
+  goal: ''
+  key_conflict: ''
+  atmosphere: ''
+  color_tone: '#ddaa66'
+  bgm_mood: melancholy
+  task:
+    description: '你终于明白：父亲守护你，也守护戏班。 你选择留下，接过传承的重担，重整戏班。 以父亲的名义、以梨园传人的身份，让这座没落的梨园重燃荣光。
+
+      '
+    sub_tasks:
+    - id: st_001
+      title: 告诉陈师傅你的决定
+      mode: dialogue
+      description: 你决定留下来继承戏班。陈师傅泪流满面，交出父亲的京胡
+      target_npc_id: npc_chen
+      status: active
+    - id: st_002
+      title: 穿上孩童戏服
+      mode: show_item
+      description: 穿上孩童戏服，站上焕然一新的戏台——薪火相传
+      target_npc_id: npc_chen
+      status: locked

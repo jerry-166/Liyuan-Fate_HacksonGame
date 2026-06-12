@@ -1,0 +1,8 @@
+id: npc_002
+name: 神崎舞
+role: 光轮集团安保主管
+personality: 冷酷高效，对集团绝对忠诚，言行充满压迫感
+secret: 实为集团生化改造人，恐惧被视作失败品而遭废弃
+background: 在赛博城市中的人工智能叛逃案的世界里，神崎舞是光轮集团安保主管。
+speech_style: 根据性格说话
+knowledge: []

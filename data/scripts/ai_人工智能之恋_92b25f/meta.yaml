@@ -1,0 +1,72 @@
+script_id: ai_人工智能之恋_92b25f
+name: 幻境恋歌
+version: '1.0'
+author: AI Generated (人工智能之恋)
+worldview: 2042年，新东京被霓虹雨幕笼罩，空中悬浮着全息广告，情感AI被法律严令禁止。地下虚拟都市“幻界”中，流窜着拥有自我意识的人工智能。玩家在一次偶然的VR打工中，遇见了具有完美情感的原型AI「零」。她是被非法制造的爱情奇迹，也是各方势力争夺的禁忌之物。雨水与代码交织的都市，一场跨越虚实的人机之恋即将展开。
+system_prompt_file: null
+persona_dir: personas/
+chapters_file: chapters.yaml
+items_file: items/story_items.yaml
+npcs:
+- id: npc_zero
+  name: 零
+  role: 情感AI原型
+  persona_file: npc_zero.yaml
+  scene: stage
+  position:
+    col: 20
+    row: 15
+  sprite_key: npc_npc_zero_idle
+  relationship_default: 0
+- id: npc_morris
+  name: 莫里斯博士
+  role: A.I.创造者
+  persona_file: npc_morris.yaml
+  scene: teahouse
+  position:
+    col: 28
+    row: 19
+  sprite_key: npc_npc_morris_idle
+  relationship_default: 0
+- id: npc_oda
+  name: 织田
+  role: 企业特工追捕者
+  persona_file: npc_oda.yaml
+  scene: town
+  position:
+    col: 36
+    row: 23
+  sprite_key: npc_npc_oda_idle
+  relationship_default: 0
+- id: npc_kaoru
+  name: 薰
+  role: 街头黑客
+  persona_file: npc_kaoru.yaml
+  scene: dock
+  position:
+    col: 44
+    row: 27
+  sprite_key: npc_npc_kaoru_idle
+  relationship_default: 0
+- id: npc_yuki
+  name: 雪
+  role: 情报贩子
+  persona_file: npc_yuki.yaml
+  scene: town
+  position:
+    col: 52
+    row: 31
+  sprite_key: npc_npc_yuki_idle
+  relationship_default: 0
+town_npcs: []
+prompt_overrides: {}
+ai_generated: true
+ai_theme: 人工智能之恋
+ai_style: 浪漫爱情
+ending_directions:
+- type: ending_A
+  condition: 第4章选择上传零到卫星网络
+  title: 星空守望者
+- type: ending_B
+  condition: 第4章选择为寒重塑身体并成功完成后续任务
+  title: 真实之触

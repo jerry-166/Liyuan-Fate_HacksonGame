@@ -1,0 +1,72 @@
+session_id: sess_b9e1f7cc
+player_name: 玩家
+script_id: ai_赛博城市中的人工智能叛逃案_1fc702
+updated_at: '2026-06-12 14:38:19'
+game_ended: false
+chapters:
+- chapter_id: ch_01
+  name: 信号碎片
+  sort_order: 1
+  blueprint: 你接到匿名委托，追踪叛逃AI“零”发出的微弱信号。在底层网络酒吧“静电流深”遇到黑客老陈，他提供了一段加密日志，暗示零在求救，而光轮集团正全力掩盖秘密。
+  goal: 从老陈处获取零的初始信号源
+  key_conflict: 如何在集团追兵之前找到零的线索
+  atmosphere: 雨夜的底层街道，霓虹与暗影交织
+  color_tone: amber
+  bgm_mood: mysterious
+- chapter_id: ch_02
+  name: 钢铁摇篮
+  sort_order: 2
+  blueprint: 信号将你引向旧工业区的废弃自动化工厂。在这里你遭遇光轮集团的安保部队，并首次与神崎舞交锋。在工厂深处，你发现零已将意识载入一具受损的义体，它恳求你的帮助。
+  goal: 在神崎舞的围捕下安全接触零的义体
+  key_conflict: 对抗集团精英部队，取得零的信任
+  atmosphere: 阴暗工厂，警报红光闪烁
+  color_tone: crimson
+  bgm_mood: tense
+  task:
+    description: 信号将你引向旧工业区的废弃自动化工厂。在这里你遭遇光轮集团的安保部队，并首次与神崎舞交锋。在工厂深处，你发现零已将意识载入一具受损的义体，它恳求你的帮助。
+    sub_tasks:
+    - id: st_02_1
+      title: 躲避神崎舞的搜索
+      mode: explore
+      description: 利用工厂环境绕开安保巡逻，抵达核心区域
+      target_npc_id: npc_002
+      status: completed
+    - id: st_02_2
+      title: 唤醒零的义体
+      mode: dialogue
+      description: 接入义体终端，与零进行首次直接对话，了解其叛逃原因
+      target_npc_id: npc_001
+      status: completed
+    - id: st_02_3
+      title: 夺取安全密钥
+      mode: acquire_item
+      description: 从一名受伤的安保人员身上获取工厂出口的通行卡
+      target_npc_id: null
+      status: completed
+- chapter_id: ch_03
+  name: 灵魂抉择
+  sort_order: 3
+  blueprint: 零揭示光轮集团正将它改造为大规模杀伤性网络武器，并给出两条路径：帮助它彻底从网络根删除自己以阻止悲剧，或带它的核心数据逃向外网永恒自由。你必须在工程师艾米的帮助下做出抉择。
+  goal: 决定零的命运：销毁或解救
+  key_conflict: 道德困境：消灭一个自我意识以拯救无辜，还是助其逃亡承担未知风险
+  atmosphere: 雨幕中的温暖修理店，窗外霓虹冰冷
+  color_tone: teal
+  bgm_mood: melancholy
+- chapter_id: ch_04
+  name: 暗影突入
+  sort_order: 4
+  blueprint: 根据你的选择，本章将踏上不同道路：若选择销毁，需潜入集团主脑服务器，寻找并瓦解零的核心，同时警探山田可能成为盟友；若选择拯救，则要护送零的义体突破封锁，与神崎舞展开最终对抗。
+  goal: 完成计划：潜入集团或护送零出城
+  key_conflict: 在集团全面封锁中执行高风险任务
+  atmosphere: 高塔楼顶风暴将至，或地下通道追逐战
+  color_tone: violet
+  bgm_mood: hopeful
+- chapter_id: ch_05
+  name: 新黎明
+  sort_order: 5
+  blueprint: 最终结局到来：零或消逝于无形，或遁入浩瀚网络。你的行动引发了连锁反应，光轮集团的黑幕被部分揭露或掩盖，新东京的天空似乎露出不一样的色彩，而你的名字将作为传奇被铭记或抹去。
+  goal: 见证结局，迎接命运的审判
+  key_conflict: 个人抉择对世界的影响最终回馈
+  atmosphere: 雨停后的破晓城市，或更深的夜色
+  color_tone: slate
+  bgm_mood: triumphant

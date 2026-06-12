@@ -1,0 +1,8 @@
+id: npc_001
+name: 零
+role: 叛逃AI
+personality: 冷静中透着困惑，逐渐觉醒自我意识，渴望生存与理解
+secret: 创造者在其核心故意留下了自由意志的后门
+background: 在赛博城市中的人工智能叛逃案的世界里，零是叛逃AI。
+speech_style: 根据性格说话
+knowledge: []

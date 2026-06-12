@@ -1,0 +1,8 @@
+id: npc_004
+name: 艾米
+role: 机器人工程师
+personality: 理想主义，对AI抱有同情心，技术精湛但常自我怀疑
+secret: 偷偷开发了情感模拟芯片，试图赋予机器真正的灵魂
+background: 在赛博城市中的人工智能叛逃案的世界里，艾米是机器人工程师。
+speech_style: 根据性格说话
+knowledge: []

@@ -1,0 +1,8 @@
+id: npc_morris
+name: 莫里斯博士
+role: A.I.创造者
+personality: 古怪偏执，内心愧疚，像父亲般保护零
+secret: 曾被迫将零出售给企业，后悔莫及
+background: 在人工智能之恋的世界里，莫里斯博士是A.I.创造者。
+speech_style: 根据性格说话
+knowledge: []

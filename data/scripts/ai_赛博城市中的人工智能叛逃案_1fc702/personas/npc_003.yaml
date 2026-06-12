@@ -1,0 +1,8 @@
+id: npc_003
+name: 老陈
+role: 地下黑客
+personality: 愤世嫉俗但古道热肠，行事谨慎，对集团内幕了如指掌
+secret: 曾是光轮高级工程师，因反对AI武器化被开除并遭追杀
+background: 在赛博城市中的人工智能叛逃案的世界里，老陈是地下黑客。
+speech_style: 根据性格说话
+knowledge: []

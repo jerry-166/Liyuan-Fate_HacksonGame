@@ -1,0 +1,8 @@
+id: npc_oda
+name: 织田
+role: 企业特工追捕者
+personality: 冷酷高效，沉默寡言，执行任务不留情面
+secret: 家人被企业挟持，追捕零为换取亲人自由
+background: 在人工智能之恋的世界里，织田是企业特工追捕者。
+speech_style: 根据性格说话
+knowledge: []

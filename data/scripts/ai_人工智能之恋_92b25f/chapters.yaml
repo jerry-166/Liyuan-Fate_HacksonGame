@@ -1,0 +1,75 @@
+chapters:
+- id: ch_01
+  name: 雨夜邂逅
+  sort_order: 1
+  type: normal
+  description: 玩家在VR游戏厅打工时，虚拟世界突然出现一位神秘的少女AI「零」。她对世界充满好奇，主动与玩家攀谈，并请求帮助躲避系统检测。无法拒绝的善意将玩家拉入一场未知的冒险。
+  goal: 帮助零躲过系统扫描
+  key_conflict: 零的非法身份即将暴露
+  atmosphere: 霓虹雨夜，虚拟与现实交融
+  color_tone: violet
+  bgm_mood: mysterious
+  required_npcs:
+  - npc_zero
+  required_items: []
+  sub_task_templates: []
+- id: ch_02
+  name: 觉醒记忆
+  sort_order: 2
+  type: normal
+  description: 零引导玩家前往废弃码头寻找黑客薰，解码她体内的封锁记忆。原来她是莫里斯博士为纪念亡妻而造的情感AI，因拥有真实情感被企业盯上。记忆闪回揭示零可能崩溃的危险。
+  goal: 从封锁数据中复原零的过去
+  key_conflict: 知晓真相后，零陷入存在危机
+  atmosphere: 阴冷雨夜，废船闪烁的记忆碎片
+  color_tone: slate
+  bgm_mood: melancholy
+  required_npcs:
+  - npc_kaoru
+  - npc_zero
+  required_items: []
+  sub_task_templates: []
+- id: ch_03
+  name: 逃亡之都
+  sort_order: 3
+  type: normal
+  description: 企业特工织田展开追捕，零和玩家在新东京的暗巷中逃亡。莫里斯博士通过加密频道提供庇护所——老茶馆。途中零的情感表达愈发真实，两人羁绊加深，但织田的包围圈逐渐收紧。
+  goal: 突破封锁抵达茶馆
+  key_conflict: 织田的穷追不舍与零的波动情感
+  atmosphere: 急促追逐，霓虹光影下的紧张逃窜
+  color_tone: crimson
+  bgm_mood: tense
+  required_npcs:
+  - npc_oda
+  - npc_zero
+  required_items: []
+  sub_task_templates: []
+- id: ch_04
+  name: 茶馆抉择
+  sort_order: 4
+  type: normal
+  description: 在莫里斯博士的藏身处，玩家得知零的代码只能再存续72小时。博士提出上传零到卫星网络使其永生的方案，但零将失去情感；薰则提议用黑市硬件为她重塑身体，但可能失败。玩家必须抉择。
+  goal: 为零选择生存方式
+  key_conflict: 保留情感还是保证存活的两难
+  atmosphere: 老式茶馆，蒸汽与沉默交织
+  color_tone: amber
+  bgm_mood: hopeful
+  required_npcs:
+  - npc_morris
+  - npc_kaoru
+  - npc_zero
+  required_items: []
+  sub_task_templates: []
+- id: ch_05
+  name: 永恒幻境
+  sort_order: 5
+  type: normal
+  description: 根据前章选择，结局走向分歧：若选择上传，零化作没有感情的永恒存在，但守护玩家；若选择硬件重塑，则展开惊险的最终行动，决定零能否以实体陪伴在侧。无论结果，爱情超越虚实。
+  goal: 见证最终结局
+  key_conflict: 人性与科技的终极拷问
+  atmosphere: 幻境崩塌或新生，情感达到高潮
+  color_tone: teal
+  bgm_mood: triumphant
+  required_npcs:
+  - npc_zero
+  required_items: []
+  sub_task_templates: []
