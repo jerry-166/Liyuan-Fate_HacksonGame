@@ -1,0 +1,153 @@
+# ============================================================
+# 世界场景定义
+# 开放世界中所有可交互的场景。
+# 场景是先于剧本存在的世界资产，AI 生成剧本时必须基于已有场景。
+#
+# 字段说明：
+#   scene_id       - 场景唯一标识（与后端数据中的 scene 标签一致）
+#   name           - 中文名称
+#   type           - 类型: outdoor 主世界户外 / indoor 子场景室内
+#   description    - 场景描述（氛围、视觉印象，50-100字）
+#   atmosphere     - 氛围关键词（2-4个词）
+#   subscene_id    - 前端子场景ID（如果是子场景；null 表示无独立子场景）
+#   map_image      - 地图图片文件名（如果是子场景；null 使用主世界地图）
+#   dimensions     - 图片像素尺寸 {w, h}（如果是子场景）
+#   connections    - 可通往的其他场景ID列表
+#   notable_areas  - 场景内值得注意的区域/地标（列表）
+#   default_npcs   - 场景预设可能存在的NPC类型（供AI参考）
+# ============================================================
+
+scenes:
+
+  # ── 主世界（户外）─────────────────────────────────────
+
+  - scene_id: town
+    name: 江南小镇
+    type: outdoor
+    description: >
+      一座被水网环绕的江南小镇，青石板路沿着河道蜿蜒。两岸是白墙黛瓦的旧式民居，
+      炊烟从瓦缝间升起，远处能听到船桨拨水的声响。镇中心的石板广场上有一棵
+      百年老榕树，树下几张竹椅散落着，像在等人来坐。
+    atmosphere: [小镇, 水乡, 日常, 安宁之下暗流涌动]
+    subscene_id: null
+    map_image: town_worldmap.png
+    dimensions: {w: 80, h: 50}     # tile 格数
+    connections: [stage_ruin, teahouse, dock, temple, father_house, cemetery]
+    notable_areas:
+      - 镇中心榕树广场
+      - 沿河石板路
+      - 码头渡口
+      - 集市街
+    default_npcs: [卖菜大婶, 河边洗衣妇, 茶馆跑堂, 镇口算命先生]
+
+  # ── 子场景（室内/封闭区域）────────────────────────────
+
+  - scene_id: stage_ruin
+    name: 破旧戏台
+    type: indoor
+    description: >
+      一座废弃已久的戏台，红漆柱子斑驳脱落，台上的帷幕已经朽烂，只剩半截挂着。
+      后台化妆间散落着蒙尘的行头和散了线的髯口，地上有几张踩烂的戏票。
+      空气里有一股陈年的檀香味混着霉味，安静得能听见自己的心跳。
+    atmosphere: [破败, 寂静, 檀香与霉味, 辉煌不再]
+    subscene_id: stage
+    map_image: stage_ruined.png
+    dimensions: {w: 1536, h: 1024}
+    connections: [town]
+    notable_areas:
+      - 前台戏台
+      - 后台化妆间
+      - 角落的旧木箱
+      - 墙上挂着的京胡
+    default_npcs: [老琴师, 年轻学徒]
+
+  - scene_id: teahouse
+    name: 如意茶馆
+    type: indoor
+    description: >
+      镇上唯一还开着的茶馆，木楼梯吱呀作响，店堂里摆着三四张八仙桌。
+      墙上挂着泛黄的戏班老照片，柜台上搁着一台手摇留声机——坏了，但没人舍得扔。
+      茶香从后厨飘出来，偶尔有人掀开门帘往里看一眼。
+    atmosphere: [喧闹, 茶香, 人来人往, 消息集散地]
+    subscene_id: tea_house
+    map_image: tea_house.png
+    dimensions: {w: 1484, h: 1060}
+    connections: [town]
+    notable_areas:
+      - 一楼大堂雅座
+      - 二楼雅间（墙上挂着戏班合影）
+      - 后厨
+      - 柜台（留声机）
+    default_npcs: [茶馆老板娘, 老琴师]
+
+  - scene_id: dock
+    name: 渡口码头
+    type: outdoor
+    description: >
+      镇东头的石板渡口，一条乌篷船常年泊在岸边。河水浑绿，浮着几片莲叶，
+      远处的芦苇荡里偶尔有白鹭惊起。船夫老李的烟斗亮着一点红光，在暮色里明灭。
+    atmosphere: [水边, 黄昏, 等待, 离别的预感]
+    subscene_id: dock
+    map_image: dock.png
+    dimensions: {w: 1774, h: 887}
+    connections: [town]
+    notable_areas:
+      - 渡口石板台阶
+      - 泊船的乌篷船
+      - 河岸芦苇荡
+    default_npcs: [船夫老李]
+
+  - scene_id: temple
+    name: 柳家祠堂
+    type: indoor
+    description: >
+      坐落在镇北山坡上的家族祠堂，门前两棵柏树高耸入云。祠堂内光线昏暗，
+      烛火摇曳中能看到供桌上密密麻麻的牌位。香灰积了厚厚一层，
+      空气里是陈年香烛的味道。后排牌位中有一个被利器刮花，名字已不可辨。
+    atmosphere: [肃穆, 昏暗, 香火, 遗忘与不甘]
+    subscene_id: ancestral_hall
+    map_image: ancestral_hall.png
+    dimensions: {w: 1387, h: 1134}
+    connections: [town]
+    notable_areas:
+      - 祠堂正堂（供桌与牌位）
+      - 后堂书架（藏有族谱）
+      - 祠堂前的两棵柏树
+    default_npcs: [守祠老者]
+
+  - scene_id: father_house
+    name: 父亲旧居
+    type: indoor
+    description: >
+      镇南一条窄巷尽头的老宅，木门虚掩，门槛上积了薄薄一层灰。屋里的
+      家具蒙着白布，靠窗的旧木桌上还搁着一盏煤油灯。墙角的老木箱半开着，
+      里面的衣物叠得整整齐齐——像是有人走之前特意收拾过。
+    atmosphere: [尘封, 孤独, 旧日痕迹, 欲言又止的遗物]
+    subscene_id: fathers_house
+    map_image: fathers_house.png
+    dimensions: {w: 1387, h: 1134}
+    connections: [town]
+    notable_areas:
+      - 堂屋（旧木桌、煤油灯）
+      - 里屋墙角（老木箱）
+      - 照片墙
+      - 后院小天井
+    default_npcs: []
+
+  - scene_id: cemetery
+    name: 镇外墓地
+    type: outdoor
+    description: >
+      镇外山坡上的一片老墓地，荒草丛生，几块墓碑歪斜着。父亲的坟在最边上，
+      新土还没长草，墓碑上的字被雨水冲刷得有些模糊了。远处是广阔的田野，
+      风吹过时野草沙沙作响，像是在低语。
+    atmosphere: [荒凉, 悲伤, 田野, 未说完的话]
+    subscene_id: graveyard
+    map_image: graveyard.png
+    dimensions: {w: 1448, h: 1086}
+    connections: [town]
+    notable_areas:
+      - 父亲的新坟
+      - 柳家祖坟区
+      - 山坡上的老槐树
+    default_npcs: []
