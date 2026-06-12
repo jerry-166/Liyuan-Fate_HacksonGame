@@ -280,16 +280,16 @@ export class RelationshipPanel {
       const label = relationshipLabel(rel);
       const color = relationshipColor(rel);
 
-      // —— NPC 名称 ——
-      const nameText = ui.add.text(nameAreaLeft, midY, npc.name, {
+      // —— NPC 名称（上方） ——
+      const nameText = ui.add.text(nameAreaLeft, midY - 13, npc.name, {
         fontFamily: '"KaiTi","SimSun",serif',
         fontSize: '20px', color: '#d4b896',
       }).setOrigin(0, 0.5);
       this._barsContainer.add(nameText);
 
-      // —— 角色标签 ——
+      // —— ★ 角色标签（下方，紧贴名称，彻底远离关系条） ——
       if (npc.role) {
-        const roleText = ui.add.text(nameAreaLeft + NAME_W + 4, midY - 14, npc.role, {
+        const roleText = ui.add.text(nameAreaLeft, midY + 13, npc.role, {
           fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
           fontSize: '11px', color: '#887766',
         }).setOrigin(0, 0.5);

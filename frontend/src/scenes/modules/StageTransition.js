@@ -15,10 +15,25 @@ export class StageTransition {
     this.ui = uiScene;
   }
 
-  /** 创建过渡覆盖层 UI */
+  /** 创建过渡覆盖层 UI — 所有尺寸基于屏幕比例计算，无硬编码 */
   createOverlay() {
     const ui = this.ui;
     const { width, height } = ui.cameras.main;
+
+    // ★ 屏幕安全边距（左右两侧各留 8% 的 padding，防止描边/阴影溢出）
+    const safePad = Math.round(width * 0.08);
+    const maxTextW = width - safePad * 2; // 文字最大可用宽度
+
+    // ★ 字号全部相对屏幕短边计算，保证任意分辨率下比例一致
+    const shortSide = Math.min(width, height);
+    const titleFS  = Math.max(20, Math.round(shortSide * 0.045)); // ~48px@1080
+    const descFS   = Math.max(14, Math.round(shortSide * 0.021)); // ~22px@1080
+    const hintFS   = Math.max(12, Math.round(shortSide * 0.017)); // ~18px@1080
+
+    // ★ 描边厚度也相对化
+    const titleStroke = Math.max(2, Math.round(shortSide * 0.005));
+    const descStroke  = Math.max(1, Math.round(shortSide * 0.004));
+    const hintStroke  = Math.max(1, Math.round(shortSide * 0.003));
 
     ui.transitionContainer = ui.add.container(0, 0).setDepth(500).setVisible(false);
 
@@ -33,28 +48,31 @@ export class StageTransition {
     ui.transitionDim.fillRect(0, 0, width, height);
     ui.transitionContainer.add(ui.transitionDim);
 
-    // 章节标题 — 大号醒目
-    ui.transitionTitle = ui.add.text(width / 2, height / 2 - 60, '', {
-      fontFamily: '"KaiTi","SimSun",serif', fontSize: '48px', color: '#f5dca0',
-      stroke: '#000000', strokeThickness: 5,
+    // 章节标题 — ★ 加 wordWrap 防止长标题溢出
+    ui.transitionTitle = ui.add.text(width / 2, height * 0.35, '', {
+      fontFamily: '"KaiTi","SimSun",serif', fontSize: `${titleFS}px`, color: '#f5dca0',
+      stroke: '#000000', strokeThickness: titleStroke,
       shadow: { offsetX: 0, offsetY: 2, color: '#000000aa', blur: 8, fill: true },
+      wordWrap: { width: maxTextW, useAdvancedWrap: true }, align: 'center',
     }).setOrigin(0.5, 0).setAlpha(0);
     ui.transitionContainer.add(ui.transitionTitle);
 
-    // 章节描述 — 清晰易读
-    ui.transitionDesc = ui.add.text(width / 2, height / 2, '', {
+    // 章节描述 — ★ 宽度 = maxTextW，窄而高防溢出
+    ui.transitionDesc = ui.add.text(width / 2, height * 0.35, '', {
       fontFamily: '"Microsoft YaHei","PingFang SC","SimHei",sans-serif',
-      fontSize: '22px', color: '#e0d0b0',
-      stroke: '#000000', strokeThickness: 4,
-      wordWrap: { width: 500 }, align: 'center',
+      fontSize: `${descFS}px`, color: '#e0d0b0',
+      stroke: '#000000', strokeThickness: descStroke,
+      wordWrap: { width: maxTextW, useAdvancedWrap: true }, align: 'center',
+      lineSpacing: Math.max(2, Math.round(shortSide * 0.004)),
     }).setOrigin(0.5, 0).setAlpha(0);
     ui.transitionContainer.add(ui.transitionDesc);
 
     // 点击提示（居中靠下，醒目但不抢眼）
-    ui.transitionHint = ui.add.text(width / 2, height - 60, '', {
+    ui.transitionHint = ui.add.text(width / 2, height * 0.88, '', {
       fontFamily: '"Microsoft YaHei","PingFang SC","SimHei",sans-serif',
-      fontSize: '18px', color: '#c8c0a0',
-      stroke: '#000000', strokeThickness: 3,
+      fontSize: `${hintFS}px`, color: '#c8c0a0',
+      stroke: '#000000', strokeThickness: hintStroke,
+      wordWrap: { width: maxTextW, useAdvancedWrap: true }, align: 'center',
     }).setOrigin(0.5).setAlpha(0);
     ui.transitionContainer.add(ui.transitionHint);
 
@@ -103,15 +121,35 @@ export class StageTransition {
     const chapterLabel = getChapterLabel(newStage.chapterId);
     ui.transitionTitle.setText(`${chapterLabel} · ${newStage.name}`);
 
-    // 描述定位：紧跟标题底部 + 间距
-    const titleBottom = ui.transitionTitle.y + ui.transitionTitle.height + 12;
-    ui.transitionDesc.setText(newStage.description || '');
-    ui.transitionDesc.setY(titleBottom);
+    // ★ 标题初始放在屏幕 35% 高度处
+    const titleBaseY = Math.round(height * 0.35);
+    ui.transitionTitle.setY(titleBaseY);
 
-    // 提示定位：紧跟描述底部 + 间距
-    const descBottom = titleBottom + ui.transitionDesc.height + 16;
+    // 描述紧跟标题底部 + 间距
+    const gapTitleDesc = Math.max(8, Math.round(height * 0.02));
+    ui.transitionDesc.setText(newStage.description || '');
+    const descTopY = ui.transitionTitle.y + ui.transitionTitle.height + gapTitleDesc;
+
+    // ★ 底部安全区：描述底边 + 提示区 至少留 height*12%
+    const safeBottom = Math.round(height * 0.12);
+    const maxDescBottom = height - safeBottom;
+    const descTotalBottom = descTopY + ui.transitionDesc.height;
+
+    if (descTotalBottom > maxDescBottom) {
+      // 整体上移标题，让描述+提示都完整显示
+      const overflow = descTotalBottom - maxDescBottom;
+      const adjustedTitleY = Math.max(Math.round(height * 0.08), titleBaseY - overflow);
+      ui.transitionTitle.setY(adjustedTitleY);
+      ui.transitionDesc.setY(adjustedTitleY + ui.transitionTitle.height + gapTitleDesc);
+    } else {
+      ui.transitionDesc.setY(descTopY);
+    }
+
+    // 提示定位：紧跟描述底部 + 间距，★ clamp 到安全区内
+    const gapDescHint = Math.max(8, Math.round(height * 0.015));
+    const hintY = ui.transitionDesc.y + ui.transitionDesc.height + gapDescHint;
     ui.transitionHint.setText('');
-    ui.transitionHint.setY(descBottom);
+    ui.transitionHint.setY(Math.min(hintY, height - safeBottom));
 
     await this._fadeIn(ui.transitionContainer, 800);
 

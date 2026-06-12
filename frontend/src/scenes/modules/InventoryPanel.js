@@ -63,14 +63,18 @@ export class InventoryPanel {
     }).setOrigin(0.5);
     ui.backpackPanel.add(ui.bpTitle);
 
-    // 左侧标题
-    ui.backpackPanel.add(ui.add.text(sepX / 2, panelY + titleH + 16, '道具列表', {
+    // 左侧标题 — ★ 限制最大宽度，防止文字溢出容器
+    ui.backpackPanel.add(ui.add.text(panelX + leftW / 2, panelY + titleH + 16, '道具列表', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '17px', color: '#887766',
+      wordWrap: { width: leftW - 32, useAdvancedWrap: true },
+      align: 'center',
     }).setOrigin(0.5, 0));
 
-    // 右侧标题
+    // 右侧标题 — ★ 限制最大宽度
     ui.backpackPanel.add(ui.add.text(sepX + rightW / 2, panelY + titleH + 16, '物品详情', {
       fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif', fontSize: '17px', color: '#887766',
+      wordWrap: { width: rightW - 32, useAdvancedWrap: true },
+      align: 'center',
     }).setOrigin(0.5, 0));
 
     // 物品列表容器

@@ -16,9 +16,10 @@
 
 import Phaser from 'phaser';
 import { getChapterLabel, GAME } from '../config.js';
-import { getSessions, deleteSession, getEnding } from '../api/client.js';
+import { getSessions, deleteSession, getEnding, getScripts } from '../api/client.js';
 import { getAllPortraitAssets } from './modules/GameUIHelpers.js';
 import { isMobileDevice, toggleFullscreen, isFullscreen } from '../utils/DeviceDetector.js';
+import { EditorPanel } from './modules/EditorPanel.js';
 
 // ========== UI 工具函数 ==========
 
@@ -108,6 +109,7 @@ export class MenuScene extends Phaser.Scene {
   create() {
     this._portraitsLoaded = false;
     this._archiveVisible = false;
+    this._archiveLoading = false;  // ★ 防止重复打开存档面板
     this._archiveSessionData = null;
     this._resizeTimer = null;
     this._uiContainer = null;
@@ -119,6 +121,15 @@ export class MenuScene extends Phaser.Scene {
     this._bindWheelHandler();
     this.keyEsc = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC);
 
+    // ★ 内联编辑器面板
+    this.editorPanel = new EditorPanel(this);
+    this.editorPanel.createPanel();
+    this.editorPanel.onScriptSelected((scriptId) => {
+      // 选中剧本后关闭编辑器和选择器，重新打开选择器以刷新
+      this._closeScriptSelector();
+      this.time.delayedCall(400, () => this._showScriptSelector());
+    });
+
     // 构建首次 UI
     const { width, height } = this.cameras.main;
     this._buildAll(width, height);
@@ -129,6 +140,8 @@ export class MenuScene extends Phaser.Scene {
 
   shutdown() {
     this.scale.off('resize', this._onResize, this);
+    if (this.editorPanel) { this.editorPanel.destroy(); this.editorPanel = null; }
+    this._cleanupNameInput();
   }
 
   // ==================== Resize 处理（防抖） ====================
@@ -163,9 +176,19 @@ export class MenuScene extends Phaser.Scene {
     this.archiveListContent = null;
     this.archiveHint = null;
     this._archiveListArea = null;
+    this.archiveListContentHeight = 0;  // ★ 防止 resize 后残留旧值
+    this.archiveScrollY = 0;
     this.allButtons = null;
     this._fsBtn = null;
     this.endingViewer = null;
+    this._scriptSelectorContainer = null;
+    this._scriptScrollContainer = null;
+    this._nameDialogContainer = null;
+    if (this._scriptWheelHandler) {
+      this.input.off('wheel', this._scriptWheelHandler);
+      this._scriptWheelHandler = null;
+    }
+    this._cleanupNameInput();
 
     // 重建
     this._buildAll(width, height);
@@ -186,14 +209,17 @@ export class MenuScene extends Phaser.Scene {
   _bindWheelHandler() {
     if (this._wheelHandler) return;
     this._wheelHandler = (_p, _go, _dx, deltaY) => {
-      if (!this.archivePanel || !this.archivePanel.active || !this.archivePanel.visible) return;
+      // ★ 仅检查面板是否存在且可见（移除 active 检查，resize 后的一帧内 active 可能为 false）
+      if (!this.archivePanel || !this.archivePanel.visible) return;
       const area = this._archiveListArea;
       if (!area || !this.archiveListContentHeight || this.archiveListContentHeight <= area.h) return;
+      // ★ 校验当前 listContent 的父容器确是当前 panel（防止 resize 前后引用错乱）
+      const content = this.archiveListContent;
+      if (!content) return;
       const maxScroll = this.archiveListContentHeight - area.h;
       this.archiveScrollY = Math.max(-maxScroll, Math.min(0, this.archiveScrollY - deltaY * 0.5));
-      if (this.archiveListContent && this.archiveListContent.active) {
-        this.archiveListContent.setY(area.baseY + this.archiveScrollY);
-      }
+      // ★ 直接设置 Y 坐标，不做 active 判断
+      content.setY(area.baseY + this.archiveScrollY);
     };
     this.input.on('wheel', this._wheelHandler);
   }
@@ -449,6 +475,10 @@ export class MenuScene extends Phaser.Scene {
   }
 
   async _showArchives() {
+    // ★ 防止短时间内重复调用（双击继续游戏按钮等）
+    if (this._archiveLoading) return;
+    this._archiveLoading = true;
+
     this.archivePanel.setVisible(true);
     this._archiveVisible = true;
     this.archiveListContent.removeAll(true);
@@ -475,6 +505,8 @@ export class MenuScene extends Phaser.Scene {
       console.warn('[MenuScene] 获取存档列表失败:', err);
       this.archiveHint.setText('无法连接到服务器');
       this._displayEmptyArchive();
+    } finally {
+      this._archiveLoading = false;
     }
   }
 
@@ -503,10 +535,10 @@ export class MenuScene extends Phaser.Scene {
     const panelW = Math.min(Math.round(780 * scale), width - 40);
     const panelX = (width - panelW) / 2;
 
-    const nameFS = Math.round(18 * scale);
-    const dateFS = Math.round(14 * scale);
-    const rowH = Math.round(58 * scale);
-    const rowGap = Math.round(62 * scale);
+    const nameFS = Math.round(17 * scale);
+    const dateFS = Math.round(13 * scale);
+    const rowH = Math.round(72 * scale);
+    const rowGap = Math.round(76 * scale);
     const btnW = Math.round(52 * scale);
     const btnH = Math.round(26 * scale);
 
@@ -521,6 +553,7 @@ export class MenuScene extends Phaser.Scene {
       const chLabel = getChapterLabel(s.chapter_id);
       const date = (s.updated_at || s.created_at || '').slice(0, 16);
       const ended = s.game_ended ? ' [已结局]' : '';
+      const scriptTag = s.script_name ? `「${s.script_name}」` : '';
       const label = `${s.player_name || '玩家'} · ${chLabel}${ended}`;
 
       const rowBg = this.add.graphics();
@@ -537,26 +570,36 @@ export class MenuScene extends Phaser.Scene {
         fontSize: `${nameFS}px`, color: s.game_ended ? '#886644' : '#d4b896',
       }));
 
-      this.archiveListContent.add(this.add.text(panelX + Math.round(42 * scale), y + Math.round(30 * scale), date || '未知时间', {
+      // Script name line
+      if (scriptTag) {
+        this.archiveListContent.add(this.add.text(panelX + Math.round(42 * scale), y + Math.round(30 * scale), scriptTag, {
+          fontFamily: '"KaiTi","SimSun",serif',
+          fontSize: `${dateFS}px`, color: '#887766',
+        }));
+      }
+
+      const dateY = scriptTag ? y + Math.round(46 * scale) : y + Math.round(30 * scale);
+      this.archiveListContent.add(this.add.text(panelX + Math.round(42 * scale), dateY, date || '未知时间', {
         fontFamily: 'monospace', fontSize: `${dateFS}px`, color: '#665544',
       }));
 
+      const btnVOffset = Math.round((rowH - btnH) / 2);
       if (s.game_ended) {
         this.archiveListContent.add(
-          createSmallButton(this, panelX + colW - Math.round(130 * scale), y + Math.round(12 * scale),
+          createSmallButton(this, panelX + colW - Math.round(130 * scale), y + btnVOffset,
             btnW, btnH, '结局', '#669988',
             () => this._showEndingViewer(s.session_id))
         );
       } else {
         this.archiveListContent.add(
-          createSmallButton(this, panelX + colW - Math.round(130 * scale), y + Math.round(12 * scale),
+          createSmallButton(this, panelX + colW - Math.round(130 * scale), y + btnVOffset,
             btnW, btnH, '继续', '#889966',
             () => this._loadArchive(s.session_id))
         );
       }
 
       this.archiveListContent.add(
-        createSmallButton(this, panelX + colW - Math.round(68 * scale), y + Math.round(12 * scale),
+        createSmallButton(this, panelX + colW - Math.round(68 * scale), y + btnVOffset,
           btnW, btnH, '删除', '#aa6655',
           () => this._confirmDelete(s.session_id, s.player_name))
       );
@@ -758,13 +801,466 @@ export class MenuScene extends Phaser.Scene {
       try { localStorage.removeItem(`__dialogue_history_${oldSession}`); } catch (_) {}
       localStorage.removeItem('__active_session__');
     }
+    // Show script selection panel before starting
+    this._showScriptSelector();
+  }
+
+  // ==================== 剧本选择面板 ====================
+
+  async _showScriptSelector() {
+    const { width, height } = this.cameras.main;
+    const scale = Math.min(width / GAME.WIDTH, height / GAME.HEIGHT);
+
+    // Disable main buttons
+    this.allButtons.forEach(btn => {
+      if (btn.list) btn.list.forEach(child => { if (child.input) child.disableInteractive(); });
+    });
+
+    // Create selector panel
+    const panelW = Math.min(Math.round(520 * scale), width - 32);
+    const panelH = Math.min(Math.round(520 * scale), height - 40);
+    const panelX = (width - panelW) / 2;
+    const panelY = (height - panelH) / 2;
+
+    const container = this.add.container(0, 0).setDepth(200);
+    this._scriptSelectorContainer = container;
+    this._uiContainer.add(container);
+
+    // Overlay (click to close — also cleans up name dialog)
+    const overlay = this.add.graphics();
+    overlay.fillStyle(0x000000, 0.75);
+    overlay.fillRect(0, 0, width, height);
+    overlay.setInteractive(new Phaser.Geom.Rectangle(0, 0, width, height), Phaser.Geom.Rectangle.Contains);
+    overlay.on('pointerdown', () => {
+      this._cleanupNameInput(); // ★ 关闭选择器前先清理名字输入 DOM
+      this._closeScriptSelector();
+    });
+    container.add(overlay);
+
+    // Panel bg — deeper, more refined
+    const bg = this.add.graphics();
+    bg.fillStyle(0x0d0d1e, 0.98);
+    bg.fillRoundedRect(panelX, panelY, panelW, panelH, 14);
+    bg.lineStyle(1.5, 0x665544, 0.5);
+    bg.strokeRoundedRect(panelX, panelY, panelW, panelH, 14);
+    // Inner glow border
+    bg.lineStyle(1, 0x887766, 0.2);
+    bg.strokeRoundedRect(panelX + 1, panelY + 1, panelW - 2, panelH - 2, 13);
+    container.add(bg);
+
+    // Title
+    const titleFS = Math.round(24 * scale);
+    const titleY = panelY + Math.round(36 * scale);
+    container.add(this.add.text(width / 2, titleY, '—— 选择剧本 ——', {
+      fontFamily: '"KaiTi","SimSun",serif', fontSize: `${titleFS}px`, color: '#d4b896',
+    }).setOrigin(0.5));
+
+    // Divider
+    const divY = panelY + Math.round(62 * scale);
+    const divGfx = this.add.graphics();
+    divGfx.lineStyle(1, 0x665544, 0.35);
+    divGfx.lineBetween(panelX + 30, divY, panelX + panelW - 30, divY);
+    container.add(divGfx);
+
+    // Close button
+    const closeFS = Math.round(20 * scale);
+    const closeBtn = this.add.text(panelX + panelW - Math.round(18 * scale), panelY + Math.round(12 * scale), '✕', {
+      fontFamily: '"Microsoft YaHei",sans-serif',
+      fontSize: `${closeFS}px`, color: '#554433',
+    }).setOrigin(1, 0).setInteractive({ useHandCursor: true });
+    closeBtn.on('pointerover', () => closeBtn.setColor('#c4a882'));
+    closeBtn.on('pointerout', () => closeBtn.setColor('#554433'));
+    closeBtn.on('pointerdown', () => this._closeScriptSelector());
+    container.add(closeBtn);
+
+    // ── Scrollable content area ──
+    const contentX = panelX + Math.round(24 * scale);
+    const contentY = panelY + Math.round(74 * scale);
+    const contentW = panelW - Math.round(48 * scale);
+    const contentH = panelH - Math.round(130 * scale);
+
+    // Mask for scroll area
+    const maskGfx = this.add.graphics();
+    maskGfx.fillStyle(0xffffff, 1);
+    maskGfx.fillRect(contentX, contentY, contentW, contentH);
+    maskGfx.setVisible(false);
+    container.add(maskGfx);
+
+    const scrollContainer = this.add.container(0, 0);
+    scrollContainer.setMask(maskGfx.createGeometryMask());
+    container.add(scrollContainer);
+    this._scriptScrollContainer = scrollContainer;
+    this._scriptScrollY = 0;
+    this._scriptScrollMax = 0;
+    this._scriptContentH = contentH;
+
+    // AI Create button at bottom
+    const aiBtnW = Math.round(150 * scale), aiBtnH = Math.round(34 * scale);
+    const aiBtn = this._createStyledButton(
+      panelX + panelW - Math.round(20 * scale),
+      panelY + panelH - Math.round(22 * scale),
+      aiBtnW, aiBtnH, '✨ AI 创作新剧本', '#7b8cde',
+      () => this._openEditorWorkshop('generate'),
+      'right', scale
+    );
+    container.add(aiBtn);
+
+    // ── Scroll wheel handler ──
+    if (this._scriptWheelHandler) {
+      this.input.off('wheel', this._scriptWheelHandler);
+    }
+    this._scriptWheelHandler = (_p, _go, _dx, deltaY) => {
+      if (!this._scriptScrollContainer || !this._scriptSelectorContainer) return;
+      const sensitivity = 0.6;
+      this._scriptScrollY = Phaser.Math.Clamp(
+        this._scriptScrollY + deltaY * sensitivity,
+        0, Math.max(0, this._scriptScrollMax)
+      );
+      this._scriptScrollContainer.y = -this._scriptScrollY;
+    };
+    this.input.on('wheel', this._scriptWheelHandler);
+
+    // Loading hint
+    const loadingText = this.add.text(width / 2, panelY + panelH / 2, '加载剧本列表中……', {
+      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+      fontSize: `${Math.round(15 * scale)}px`, color: '#665544',
+    }).setOrigin(0.5);
+    container.add(loadingText);
+
+    // Load scripts
+    try {
+      const data = await getScripts();
+      const scripts = data.scripts || [];
+      loadingText.destroy();
+
+      if (scripts.length === 0) {
+        container.add(this.add.text(width / 2, panelY + panelH / 2 + Math.round(16 * scale), '暂无剧本，请使用 AI 创作新剧本', {
+          fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+          fontSize: `${Math.round(14 * scale)}px`, color: '#665544',
+        }).setOrigin(0.5));
+        return;
+      }
+
+      this._renderScriptCards(scrollContainer, scripts, contentX, contentY, contentW, contentH, scale);
+    } catch (err) {
+      console.warn('[MenuScene] 加载剧本列表失败:', err);
+      loadingText.setText('加载失败，将使用默认剧本');
+      this.time.delayedCall(1500, () => {
+        this._closeScriptSelector();
+        this._startNewGameWithScript('liyuan_shengsi');
+      });
+    }
+  }
+
+  _renderScriptCards(container, scripts, cx, cy, rw, rh, scale) {
+    const cardW = rw;
+    const cardH = Math.round(76 * scale);
+    const cardGap = Math.round(10 * scale);
+    const nameFS = Math.round(16 * scale);
+    const descFS = Math.round(12 * scale);
+    const metaFS = Math.round(11 * scale);
+    const pad = Math.round(16 * scale);
+
+    scripts.forEach((s, i) => {
+      const cardY = cy + i * (cardH + cardGap);
+      const cardX = cx;
+
+      // Card bg
+      const card = this.add.graphics();
+      const drawCard = (hover) => {
+        card.clear();
+        card.fillStyle(hover ? 0x1c1c32 : 0x141428, 1);
+        card.fillRoundedRect(cardX, cardY, cardW, cardH, 8);
+        card.lineStyle(1, hover ? 0x776655 : 0x443322, hover ? 0.6 : 0.35);
+        card.strokeRoundedRect(cardX, cardY, cardW, cardH, 8);
+      };
+      drawCard(false);
+      container.add(card);
+
+      // Left accent bar
+      const accent = this.add.graphics();
+      accent.fillStyle(0xd4b896, 0.5);
+      accent.fillRoundedRect(cardX + 2, cardY + cardH * 0.2, 3, cardH * 0.6, 1.5);
+      container.add(accent);
+
+      // Script name — with wordWrap fallback for long names on small screens
+      const nameLimit = Math.floor(cardW * 0.85);
+      const nameText = this.add.text(cardX + pad, cardY + Math.round(10 * scale),
+        s.name.length > 10 ? s.name.slice(0, 9) + '…' : s.name, {
+          fontFamily: '"KaiTi","SimSun",serif',
+          fontSize: `${nameFS}px`, color: '#d4b896',
+          wordWrap: { width: nameLimit - pad, useAdvancedWrap: true },
+          maxLines: 1,
+        });
+      container.add(nameText);
+
+      // Chapter/NPC tag - right aligned
+      const tagText = this.add.text(cardX + cardW - pad, cardY + Math.round(12 * scale),
+        `${s.chapter_count}章 · ${s.npc_count}角色`, {
+          fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+          fontSize: `${metaFS}px`, color: '#554433',
+        }).setOrigin(1, 0);
+      container.add(tagText);
+
+      // Description
+      const descW = cardW - pad * 2;
+      const descText = this.add.text(cardX + pad, cardY + Math.round(34 * scale),
+        s.description || '暂无描述', {
+          fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+          fontSize: `${descFS}px`, color: '#887766',
+          wordWrap: { width: descW, useAdvancedWrap: true },
+          maxLines: 2,
+        });
+      container.add(descText);
+
+      // Author tag (bottom-right)
+      if (s.author) {
+        container.add(this.add.text(cardX + cardW - pad, cardY + cardH - pad * 0.6,
+          s.author, {
+            fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+            fontSize: `${Math.round(10 * scale)}px`, color: '#443322',
+          }).setOrigin(1, 0));
+      }
+
+      // Click zone
+      const zone = this.add.zone(cardX + cardW / 2, cardY + cardH / 2, cardW, cardH)
+        .setInteractive({ useHandCursor: true });
+      zone.on('pointerover', () => drawCard(true));
+      zone.on('pointerout', () => drawCard(false));
+      zone.on('pointerdown', () => {
+        this._onScriptSelected(s.script_id, s.name);
+      });
+      container.add(zone);
+    });
+
+    // Update scroll max — content starts at cy, visible height is rh
+    this._scriptScrollMax = Math.max(0,
+      scripts.length * (cardH + cardGap) - cardGap - rh
+    );
+  }
+
+  _createStyledButton(x, y, w, h, label, color, callback, align = 'center', scale = 1) {
+    const container = this.add.container(0, 0);
+    const offsetX = align === 'right' ? -w : align === 'left' ? 0 : -w / 2;
+    const bg = this.add.graphics();
+    const hexColor = parseInt(color.replace('#', ''), 16);
+    const drawBg = (hover) => {
+      bg.clear();
+      bg.fillStyle(hover ? 0x2a2e50 : 0x1a1e3a, hover ? 1 : 0.9);
+      bg.fillRoundedRect(x + offsetX, y - h / 2, w, h, 6);
+      bg.lineStyle(1, hexColor, hover ? 0.9 : 0.5);
+      bg.strokeRoundedRect(x + offsetX, y - h / 2, w, h, 6);
+    };
+    drawBg(false);
+    container.add(bg);
+    const fs = Math.round(h * 0.48);
+    container.add(this.add.text(x + offsetX + w / 2, y, label, {
+      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+      fontSize: `${fs}px`, color: color,
+    }).setOrigin(0.5));
+    const zone = this.add.zone(x + offsetX + w / 2, y, w, h).setInteractive({ useHandCursor: true });
+    zone.on('pointerover', () => drawBg(true));
+    zone.on('pointerout', () => drawBg(false));
+    zone.on('pointerdown', callback);
+    container.add(zone);
+    return container;
+  }
+
+  _onScriptSelected(scriptId, scriptName) {
+    // Show name input dialog
+    this._showNameInputDialog(scriptId, scriptName);
+  }
+
+  _showNameInputDialog(scriptId, scriptName) {
+    const { width, height } = this.cameras.main;
+    const scale = Math.min(width / GAME.WIDTH, height / GAME.HEIGHT);
+
+    // ★ 先彻底清理所有可能的残留 DOM input（包括上一轮的）
+    this._cleanupNameInput();
+
+    // Remove existing name dialog if any
+    if (this._nameDialogContainer) {
+      this._nameDialogContainer.destroy(true);
+      this._nameDialogContainer = null;
+    }
+
+    const dW = Math.round(380 * scale), dH = Math.round(220 * scale);
+    const dX = (width - dW) / 2, dY = (height - dH) / 2;
+    const container = this.add.container(0, 0).setDepth(300);
+    this._nameDialogContainer = container;
+    this._uiContainer.add(container);
+
+    const bg = this.add.graphics();
+    bg.fillStyle(0x0d0d1e, 0.97);
+    bg.fillRoundedRect(dX, dY, dW, dH, 10);
+    bg.lineStyle(1.5, 0xd4b896, 0.6);
+    bg.strokeRoundedRect(dX, dY, dW, dH, 10);
+    container.add(bg);
+
+    const fs = Math.round(16 * scale);
+    container.add(this.add.text(width / 2, dY + Math.round(30 * scale),
+      `开始「${scriptName}」`, {
+        fontFamily: '"KaiTi","SimSun",serif', fontSize: `${fs + 2}px`, color: '#d4b896',
+        wordWrap: { width: dW - Math.round(40 * scale), useAdvancedWrap: true },
+        align: 'center',
+      }).setOrigin(0.5));
+
+    container.add(this.add.text(width / 2, dY + Math.round(68 * scale), '请输入你的名字', {
+      fontFamily: '"Microsoft YaHei",sans-serif', fontSize: `${Math.round(14 * scale)}px`, color: '#887766',
+    }).setOrigin(0.5));
+
+    // ★ 计算 canvas 在视口中的实际位置（Phaser 缩放后 canvas 坐标 ≠ CSS 坐标）
+    const canvas = this.sys.game.canvas;
+    const canvasRect = canvas ? canvas.getBoundingClientRect() : { left: 0, top: 0, width, height };
+    const cwRatio = canvasRect.width / width;   // canvas CSS 宽 / 逻辑宽
+    const chRatio = canvasRect.height / height; // canvas CSS 高 / 逻辑高
+
+    const inputLeft = canvasRect.left + dX * cwRatio + dW * 0.15 * cwRatio;
+    const inputTop = canvasRect.top + dY * chRatio + dH * 0.44 * chRatio;
+    const inputW = dW * 0.7 * cwRatio;
+    const inputH = Math.round(38 * scale) * chRatio;
+
+    // DOM input (overlay on canvas)
+    const inputEl = document.createElement('input');
+    inputEl.type = 'text';
+    inputEl.value = '玩家';
+    inputEl.maxLength = 12;
+    inputEl.className = 'menu-name-input'; // ★ 添加 class 方便识别和清理
+    inputEl.style.cssText = `
+      position: fixed;
+      left: ${inputLeft}px;
+      top: ${inputTop}px;
+      width: ${Math.max(100, inputW)}px;
+      height: ${Math.max(26, inputH)}px;
+      background: #111122;
+      border: 1px solid #443322;
+      border-radius: 6px;
+      color: #d4b896;
+      font-size: ${Math.max(12, Math.round(15 * scale))}px;
+      font-family: "Microsoft YaHei", sans-serif;
+      text-align: center;
+      outline: none;
+      padding: 0 10px;
+      z-index: 9999;
+      box-sizing: border-box;
+    `;
+    document.body.appendChild(inputEl);
+    inputEl.focus();
+    inputEl.select();
+    this._activeInputEl = inputEl;
+
+    // Shared callback for both button click and Enter key
+    const doStartGame = () => {
+      const name = (inputEl.value || '玩家').trim() || '玩家';
+      inputEl.style.display = 'none';
+      inputEl.blur();
+      this._cleanupNameInput();
+      this._closeScriptSelector();
+      this._startNewGameWithScript(scriptId, name);
+    };
+
+    // Buttons — left: 开始游戏, right: 取消
+    const btnW = Math.round(130 * scale), btnH = Math.round(36 * scale);
+    const btnY = dY + dH - Math.round(34 * scale);
+    const margin = Math.round(20 * scale);
+    const confBtn = this._createStyledButton(
+      dX + margin, btnY, btnW, btnH,
+      '开始游戏', '#d4b896', doStartGame, 'left', scale
+    );
+    container.add(confBtn);
+
+    const cancelBtn = this._createStyledButton(
+      dX + dW - margin, btnY, btnW, btnH,
+      '取消', '#665544', () => {
+        this._cleanupNameInput();
+        container.destroy(true);
+        this._nameDialogContainer = null;
+      }, 'right', scale
+    );
+    container.add(cancelBtn);
+
+    inputEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        doStartGame();
+      }
+      if (e.key === 'Escape') {
+        this._cleanupNameInput();
+        container.destroy(true);
+        this._nameDialogContainer = null;
+      }
+    });
+  }
+
+  _cleanupNameInput() {
+    // 清理当前追踪的 DOM input
+    if (this._activeInputEl) {
+      try {
+        if (this._activeInputEl.parentNode) {
+          this._activeInputEl.parentNode.removeChild(this._activeInputEl);
+        }
+      } catch (_) { /* already removed */ }
+      this._activeInputEl = null;
+    }
+    // ★ 兜底：清理所有 class="menu-name-input" 的残留元素（防止引用丢失导致的 DOM 泄漏）
+    try {
+      const orphans = document.querySelectorAll('.menu-name-input');
+      orphans.forEach(el => {
+        if (el.parentNode) el.parentNode.removeChild(el);
+      });
+    } catch (_) { /* ignore */ }
+  }
+
+  _closeScriptSelector() {
+    if (this._nameDialogContainer) {
+      this._nameDialogContainer.destroy(true);
+      this._nameDialogContainer = null;
+    }
+    if (this._scriptSelectorContainer) {
+      this._scriptSelectorContainer.destroy(true);
+      this._scriptSelectorContainer = null;
+    }
+    if (this._scriptWheelHandler) {
+      this.input.off('wheel', this._scriptWheelHandler);
+      this._scriptWheelHandler = null;
+    }
+    this._scriptScrollContainer = null;
+    this._scriptScrollY = 0;
+    this._scriptScrollMax = 0;
+    this._cleanupNameInput();
+    // Re-enable main buttons
+    if (this.allButtons) {
+      this.allButtons.forEach(btn => {
+        if (btn.list) btn.list.forEach(child => {
+          if (child.input) child.setInteractive({ useHandCursor: true });
+        });
+      });
+    }
+  }
+
+  _startNewGameWithScript(scriptId = 'liyuan_shengsi', playerName = '玩家') {
+    // Store selected script for GameScene
+    localStorage.setItem('__selected_script_id__', scriptId);
+    localStorage.setItem('__selected_player_name__', playerName);
     this.cameras.main.fadeOut(600, 0, 0, 0);
-    this.time.delayedCall(600, () => this.scene.start('GameScene'));
+    this.time.delayedCall(600, () => this.scene.start('GameScene', { scriptId, playerName }));
+  }
+
+  _openEditorWorkshop(view = 'scripts') {
+    this.editorPanel.show(view);
   }
 
   // ==================== 更新循环 ====================
 
   update() {
+    // ★ 编辑器面板可见时优先处理 ESC 关闭
+    if (this.editorPanel && this.editorPanel.isVisible()) {
+      if (this.keyEsc && Phaser.Input.Keyboard.JustDown(this.keyEsc)) {
+        this.editorPanel.hide();
+      }
+      return;
+    }
+
     if (!this.fallingParticles) return;
 
     const { width, height } = this.cameras.main;
