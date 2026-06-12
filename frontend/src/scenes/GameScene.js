@@ -94,6 +94,9 @@ export class GameScene extends Phaser.Scene {
 
   init(data) {
     this._savedSessionId = data?.savedSessionId || null;
+    // Support new script selection flow
+    this._selectedScriptId = data?.scriptId || localStorage.getItem('__selected_script_id__') || 'liyuan_shengsi';
+    this._selectedPlayerName = data?.playerName || localStorage.getItem('__selected_player_name__') || '玩家';
   }
 
   preload() {
@@ -379,7 +382,7 @@ export class GameScene extends Phaser.Scene {
         this._loadingHint = _showLoadingHint(this, '正在创建新的故事……');
       }, 400);
 
-      const gameState = await startGame('玩家');
+      const gameState = await startGame(this._selectedPlayerName || '玩家', this._selectedScriptId || 'liyuan_shengsi');
       clearTimeout(hintTimer);
       if (loadingHintShown) _hideLoadingHint(this._loadingHint);
       if (!gameState || !gameState.session_id) throw new Error('创建游戏失败');

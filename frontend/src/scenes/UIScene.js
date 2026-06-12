@@ -31,6 +31,7 @@ import { SaveManager } from './modules/SaveManager.js';
 import { EndingScreen } from './modules/EndingScreen.js';
 import { StageTransition } from './modules/StageTransition.js';
 import { RelationshipPanel } from './modules/RelationshipPanel.js';
+import { EditorPanel } from './modules/EditorPanel.js';
 import { toggleFullscreen, isFullscreen } from '../utils/DeviceDetector.js';
 
 export class UIScene extends Phaser.Scene {
@@ -82,6 +83,7 @@ export class UIScene extends Phaser.Scene {
     this.endingScreen = new EndingScreen(this);
     this.stageTransition = new StageTransition(this);
     this.relationshipPanel = new RelationshipPanel(this);
+    this.editorPanel = new EditorPanel(this);
 
     // ========== 构建 UI ==========
     this.dialogue.createPanel();
@@ -95,6 +97,7 @@ export class UIScene extends Phaser.Scene {
     this.endingScreen.createScreen();
     this.saveManager.createPauseMenu();
     this.relationshipPanel.createPanel();
+    this.editorPanel.createPanel();
 
     // ========== 响应式适配：窗口缩放时重定位所有 UI ==========
     this.scale.on('resize', this._onResize, this);
@@ -499,6 +502,8 @@ export class UIScene extends Phaser.Scene {
         gs.events.emit('chapter:new', chapterResult);
 
         await this.stageTransition.play(newStage);
+        // ★ 章节开始后，显示编辑器入口按钮（右下角悬浮）
+        this._showChapterEditButton(chapterResult.chapter_id, chapterResult.chapter_name);
         if (this.taskPanel) this.taskPanel.refreshContent();
       }
     } catch (e) {
@@ -548,6 +553,8 @@ export class UIScene extends Phaser.Scene {
         gs.events.emit('chapter:new', chapterResult);
 
         await this.stageTransition.play(newStage);
+        // ★ 章节开始后，显示编辑器入口按钮（右下角悬浮）
+        this._showChapterEditButton(chapterResult.chapter_id, chapterResult.chapter_name);
 
         if (this.sessionId) {
           // ★ 收集当前所有 NPC 和主角的实时位置
@@ -607,7 +614,128 @@ export class UIScene extends Phaser.Scene {
     if (mapped && mapped > this.currentStage) this.currentStage = mapped;
   }
 
-  // =========================== 章节加载过渡动画 ============================
+  // =========================== 章节编辑器入口按钮 ============================
+
+  /**
+   * 章节跳转后，在右下角显示一个悬浮的「编辑章节」按钮，
+   * 点击后在新窗口打开 editor.html 并跳转到章节详情编辑页。
+   * 按钮会在 12 秒后自动淡出消失。
+   */
+  _showChapterEditButton(chapterId, chapterName) {
+    if (!this.sessionId || !chapterId) return;
+
+    // 清理上一个按钮
+    if (this._chapterEditBtn) {
+      this._chapterEditBtn.destroy(true);
+      this._chapterEditBtn = null;
+    }
+    if (this._chapterEditBtnTimer) {
+      clearTimeout(this._chapterEditBtnTimer);
+      this._chapterEditBtnTimer = null;
+    }
+
+    const { width, height } = this.cameras.main;
+    const scale = Math.min(width / 1280, height / 720);
+    const btnW = Math.round(160 * scale);
+    const btnH = Math.round(36 * scale);
+    const margin = Math.round(16 * scale);
+    const bx = width - margin - btnW;
+    const by = height - margin - btnH - Math.round(60 * scale); // above bottom bar
+
+    const container = this.add.container(0, 0).setDepth(400).setAlpha(0);
+    this._chapterEditBtn = container;
+
+    // Button background
+    const bg = this.add.graphics();
+    const drawBg = (hover) => {
+      bg.clear();
+      bg.fillStyle(hover ? 0x1a1e3a : 0x111128, hover ? 0.95 : 0.85);
+      bg.fillRoundedRect(bx, by, btnW, btnH, 6);
+      bg.lineStyle(1, hover ? 0x7b8cde : 0x443388, hover ? 0.9 : 0.5);
+      bg.strokeRoundedRect(bx, by, btnW, btnH, 6);
+    };
+    drawBg(false);
+    container.add(bg);
+
+    const fs = Math.round(12 * scale);
+    const labelText = this.add.text(bx + btnW / 2, by + btnH / 2, '✎ 查看/编辑章节', {
+      fontFamily: '"Microsoft YaHei","PingFang SC",sans-serif',
+      fontSize: `${fs}px`,
+      color: '#8899dd',
+    }).setOrigin(0.5);
+    container.add(labelText);
+
+    // Hint below
+    const hintText = this.add.text(bx + btnW / 2, by + btnH + Math.round(4 * scale),
+      `「${chapterName || chapterId}」`, {
+        fontFamily: '"KaiTi","SimSun",serif',
+        fontSize: `${Math.round(10 * scale)}px`,
+        color: '#665544',
+      }).setOrigin(0.5, 0);
+    container.add(hintText);
+
+    // Interaction zone
+    const zone = this.add.zone(bx + btnW / 2, by + btnH / 2, btnW, btnH)
+      .setInteractive({ useHandCursor: true });
+    zone.on('pointerover', () => {
+      drawBg(true);
+      labelText.setColor('#c0c8ff');
+    });
+    zone.on('pointerout', () => {
+      drawBg(false);
+      labelText.setColor('#8899dd');
+    });
+    zone.on('pointerdown', () => {
+      this._openChapterEditor(chapterId);
+    });
+    container.add(zone);
+
+    // Fade in
+    this.tweens.add({
+      targets: container,
+      alpha: 1,
+      duration: 500,
+      ease: 'Sine.easeOut',
+    });
+
+    // Auto fade out after 12s
+    this._chapterEditBtnTimer = setTimeout(() => {
+      if (this._chapterEditBtn === container) {
+        this.tweens.add({
+          targets: container,
+          alpha: 0,
+          duration: 800,
+          ease: 'Sine.easeIn',
+          onComplete: () => container.destroy(true),
+        });
+        this._chapterEditBtn = null;
+      }
+    }, 12000);
+  }
+
+  /**
+   * 打开章节编辑器（内联 iframe 覆盖层），替代 window.open 弹窗。
+   */
+  _openChapterEditor(chapterId) {
+    if (!this.sessionId || !chapterId) return;
+    this.editorPanel.show('chapter', {
+      session_id: this.sessionId,
+      chapter_id: chapterId,
+    });
+  }
+
+  /**
+   * 打开骨架编辑器（内联 iframe 覆盖层）。
+   */
+  openSkeletonEditor(scriptId) {
+    if (!scriptId) return;
+    this.editorPanel.show('skeleton', { script_id: scriptId });
+  }
+
+  /** 打开剧本工坊（剧本库 + AI 创作） */
+  openEditorWorkshop() {
+    this.editorPanel.show('scripts');
+  }
 
   _showChapterLoading(title = '整理记忆，进入下一章……', hint = '故事正在推进……') {
     this._hideChapterLoading(true); // 先清理旧的
@@ -964,6 +1092,9 @@ export class UIScene extends Phaser.Scene {
   // =========================== ESC 键统一处理 ============================
 
   _handleEscPress() {
+    // 编辑器面板优先关闭
+    if (this.editorPanel && this.editorPanel.isVisible()) { this.editorPanel.hide(); return; }
+
     // 编辑模式下不处理 ESC，交给 GameScene 的编辑器
     if (this._isGameEditing()) return;
 
@@ -1000,10 +1131,22 @@ export class UIScene extends Phaser.Scene {
   // =========================== 更新循环 ============================
 
   update() {
+    // ★ 编辑器面板可见时，仅处理 ESC 关闭，其余输入全部阻断
+    if (this.editorPanel && this.editorPanel.isVisible()) {
+      if (Phaser.Input.Keyboard.JustDown(this.keyESC)) {
+        this.editorPanel.hide();
+      }
+      return;
+    }
+
     const editing = this._isGameEditing();
 
     // ESC 键 — 编辑模式下交给 GameScene 处理
     if (Phaser.Input.Keyboard.JustDown(this.keyESC)) {
+      if (this.editorPanel && this.editorPanel.isVisible()) {
+        this.editorPanel.hide();
+        return;
+      }
       if (!editing) this._handleEscPress();
       return;
     }
@@ -1106,5 +1249,12 @@ export class UIScene extends Phaser.Scene {
     if (this._fsResizeTimer) { this._fsResizeTimer.remove(false); this._fsResizeTimer = null; }
     if (this.freeInput) { this.freeInput.blur(); this.freeInput.style.display = 'none'; }
     if (this._domKeyHandler) { document.removeEventListener('keydown', this._domKeyHandler); this._domKeyHandler = null; }
+
+    // ★ 清理章节编辑器相关资源
+    if (this._chapterEditBtnTimer) { clearTimeout(this._chapterEditBtnTimer); this._chapterEditBtnTimer = null; }
+    if (this._chapterEditBtn) { this._chapterEditBtn.destroy(true); this._chapterEditBtn = null; }
+
+    // ★ 清理内联编辑器面板
+    if (this.editorPanel) { this.editorPanel.destroy(); this.editorPanel = null; }
   }
 }

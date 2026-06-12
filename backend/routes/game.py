@@ -1,5 +1,6 @@
 """
-游戏路由 — v2 新增 /api/scripts + /api/game/new。
+游戏路由 — v2 新增 /api/game/new。
+注意：/api/scripts 路由已移至 routes/script.py，此处不再重复注册。
 """
 
 import logging
@@ -69,18 +70,6 @@ async def start_game(req: StartGameRequest):
     }
     return response
 
-
-@router.get("/scripts")
-async def list_scripts():
-    """列出所有可用剧本。"""
-    from data.script_loader import ScriptLoader
-    loader = ScriptLoader()
-    try:
-        scripts = loader.list_scripts()
-        return {"scripts": scripts, "total": len(scripts)}
-    except Exception as e:
-        logger.error(f"[Scripts] list failed: {e}")
-        return {"scripts": [], "total": 0, "error": str(e)}
 
 
 @router.get("/game/{session_id}")

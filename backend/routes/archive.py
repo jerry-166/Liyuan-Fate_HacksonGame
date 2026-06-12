@@ -3,7 +3,8 @@
 """
 import logging
 import uuid
-from fastapi import APIRouter, HTTPException, Body
+from typing import Optional
+from fastapi import APIRouter, HTTPException, Body, Query
 from state.manager import get_session_manager
 
 router = APIRouter()
@@ -14,22 +15,36 @@ MAX_SAVE_SLOTS = 6
 
 
 @router.get("/sessions")
-async def list_sessions():
-    """列出所有历史存档（仅摘要，不含完整 NPC 状态）。"""
+async def list_sessions(script_id: Optional[str] = Query(None)):
+    """列出所有历史存档。支持按 script_id 过滤。"""
     manager = get_session_manager()
     sessions = manager.list_sessions()
 
+    # Filter by script_id if provided
+    if script_id:
+        sessions = [s for s in sessions if s.get("script_id") == script_id]
+
     # 补充章节信息
     from config import CHAPTER_TO_STAGE
+    from routes.script import _load_script_meta
     result = []
     for s in sessions:
         chapter_id = s.get("current_chapter_id") or ""
+        sid = s.get("script_id") or "liyuan_shengsi"
+        script_name = ""
+        try:
+            meta = _load_script_meta(sid)
+            script_name = meta.get("name", "")
+        except Exception:
+            script_name = sid
         result.append({
             "session_id": s["session_id"],
             "player_name": s["player_name"],
             "chapter_id": chapter_id,
             "stage": s["current_stage"],
             "game_ended": bool(s.get("game_ended", 0)),
+            "script_id": sid,
+            "script_name": script_name,
             "created_at": str(s.get("created_at", "")),
             "updated_at": str(s.get("updated_at", "")),
         })

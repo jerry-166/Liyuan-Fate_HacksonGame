@@ -1,0 +1,2264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>剧本工坊 · 梨园生死</title>
+<style>
+/* ═══════════════════════════════════════════════
+   CSS Variables & Reset
+═══════════════════════════════════════════════ */
+:root {
+  --bg-deep:       #0a0a14;
+  --bg-panel:      #111120;
+  --bg-card:       #181828;
+  --bg-hover:      #1e1e30;
+  --bg-active:     #222238;
+  --border:        rgba(180, 140, 90, 0.2);
+  --border-bright: rgba(212, 184, 150, 0.5);
+  --gold:          #d4b896;
+  --gold-dim:      #a08060;
+  --gold-bright:   #e8d4b0;
+  --accent:        #7b8cde;
+  --accent-dim:    #4a5aaa;
+  --green:         #5aaa7a;
+  --red:           #aa5a5a;
+  --amber:         #c4902a;
+  --text-primary:  #e0d0b8;
+  --text-secondary:#a09080;
+  --text-dim:      #605040;
+  --radius-sm:     6px;
+  --radius:        10px;
+  --radius-lg:     16px;
+  --shadow:        0 4px 24px rgba(0,0,0,0.5);
+  --shadow-lg:     0 8px 40px rgba(0,0,0,0.7);
+  --transition:    0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  --font-serif:    "KaiTi", "SimSun", "STKaiti", serif;
+  --font-sans:     "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
+  --font-mono:     "Consolas", "Courier New", monospace;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  width: 100%; height: 100%;
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.6;
+  overflow: hidden;
+}
+
+/* ═══════════════════════════════════════════════
+   Layout Shell
+═══════════════════════════════════════════════ */
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── Top Bar ── */
+#topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 20px;
+  height: 52px;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  z-index: 100;
+}
+
+#topbar .logo {
+  font-family: var(--font-serif);
+  font-size: 18px;
+  color: var(--gold);
+  letter-spacing: 4px;
+  flex-shrink: 0;
+}
+
+#topbar .sep { color: var(--border-bright); margin: 0 4px; }
+
+#topbar .page-title {
+  font-size: 13px;
+  color: var(--text-secondary);
+  flex-grow: 1;
+}
+
+#topbar .close-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: var(--transition);
+}
+#topbar .close-btn:hover {
+  border-color: var(--border-bright);
+  color: var(--gold);
+  background: var(--bg-hover);
+}
+
+/* ── Main Content ── */
+#main {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ── Left Sidebar Navigation ── */
+#sidebar {
+  width: 200px;
+  background: var(--bg-panel);
+  border-right: 1px solid var(--border);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 0;
+  gap: 4px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 20px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 13px;
+  transition: var(--transition);
+  border-left: 2px solid transparent;
+  user-select: none;
+}
+.nav-item:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+.nav-item.active {
+  color: var(--gold);
+  background: var(--bg-active);
+  border-left-color: var(--gold);
+}
+.nav-item .icon { font-size: 16px; flex-shrink: 0; }
+
+.nav-section-title {
+  padding: 16px 20px 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+/* ── Content Area ── */
+#content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+#content::-webkit-scrollbar { width: 6px; }
+#content::-webkit-scrollbar-track { background: transparent; }
+#content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+#content::-webkit-scrollbar-thumb:hover { background: var(--border-bright); }
+
+/* ── Right Inspector Panel ── */
+#inspector {
+  width: 320px;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#inspector-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  color: var(--text-secondary);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+#inspector-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+#inspector-body::-webkit-scrollbar { width: 4px; }
+#inspector-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* ═══════════════════════════════════════════════
+   Common Components
+═══════════════════════════════════════════════ */
+
+/* ── Section Headers ── */
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.section-title {
+  font-family: var(--font-serif);
+  font-size: 18px;
+  color: var(--gold);
+  letter-spacing: 2px;
+}
+
+.section-subtitle {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+
+/* ── Cards ── */
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  transition: var(--transition);
+}
+
+.card:hover { border-color: var(--border-bright); }
+.card.selected { border-color: var(--gold); background: var(--bg-active); }
+
+.card-title {
+  font-size: 14px;
+  color: var(--text-primary);
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+
+.card-subtitle {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* ── Buttons ── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: var(--transition);
+  font-family: var(--font-sans);
+  white-space: nowrap;
+}
+.btn:hover { border-color: var(--border-bright); background: var(--bg-hover); }
+.btn:active { transform: scale(0.98); }
+
+.btn-primary {
+  background: linear-gradient(135deg, #3a4080, #2a3060);
+  border-color: var(--accent);
+  color: #c0c8f0;
+}
+.btn-primary:hover {
+  background: linear-gradient(135deg, #4a50a0, #3a4080);
+  border-color: #9aa4f0;
+  color: #e0e8ff;
+}
+
+.btn-gold {
+  background: linear-gradient(135deg, #4a3820, #3a2810);
+  border-color: var(--gold-dim);
+  color: var(--gold);
+}
+.btn-gold:hover {
+  background: linear-gradient(135deg, #6a5030, #4a3820);
+  border-color: var(--gold);
+  color: var(--gold-bright);
+}
+
+.btn-success {
+  background: linear-gradient(135deg, #1a4030, #0f2820);
+  border-color: #3a7a5a;
+  color: var(--green);
+}
+.btn-success:hover {
+  background: linear-gradient(135deg, #2a5040, #1a4030);
+  border-color: var(--green);
+}
+
+.btn-danger {
+  background: transparent;
+  border-color: #6a3030;
+  color: #aa6060;
+}
+.btn-danger:hover {
+  background: #2a1010;
+  border-color: var(--red);
+  color: #cc8080;
+}
+
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+.btn-icon { padding: 6px; min-width: 32px; justify-content: center; }
+
+/* ── Form Elements ── */
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.form-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.form-label .required { color: var(--amber); }
+
+.form-input,
+.form-textarea,
+.form-select {
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  padding: 8px 12px;
+  transition: var(--transition);
+  outline: none;
+  width: 100%;
+}
+.form-input:focus,
+.form-textarea:focus,
+.form-select:focus {
+  border-color: var(--accent-dim);
+  box-shadow: 0 0 0 2px rgba(123, 140, 222, 0.15);
+}
+
+.form-textarea {
+  resize: vertical;
+  min-height: 80px;
+  line-height: 1.6;
+}
+
+.form-select option {
+  background: var(--bg-panel);
+}
+
+/* ── Tags / Badges ── */
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 11px;
+  border: 1px solid;
+}
+.tag-gold  { color: var(--gold-dim); border-color: rgba(180,140,90,0.3); background: rgba(180,140,90,0.08); }
+.tag-blue  { color: #8899dd; border-color: rgba(100,120,200,0.3); background: rgba(100,120,200,0.08); }
+.tag-green { color: var(--green); border-color: rgba(90,170,122,0.3); background: rgba(90,170,122,0.08); }
+.tag-amber { color: var(--amber); border-color: rgba(196,144,42,0.3); background: rgba(196,144,42,0.08); }
+.tag-red   { color: var(--red); border-color: rgba(170,90,90,0.3); background: rgba(170,90,90,0.08); }
+
+/* ── Dividers ── */
+.divider {
+  height: 1px;
+  background: var(--border);
+  margin: 16px 0;
+}
+
+/* ── Toast Notification ── */
+#toast-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 9999;
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  font-size: 13px;
+  color: var(--text-primary);
+  animation: toastIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: auto;
+  min-width: 240px;
+  max-width: 360px;
+}
+.toast.success { border-color: #3a7a5a; }
+.toast.error   { border-color: #7a3a3a; }
+.toast.info    { border-color: var(--accent-dim); }
+@keyframes toastIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: none; } }
+@keyframes toastOut { to { opacity: 0; transform: translateX(20px); } }
+
+/* ── Loading Overlay ── */
+#loading-overlay {
+  position: fixed; inset: 0;
+  background: rgba(10,10,20,0.85);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  z-index: 8888;
+  backdrop-filter: blur(4px);
+  display: none;
+}
+
+.spinner {
+  width: 40px; height: 40px;
+  border: 3px solid var(--border);
+  border-top-color: var(--gold);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.loading-text { color: var(--text-secondary); font-size: 14px; }
+
+/* ── Modal ── */
+.modal-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5000;
+  backdrop-filter: blur(4px);
+  animation: fadeIn 0.2s ease;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.modal {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  width: min(560px, calc(100vw - 40px));
+  max-height: calc(100vh - 80px);
+  display: flex;
+  flex-direction: column;
+  animation: modalIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+@keyframes modalIn { from { opacity: 0; transform: scale(0.95) translateY(10px); } to { opacity: 1; transform: none; } }
+
+.modal-header {
+  padding: 20px 24px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+.modal-title { font-family: var(--font-serif); font-size: 18px; color: var(--gold); letter-spacing: 2px; }
+.modal-close {
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 18px;
+  transition: var(--transition);
+  border: none; background: transparent;
+}
+.modal-close:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+.modal-body {
+  padding: 20px 24px;
+  overflow-y: auto;
+  flex: 1;
+}
+.modal-body::-webkit-scrollbar { width: 4px; }
+.modal-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.modal-footer {
+  padding: 16px 24px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+/* ═══════════════════════════════════════════════
+   View: Script Library (scripts)
+═══════════════════════════════════════════════ */
+
+#view-scripts { display: none; flex-direction: column; gap: 20px; }
+
+.script-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.script-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  cursor: pointer;
+  transition: var(--transition);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.script-card:hover {
+  border-color: var(--border-bright);
+  background: var(--bg-hover);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow);
+}
+.script-card.active-script {
+  border-color: var(--gold);
+  background: var(--bg-active);
+}
+.script-card .sc-name {
+  font-family: var(--font-serif);
+  font-size: 16px;
+  color: var(--gold);
+  letter-spacing: 2px;
+}
+.script-card .sc-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.script-card .sc-meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.script-card .sc-active-badge {
+  position: absolute;
+  top: 12px; right: 12px;
+  padding: 2px 8px;
+  background: rgba(212, 184, 150, 0.15);
+  border: 1px solid var(--gold-dim);
+  border-radius: 20px;
+  font-size: 10px;
+  color: var(--gold-dim);
+}
+
+.add-script-card {
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  cursor: pointer;
+  transition: var(--transition);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--text-dim);
+  font-size: 14px;
+  min-height: 120px;
+}
+.add-script-card:hover {
+  border-color: var(--gold-dim);
+  color: var(--gold-dim);
+  background: rgba(180,140,90,0.04);
+}
+
+/* ═══════════════════════════════════════════════
+   View: AI Generate (generate)
+═══════════════════════════════════════════════ */
+
+#view-generate { display: none; flex-direction: column; gap: 20px; }
+
+.generate-layout {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 20px;
+  align-items: start;
+}
+
+.style-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.style-chip {
+  padding: 5px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.style-chip:hover { border-color: var(--border-bright); color: var(--text-primary); }
+.style-chip.selected {
+  border-color: var(--gold-dim);
+  background: rgba(180,140,90,0.1);
+  color: var(--gold);
+}
+
+.chapter-count-selector {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.chapter-count-btn {
+  width: 32px; height: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--transition);
+}
+.chapter-count-btn:hover { border-color: var(--border-bright); }
+.chapter-count-display {
+  font-size: 22px;
+  font-family: var(--font-mono);
+  color: var(--gold);
+  min-width: 40px;
+  text-align: center;
+}
+
+.preview-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  position: sticky;
+  top: 0;
+}
+
+.preview-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 300px;
+  gap: 12px;
+  color: var(--text-dim);
+}
+.preview-placeholder .ph-icon { font-size: 48px; opacity: 0.3; }
+
+.ai-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  background: var(--bg-deep);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+.ai-progress-step {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+.ai-progress-step.active { color: var(--gold); }
+.ai-progress-step.done   { color: var(--green); }
+.step-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--text-dim);
+  flex-shrink: 0;
+}
+.step-dot.active { background: var(--gold); animation: pulse 1s infinite; }
+.step-dot.done   { background: var(--green); }
+@keyframes pulse { 0%,100%{ opacity:1; } 50%{ opacity:0.4; } }
+
+/* ═══════════════════════════════════════════════
+   View: Skeleton Editor (skeleton)
+═══════════════════════════════════════════════ */
+
+#view-skeleton { display: none; flex-direction: column; gap: 20px; }
+
+.worldview-editor {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+}
+
+.chapter-skeleton-list { display: flex; flex-direction: column; gap: 10px; }
+
+.chapter-skeleton-item {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: var(--transition);
+}
+.chapter-skeleton-item:hover { border-color: var(--border-bright); }
+.chapter-skeleton-item.expanded { border-color: var(--gold-dim); }
+
+.csi-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  cursor: pointer;
+  user-select: none;
+}
+.csi-order {
+  width: 28px; height: 28px;
+  border-radius: 50%;
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+.chapter-skeleton-item.expanded .csi-order {
+  border-color: var(--gold-dim);
+  color: var(--gold);
+}
+
+.csi-info { flex: 1; }
+.csi-name { font-size: 14px; color: var(--text-primary); font-weight: 500; }
+.csi-desc { font-size: 12px; color: var(--text-dim); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.csi-chevron { color: var(--text-dim); font-size: 12px; transition: transform var(--transition); }
+.chapter-skeleton-item.expanded .csi-chevron { transform: rotate(90deg); }
+
+.csi-body {
+  display: none;
+  padding: 0 16px 16px;
+  border-top: 1px solid var(--border);
+}
+.chapter-skeleton-item.expanded .csi-body { display: block; }
+
+.csi-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.color-tone-select { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.ct-option {
+  width: 24px; height: 24px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: var(--transition);
+}
+.ct-option:hover, .ct-option.selected { border-color: white; transform: scale(1.15); }
+
+/* ═══════════════════════════════════════════════
+   View: Chapter Detail Editor (chapter)
+═══════════════════════════════════════════════ */
+
+#view-chapter { display: none; flex-direction: column; gap: 20px; }
+
+.chapter-info-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.subtask-list { display: flex; flex-direction: column; gap: 8px; }
+
+.subtask-item {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: var(--transition);
+}
+.subtask-item:hover { border-color: var(--border-bright); }
+
+.sti-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+}
+
+.sti-mode-badge {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  background: var(--bg-deep);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.sti-status {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-locked    { background: var(--text-dim); }
+.status-active    { background: var(--amber); animation: pulse 1s infinite; }
+.status-in_progress { background: var(--accent); animation: pulse 1s infinite; }
+.status-completed { background: var(--green); }
+
+.sti-title { font-size: 14px; color: var(--text-primary); flex: 1; }
+.sti-edit-btn { opacity: 0; transition: var(--transition); }
+.subtask-item:hover .sti-edit-btn { opacity: 1; }
+
+.inline-editor {
+  background: var(--bg-deep);
+  border-top: 1px solid var(--border);
+  padding: 12px 16px;
+  display: none;
+}
+.inline-editor.open { display: block; }
+
+.inject-context-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  border-left: 3px solid var(--accent-dim);
+}
+
+.npc-snapshots { display: flex; gap: 10px; flex-wrap: wrap; }
+
+.npc-snap-card {
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  min-width: 130px;
+}
+.npc-snap-name { font-size: 13px; color: var(--text-primary); }
+.npc-snap-role { font-size: 11px; color: var(--text-dim); }
+.relationship-bar {
+  height: 3px;
+  background: var(--bg-panel);
+  border-radius: 2px;
+  margin-top: 6px;
+  overflow: hidden;
+}
+.relationship-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+
+/* ═══════════════════════════════════════════════
+   Misc: Empty States
+═══════════════════════════════════════════════ */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  gap: 12px;
+  color: var(--text-dim);
+}
+.empty-state .es-icon { font-size: 48px; opacity: 0.3; }
+.empty-state .es-text { font-size: 14px; }
+
+/* ─── color tones ─── */
+.ct-amber  { background: #c4902a; }
+.ct-crimson { background: #aa3030; }
+.ct-teal   { background: #2a8080; }
+.ct-violet { background: #7a50a0; }
+.ct-slate  { background: #607090; }
+
+/* ── Scrollbar global ── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- Top Bar -->
+  <header id="topbar">
+    <div class="logo">剧本工坊</div>
+    <div class="sep">·</div>
+    <div class="page-title" id="page-title">梨园生死</div>
+    <div style="flex:1"></div>
+    <button class="close-btn" onclick="handleClose()">✕ 关闭</button>
+  </header>
+
+  <div id="main">
+
+    <!-- Sidebar -->
+    <nav id="sidebar">
+      <div class="nav-section-title">剧本管理</div>
+      <div class="nav-item active" data-view="scripts" onclick="switchView('scripts')">
+        <span class="icon">📚</span> 剧本库
+      </div>
+      <div class="nav-item" data-view="generate" onclick="switchView('generate')">
+        <span class="icon">✨</span> AI 创作
+      </div>
+
+      <div class="nav-section-title" style="margin-top:8px">当前游戏</div>
+      <div class="nav-item" data-view="skeleton" id="nav-skeleton" onclick="switchView('skeleton')">
+        <span class="icon">🗂</span> 骨架编辑
+      </div>
+      <div class="nav-item" data-view="chapter" id="nav-chapter" onclick="switchView('chapter')">
+        <span class="icon">✏️</span> 章节详情
+      </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main id="content">
+
+      <!-- ══ View: Script Library ══ -->
+      <div id="view-scripts" style="display:flex">
+        <div class="section-header">
+          <div>
+            <div class="section-title">剧本库</div>
+            <div class="section-subtitle">选择一个剧本开始新游戏，或使用 AI 创作全新世界</div>
+          </div>
+          <div style="display:flex;gap:10px">
+            <button class="btn btn-gold" onclick="switchView('generate')">✨ AI 创作新剧本</button>
+            <button class="btn" onclick="loadScripts()">↻ 刷新</button>
+          </div>
+        </div>
+
+        <div id="script-grid" class="script-grid">
+          <div class="empty-state">
+            <div class="es-icon">🎭</div>
+            <div class="es-text">加载剧本列表中……</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ View: AI Generate ══ -->
+      <div id="view-generate">
+        <div class="section-header">
+          <div>
+            <div class="section-title">AI 创作剧本</div>
+            <div class="section-subtitle">描述你的创作主题，AI 将生成完整的微剧本骨架</div>
+          </div>
+          <button class="btn btn-gold" id="gen-btn" onclick="startGenerate()">✨ 开始生成</button>
+        </div>
+
+        <div class="generate-layout">
+          <div style="display:flex;flex-direction:column;gap:16px">
+            <div class="card">
+              <div class="form-group">
+                <label class="form-label">主题描述 <span class="required">*</span></label>
+                <input class="form-input" id="gen-theme" placeholder="如：赛博朋克城市中的人工智能叛逃案" style="font-size:14px">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">叙事风格</label>
+                <div class="style-chips" id="style-chips">
+                  <div class="style-chip selected" onclick="selectStyle(this,'悬疑推理')">悬疑推理</div>
+                  <div class="style-chip" onclick="selectStyle(this,'浪漫爱情')">浪漫爱情</div>
+                  <div class="style-chip" onclick="selectStyle(this,'武侠热血')">武侠热血</div>
+                  <div class="style-chip" onclick="selectStyle(this,'科幻冒险')">科幻冒险</div>
+                  <div class="style-chip" onclick="selectStyle(this,'历史传奇')">历史传奇</div>
+                  <div class="style-chip" onclick="selectStyle(this,'都市现实')">都市现实</div>
+                  <div class="style-chip" onclick="selectStyle(this,'奇幻异世界')">奇幻异世界</div>
+                  <div class="style-chip" onclick="selectStyle(this,'恐怖惊悚')">恐怖惊悚</div>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">章节数量</label>
+                <div class="chapter-count-selector">
+                  <button class="chapter-count-btn" onclick="changeChapterCount(-1)">−</button>
+                  <div class="chapter-count-display" id="chapter-count-display">5</div>
+                  <button class="chapter-count-btn" onclick="changeChapterCount(1)">+</button>
+                  <span style="font-size:12px;color:var(--text-dim)">(2–8 章)</span>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">主角背景（可选）</label>
+                <input class="form-input" id="gen-protagonist" placeholder="如：失忆的前特工，现在在小镇开修表店">
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">额外备注（可选）</label>
+                <textarea class="form-textarea" id="gen-notes" placeholder="特别要求、禁止元素、参考作品等…" style="min-height:60px"></textarea>
+              </div>
+            </div>
+
+            <!-- Progress Steps (hidden by default) -->
+            <div id="gen-progress" style="display:none">
+              <div class="ai-progress">
+                <div class="ai-progress-step" id="step-1">
+                  <div class="step-dot" id="dot-1"></div> 正在构思世界观与人物…
+                </div>
+                <div class="ai-progress-step" id="step-2">
+                  <div class="step-dot" id="dot-2"></div> 设计章节骨架与情节钩子…
+                </div>
+                <div class="ai-progress-step" id="step-3">
+                  <div class="step-dot" id="dot-3"></div> 生成 NPC 人设与子任务…
+                </div>
+                <div class="ai-progress-step" id="step-4">
+                  <div class="step-dot" id="dot-4"></div> 写入剧本文件…
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Preview Panel -->
+          <div class="preview-panel" id="gen-preview">
+            <div id="preview-content">
+              <div class="preview-placeholder">
+                <div class="ph-icon">🎭</div>
+                <div style="font-size:13px;text-align:center">
+                  填写主题后点击<br>「开始生成」预览剧本
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ View: Skeleton Editor ══ -->
+      <div id="view-skeleton">
+        <div class="section-header">
+          <div>
+            <div class="section-title">骨架编辑</div>
+            <div class="section-subtitle" id="skeleton-subtitle">修改章节标题、描述、目标等信息</div>
+          </div>
+          <div style="display:flex;gap:10px">
+            <button class="btn" onclick="loadSkeleton()">↻ 重新加载</button>
+            <button class="btn btn-success" onclick="saveSkeleton()">✓ 保存骨架</button>
+          </div>
+        </div>
+
+        <!-- Worldview Editor -->
+        <div class="worldview-editor" id="worldview-section" style="display:none">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <div style="font-size:13px;color:var(--text-secondary)">⊕ 世界观设定</div>
+            <button class="btn btn-sm" onclick="toggleWorldviewEdit()">编辑</button>
+          </div>
+          <div id="worldview-display" style="font-size:13px;color:var(--text-secondary);line-height:1.8"></div>
+          <textarea class="form-textarea" id="worldview-input" style="display:none;margin-top:8px;min-height:100px"></textarea>
+        </div>
+
+        <!-- Chapter List -->
+        <div class="chapter-skeleton-list" id="skeleton-chapter-list">
+          <div class="empty-state">
+            <div class="es-icon">🗂</div>
+            <div class="es-text">请先在剧本库中选择一个剧本</div>
+          </div>
+        </div>
+
+        <!-- ★ 使用此剧本的游戏记录 -->
+        <div id="script-sessions-section" style="margin-top:20px;display:none">
+          <div class="divider"></div>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <div style="font-size:14px;color:var(--gold);font-family:var(--font-serif);letter-spacing:2px">游戏记录</div>
+            <button class="btn btn-sm" onclick="loadScriptSessions()">↻ 刷新</button>
+          </div>
+          <div id="script-sessions-list" style="font-size:12px;color:var(--text-dim)">加载中…</div>
+        </div>
+      </div>
+
+      <!-- ══ View: Chapter Detail ══ -->
+      <div id="view-chapter">
+        <div class="section-header">
+          <div>
+            <div class="section-title">章节详情编辑</div>
+            <div class="section-subtitle" id="chapter-subtitle">编辑当前章节的任务和子任务</div>
+          </div>
+          <div style="display:flex;gap:10px">
+            <button class="btn" id="btn-regen" onclick="regenerateChapter()" style="display:none">🔄 重新生成</button>
+            <button class="btn btn-success" id="btn-save-chapter" onclick="saveChapterDetail()">✓ 保存并注入</button>
+          </div>
+        </div>
+
+        <!-- Chapter Info Bar -->
+        <div class="chapter-info-bar" id="chapter-info-bar" style="display:none">
+          <div id="ci-color-dot" style="width:12px;height:12px;border-radius:50%;flex-shrink:0;"></div>
+          <div style="flex:1">
+            <div id="ci-chapter-name" style="font-size:15px;color:var(--gold);font-family:var(--font-serif)"></div>
+            <div id="ci-chapter-desc" style="font-size:12px;color:var(--text-secondary);margin-top:2px"></div>
+          </div>
+          <div id="ci-status" style="font-size:12px"></div>
+        </div>
+
+        <!-- Chapter Description Edit -->
+        <div class="card" id="chapter-desc-card" style="display:none">
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label">章节描述（会注入 NPC 对话上下文）</label>
+            <textarea class="form-textarea" id="chapter-desc-input" style="min-height:80px"></textarea>
+          </div>
+        </div>
+
+        <!-- NPC Snapshots -->
+        <div id="npc-snapshot-section" style="display:none">
+          <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px">相关 NPC 状态</div>
+          <div class="npc-snapshots" id="npc-snapshots"></div>
+        </div>
+
+        <!-- Sub Tasks -->
+        <div id="subtask-section" style="display:none">
+          <div style="font-size:13px;color:var(--text-secondary);margin-bottom:12px">
+            子任务列表 <span id="subtask-count" style="font-size:12px;color:var(--text-dim)"></span>
+          </div>
+          <div class="subtask-list" id="subtask-list"></div>
+        </div>
+
+        <!-- Inject Context -->
+        <div class="inject-context-panel" id="inject-section" style="display:none">
+          <div style="font-size:13px;color:var(--accent);margin-bottom:8px">
+            💡 额外上下文注入
+            <span style="font-size:11px;color:var(--text-dim);margin-left:6px">（注入到下一章节的 AI 生成 prompt 中）</span>
+          </div>
+          <textarea class="form-textarea" id="inject-context-input" placeholder="描述这一章实际发生了什么，玩家做了什么决定，有哪些意外情节…" style="min-height:80px"></textarea>
+        </div>
+
+        <!-- Empty State -->
+        <div class="empty-state" id="chapter-empty-state">
+          <div class="es-icon">✏️</div>
+          <div class="es-text">请先从游戏中打开章节编辑</div>
+          <div style="font-size:12px;color:var(--text-dim);margin-top:4px">或在下方输入游戏会话 ID 和章节 ID</div>
+          <div style="display:flex;gap:10px;margin-top:16px">
+            <input class="form-input" id="manual-session-id" placeholder="游戏会话 ID" style="width:200px">
+            <input class="form-input" id="manual-chapter-id" placeholder="章节 ID" style="width:160px">
+            <button class="btn btn-primary" onclick="loadChapterManual()">加载</button>
+          </div>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- Inspector Panel -->
+    <aside id="inspector">
+      <div id="inspector-header">
+        <span>详情</span>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:12px;color:var(--text-dim)" id="inspector-status">就绪</span>
+          <button onclick="clearInspector()" id="inspector-clear-btn" style="
+            display:none;background:none;border:1px solid rgba(180,140,90,0.3);color:#a09080;
+            border-radius:3px;cursor:pointer;font-size:11px;padding:2px 8px;
+          " title="清除选择">✕ 清除</button>
+        </div>
+      </div>
+      <div id="inspector-body">
+        <div style="color:var(--text-dim);font-size:12px;padding:20px 0;text-align:center">
+          选择一个项目查看详情
+        </div>
+      </div>
+    </aside>
+
+  </div>
+</div>
+
+<!-- Loading Overlay -->
+<div id="loading-overlay">
+  <div class="spinner"></div>
+  <div class="loading-text" id="loading-text">处理中…</div>
+</div>
+
+<!-- Toast Container -->
+<div id="toast-container"></div>
+
+<!-- Confirm Dialog -->
+<div id="confirm-dialog" style="display:none" class="modal-overlay" onclick="closeConfirm()">
+  <div class="modal" style="max-width:400px" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div class="modal-title" id="confirm-title">确认操作</div>
+    </div>
+    <div class="modal-body">
+      <div id="confirm-message" style="font-size:14px;line-height:1.8"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeConfirm()">取消</button>
+      <button class="btn btn-success" id="confirm-ok-btn">确认</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════
+// State
+// ═══════════════════════════════════════════════
+const state = {
+  currentView: 'scripts',
+  sessionId: null,
+  chapterId: null,
+  scriptId: null,
+  scripts: [],
+  skeleton: null,
+  chapterDetail: null,
+  generating: false,
+  selectedStyle: '悬疑推理',
+  chapterCount: 5,
+  skeletonDirty: false,
+  chapterDetailDirty: false,
+};
+
+// API base URL — same origin as game
+const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  ? `http://${window.location.hostname}:8000/api`
+  : '/api';
+
+// ═══════════════════════════════════════════════
+// Init — Parse URL params / postMessage context
+// ═══════════════════════════════════════════════
+function init() {
+  // Parse query params
+  const params = new URLSearchParams(window.location.search);
+  state.sessionId  = params.get('session_id') || null;
+  state.chapterId  = params.get('chapter_id') || null;
+  state.scriptId   = params.get('script_id') || null;
+  const initView   = params.get('view') || 'scripts';
+
+  // If we have session+chapter, auto-switch to chapter view
+  if (state.sessionId && state.chapterId) {
+    switchView('chapter');
+    loadChapterDetail(state.sessionId, state.chapterId);
+  } else if (state.scriptId) {
+    switchView('skeleton');
+    loadSkeleton();
+  } else {
+    switchView(initView);
+    loadScripts();
+  }
+
+  // Listen for postMessage from parent game
+  window.addEventListener('message', handleMessage);
+
+  // Update page title
+  updatePageTitle();
+}
+
+function handleMessage(event) {
+  const data = event.data;
+  if (!data || typeof data !== 'object') return;
+
+  switch (data.type) {
+    case 'OPEN_CHAPTER_EDIT':
+      state.sessionId = data.session_id;
+      state.chapterId = data.chapter_id;
+      switchView('chapter');
+      loadChapterDetail(data.session_id, data.chapter_id);
+      break;
+    case 'OPEN_SKELETON_EDIT':
+      state.scriptId  = data.script_id;
+      state.sessionId = data.session_id || null;
+      switchView('skeleton');
+      loadSkeleton();
+      break;
+    case 'OPEN_GENERATE':
+      switchView('generate');
+      break;
+    case 'OPEN_SCRIPTS':
+      switchView('scripts');
+      loadScripts();
+      break;
+  }
+}
+
+// ═══════════════════════════════════════════════
+// Navigation
+// ═══════════════════════════════════════════════
+function switchView(view) {
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('[id^="view-"]').forEach(el => { el.style.display = 'none'; });
+
+  state.currentView = view;
+  const viewEl = document.getElementById(`view-${view}`);
+  if (viewEl) viewEl.style.display = 'flex';
+
+  const navEl = document.querySelector(`[data-view="${view}"]`);
+  if (navEl) navEl.classList.add('active');
+
+  updatePageTitle();
+}
+
+function updatePageTitle() {
+  const titles = {
+    scripts: '剧本库',
+    generate: 'AI 创作新剧本',
+    skeleton: '骨架编辑',
+    chapter: '章节详情编辑',
+  };
+  document.getElementById('page-title').textContent = titles[state.currentView] || '';
+}
+
+function handleClose() {
+  // In iframe mode, notify parent to hide the panel
+  const embedded = new URLSearchParams(window.location.search).get('embedded');
+  if (embedded === '1' || window !== window.parent) {
+    window.parent.postMessage({ type: 'EDITOR_CLOSED' }, '*');
+    return;
+  }
+  // Legacy: notify parent via opener
+  if (window.opener) {
+    window.opener.postMessage({ type: 'EDITOR_CLOSED' }, '*');
+    window.close();
+  } else {
+    window.history.back();
+  }
+}
+
+// ═══════════════════════════════════════════════
+// API Helpers
+// ═══════════════════════════════════════════════
+async function apiFetch(path, options = {}) {
+  const url = `${API_BASE}${path}`;
+  const res = await fetch(url, {
+    headers: { 'Content-Type': 'application/json', ...options.headers },
+    ...options,
+  });
+  if (!res.ok) {
+    let errMsg = `HTTP ${res.status}`;
+    try { const j = await res.json(); errMsg = j.detail?.message || j.message || errMsg; } catch {}
+    throw new Error(errMsg);
+  }
+  return res.json();
+}
+
+// ═══════════════════════════════════════════════
+// Toast Notifications
+// ═══════════════════════════════════════════════
+function toast(msg, type = 'info', duration = 3000) {
+  const icons = { success: '✓', error: '✕', info: 'ℹ' };
+  const c = document.getElementById('toast-container');
+  const t = document.createElement('div');
+  t.className = `toast ${type}`;
+  t.innerHTML = `<span style="font-size:16px">${icons[type]||icons.info}</span> ${msg}`;
+  c.appendChild(t);
+  setTimeout(() => {
+    t.style.animation = 'toastOut 0.3s ease forwards';
+    setTimeout(() => t.remove(), 300);
+  }, duration);
+}
+
+// ═══════════════════════════════════════════════
+// Loading
+// ═══════════════════════════════════════════════
+function showLoading(msg = '处理中…') {
+  const el = document.getElementById('loading-overlay');
+  document.getElementById('loading-text').textContent = msg;
+  el.style.display = 'flex';
+}
+function hideLoading() {
+  document.getElementById('loading-overlay').style.display = 'none';
+}
+
+// ═══════════════════════════════════════════════
+// Confirm Dialog
+// ═══════════════════════════════════════════════
+let _confirmResolve = null;
+function showConfirm(title, message) {
+  return new Promise(resolve => {
+    _confirmResolve = resolve;
+    document.getElementById('confirm-title').textContent = title;
+    document.getElementById('confirm-message').innerHTML = message;
+    document.getElementById('confirm-dialog').style.display = 'flex';
+    document.getElementById('confirm-ok-btn').onclick = () => { resolve(true); closeConfirm(); };
+  });
+}
+function closeConfirm() {
+  document.getElementById('confirm-dialog').style.display = 'none';
+  if (_confirmResolve) { _confirmResolve(false); _confirmResolve = null; }
+}
+
+// ═══════════════════════════════════════════════
+// View: Script Library
+// ═══════════════════════════════════════════════
+async function loadScripts() {
+  const grid = document.getElementById('script-grid');
+  grid.innerHTML = `<div class="empty-state"><div class="es-icon">⌛</div><div class="es-text">加载中…</div></div>`;
+  try {
+    const data = await apiFetch('/scripts');
+    state.scripts = data.scripts || [];
+    renderScriptGrid();
+  } catch (e) {
+    grid.innerHTML = `<div class="empty-state"><div class="es-icon">⚠️</div><div class="es-text">加载失败: ${e.message}</div></div>`;
+    toast(`加载剧本列表失败: ${e.message}`, 'error');
+  }
+}
+
+function renderScriptGrid() {
+  const grid = document.getElementById('script-grid');
+  if (state.scripts.length === 0) {
+    grid.innerHTML = `<div class="empty-state"><div class="es-icon">🎭</div><div class="es-text">暂无剧本，使用 AI 创作一个吧</div></div>`;
+    return;
+  }
+
+  grid.innerHTML = state.scripts.map(s => {
+    const isActive = state.scriptId === s.script_id || s.script_id === 'liyuan_shengsi';
+    return `
+    <div class="script-card ${isActive ? 'active-script' : ''}" onclick="selectScript('${s.script_id}')">
+      ${isActive ? `<div class="sc-active-badge">当前</div>` : ''}
+      <div class="sc-name">${s.name}</div>
+      <div class="sc-desc">${s.description || '暂无描述'}</div>
+      <div class="sc-meta">
+        <span class="tag tag-gold">${s.chapter_count} 章</span>
+        <span class="tag tag-blue">${s.npc_count} NPC</span>
+        ${s.author ? `<span class="tag">${s.author}</span>` : ''}
+      </div>
+    </div>`;
+  }).join('') + `
+    <div class="add-script-card" onclick="switchView('generate')">
+      <span style="font-size:24px">✨</span> AI 创作新剧本
+    </div>`;
+}
+
+function selectScript(scriptId) {
+  state.scriptId = scriptId;
+  showInspector('script', scriptId);
+
+  // Highlight
+  document.querySelectorAll('.script-card').forEach(el => el.classList.remove('active-script'));
+  event.currentTarget.classList.add('active-script');
+}
+
+function clearInspector() {
+  state.scriptId = null;
+  document.getElementById('inspector-status').textContent = '就绪';
+  document.getElementById('inspector-clear-btn').style.display = 'none';
+  document.getElementById('inspector-body').innerHTML = `
+    <div style="color:var(--text-dim);font-size:12px;padding:20px 0;text-align:center">
+      选择一个项目查看详情
+    </div>`;
+  document.querySelectorAll('.script-card').forEach(el => el.classList.remove('active-script'));
+}
+
+function showInspector(type, id) {
+  const body = document.getElementById('inspector-body');
+  document.getElementById('inspector-status').textContent = '已选中';
+  document.getElementById('inspector-clear-btn').style.display = 'inline-block';
+
+  if (type === 'script') {
+    const s = state.scripts.find(x => x.script_id === id);
+    if (!s) return;
+    body.innerHTML = `
+      <div style="margin-bottom:16px">
+        <div style="font-family:var(--font-serif);font-size:20px;color:var(--gold);letter-spacing:3px;margin-bottom:8px">${s.name}</div>
+        <div style="font-size:12px;color:var(--text-secondary);line-height:1.8">${s.description || '暂无描述'}</div>
+      </div>
+      <div class="divider"></div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div class="form-group" style="margin-bottom:0">
+          <div style="font-size:11px;color:var(--text-dim)">脚本 ID</div>
+          <div style="font-family:var(--font-mono);font-size:12px;color:var(--accent);margin-top:2px">${s.script_id}</div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div><div style="font-size:11px;color:var(--text-dim)">章节数</div><div style="font-size:18px;color:var(--gold);font-family:var(--font-mono)">${s.chapter_count}</div></div>
+          <div><div style="font-size:11px;color:var(--text-dim)">NPC 数</div><div style="font-size:18px;color:var(--gold);font-family:var(--font-mono)">${s.npc_count}</div></div>
+        </div>
+        ${s.author ? `<div><div style="font-size:11px;color:var(--text-dim)">作者</div><div style="font-size:13px;margin-top:2px">${s.author}</div></div>` : ''}
+      </div>
+      <div class="divider"></div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <button class="btn btn-gold" onclick="useScriptForGame('${s.script_id}')">🎮 用此剧本开始游戏</button>
+        <button class="btn" onclick="editSkeleton('${s.script_id}')">🗂 编辑骨架</button>
+      </div>`;
+  }
+}
+
+function useScriptForGame(scriptId) {
+  const msg = { type: 'SELECT_SCRIPT', script_id: scriptId };
+  if (window !== window.parent) {
+    window.parent.postMessage(msg, '*');
+  }
+  if (window.opener) {
+    window.opener.postMessage(msg, '*');
+  }
+  toast(`已选择剧本: ${scriptId}，请在游戏主菜单中开始游戏`, 'success', 4000);
+}
+
+function editSkeleton(scriptId) {
+  state.scriptId = scriptId;
+  switchView('skeleton');
+  loadSkeleton();
+}
+
+// ═══════════════════════════════════════════════
+// View: AI Generate
+// ═══════════════════════════════════════════════
+function selectStyle(el, style) {
+  document.querySelectorAll('.style-chip').forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  state.selectedStyle = style;
+}
+
+function changeChapterCount(delta) {
+  state.chapterCount = Math.max(2, Math.min(8, state.chapterCount + delta));
+  document.getElementById('chapter-count-display').textContent = state.chapterCount;
+}
+
+async function startGenerate() {
+  const theme = document.getElementById('gen-theme').value.trim();
+  if (!theme) { toast('请输入主题描述', 'error'); return; }
+  if (state.generating) return;
+
+  state.generating = true;
+  document.getElementById('gen-btn').disabled = true;
+  document.getElementById('gen-btn').textContent = '⌛ 生成中…';
+
+  // Show progress
+  const progressEl = document.getElementById('gen-progress');
+  progressEl.style.display = 'block';
+  setProgressStep(1, 'active');
+
+  // Show preview placeholder
+  document.getElementById('preview-content').innerHTML = `
+    <div style="padding:20px;display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:13px;color:var(--text-secondary)">✨ AI 正在创作中，请稍候…</div>
+      <div style="height:1px;background:var(--border)"></div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${[1,2,3].map(i => `<div style="height:14px;background:var(--bg-hover);border-radius:4px;width:${60+i*10}%;animation:pulse 1.5s infinite ${i*0.2}s"></div>`).join('')}
+      </div>
+    </div>`;
+
+  try {
+    setTimeout(() => setProgressStep(2, 'active'), 3000);
+    setTimeout(() => setProgressStep(3, 'active'), 8000);
+    setTimeout(() => setProgressStep(4, 'active'), 15000);
+
+    const result = await apiFetch('/scripts/generate', {
+      method: 'POST',
+      body: JSON.stringify({
+        theme: theme,
+        style: state.selectedStyle,
+        chapter_count: state.chapterCount,
+        protagonist_desc: document.getElementById('gen-protagonist').value.trim(),
+        extra_notes: document.getElementById('gen-notes').value.trim(),
+      }),
+    });
+
+    setProgressStep(4, 'done');
+    [1,2,3].forEach(i => setProgressStep(i, 'done'));
+
+    // Show preview result
+    renderGeneratePreview(result);
+    state.scripts.push({
+      script_id: result.script_id,
+      name: result.name,
+      description: result.worldview?.slice(0, 80),
+      chapter_count: result.chapter_count,
+      npc_count: result.npc_count,
+      author: '✨ AI 生成',
+    });
+
+    toast(`剧本「${result.name}」创作完成！`, 'success');
+
+    // Auto switch to skeleton for review
+    setTimeout(() => {
+      state.scriptId = result.script_id;
+      showConfirm('剧本创作完成', `剧本「<b>${result.name}</b>」已生成，共 ${result.chapter_count} 章，${result.npc_count} 个 NPC。<br><br>是否立即前往骨架编辑器进行审阅与修改？`).then(confirmed => {
+        if (confirmed) {
+          loadSkeleton(result);
+          switchView('skeleton');
+        }
+      });
+    }, 500);
+
+  } catch (e) {
+    toast(`生成失败: ${e.message}`, 'error', 6000);
+    document.getElementById('preview-content').innerHTML = `
+      <div class="empty-state">
+        <div class="es-icon">⚠️</div>
+        <div class="es-text" style="color:var(--red)">${e.message}</div>
+        <div style="font-size:12px;color:var(--text-dim);margin-top:4px">请检查 API 密钥或网络连接后重试</div>
+      </div>`;
+    [1,2,3,4].forEach(i => setProgressStep(i, ''));
+  } finally {
+    state.generating = false;
+    document.getElementById('gen-btn').disabled = false;
+    document.getElementById('gen-btn').textContent = '✨ 开始生成';
+  }
+}
+
+function setProgressStep(n, status) {
+  const step = document.getElementById(`step-${n}`);
+  const dot  = document.getElementById(`dot-${n}`);
+  if (!step || !dot) return;
+  step.className = `ai-progress-step ${status}`;
+  dot.className  = `step-dot ${status}`;
+}
+
+function renderGeneratePreview(result) {
+  const chapters = result.chapters || [];
+  document.getElementById('preview-content').innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:14px">
+      <div>
+        <div style="font-family:var(--font-serif);font-size:20px;color:var(--gold);letter-spacing:3px;margin-bottom:6px">${result.name}</div>
+        <div style="font-size:12px;color:var(--text-secondary);line-height:1.7">${result.worldview?.slice(0, 120)}…</div>
+      </div>
+      <div style="height:1px;background:var(--border)"></div>
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">章节骨架（${chapters.length} 章）</div>
+      ${chapters.map((ch, i) => `
+        <div style="display:flex;gap:10px;align-items:flex-start;padding:8px;background:var(--bg-deep);border-radius:6px;border:1px solid var(--border)">
+          <div style="width:22px;height:22px;border-radius:50%;background:var(--ct-${ch.color_tone||'amber'});flex-shrink:0;margin-top:2px;border:2px solid rgba(255,255,255,0.1)"></div>
+          <div style="flex:1">
+            <div style="font-size:13px;font-weight:500;color:var(--text-primary)">${ch.name}</div>
+            <div style="font-size:11px;color:var(--text-dim);margin-top:2px;line-height:1.5">${ch.description?.slice(0,60)||ch.goal||''}</div>
+          </div>
+        </div>
+      `).join('')}
+      <div style="font-size:11px;color:var(--text-dim)">NPC: ${result.npcs?.map(n=>n.name).join('、') || '-'}</div>
+      <div style="display:flex;gap:10px;margin-top:6px">
+        <button class="btn btn-gold" onclick="goEditSkeleton('${result.script_id}')">📝 查看/编辑骨架</button>
+        <span style="font-size:11px;color:var(--text-dim);align-self:center">剧本已自动保存，可随时在骨架编辑器中修改</span>
+      </div>
+    </div>`;
+
+  // Helper function for the button
+  window.goEditSkeleton = (scriptId) => {
+    state.scriptId = scriptId;
+    loadSkeleton();
+    switchView('skeleton');
+  };
+}
+
+// ═══════════════════════════════════════════════
+// View: Skeleton Editor
+// ═══════════════════════════════════════════════
+async function loadSkeleton(preloaded = null) {
+  const sid = state.scriptId;
+  if (!sid && !preloaded) {
+    toast('请先选择一个剧本', 'error');
+    return;
+  }
+
+  if (preloaded) {
+    renderSkeleton(preloaded);
+    return;
+  }
+
+  showLoading('加载骨架数据…');
+  try {
+    const data = await apiFetch(`/scripts/${sid}/skeleton`);
+    state.skeleton = data;
+    renderSkeleton(data);
+  } catch (e) {
+    toast(`加载骨架失败: ${e.message}`, 'error');
+  } finally {
+    hideLoading();
+  }
+}
+
+function renderSkeleton(data) {
+  state.skeleton = data;
+
+  // Update subtitle
+  document.getElementById('skeleton-subtitle').textContent = `${data.name || '剧本'} — 共 ${data.chapters.length} 章`;
+
+  // Show sessions section
+  document.getElementById('script-sessions-section').style.display = 'block';
+  loadScriptSessions();
+
+  // Worldview
+  const wvSection = document.getElementById('worldview-section');
+  wvSection.style.display = 'block';
+  document.getElementById('worldview-display').textContent = data.worldview || '';
+  document.getElementById('worldview-input').value = data.worldview || '';
+
+  // Chapters
+  const list = document.getElementById('skeleton-chapter-list');
+  const colorToneColors = { amber: '#c4902a', crimson: '#aa3030', teal: '#2a8080', violet: '#7a50a0', slate: '#607090' };
+
+  list.innerHTML = data.chapters.map((ch, i) => `
+    <div class="chapter-skeleton-item" id="csi-${ch.id}">
+      <div class="csi-header" onclick="toggleChapterSkeleton('${ch.id}')">
+        <div class="csi-order">${ch.sort_order || i+1}</div>
+        <div class="csi-info">
+          <div class="csi-name" id="csi-name-${ch.id}">${ch.name}</div>
+          <div class="csi-desc" id="csi-desc-${ch.id}">${ch.description||ch.goal||''}</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <span class="tag tag-gold" style="font-size:10px">${ch.sub_task_count||0} 子任务</span>
+          ${ch.color_tone ? `<div style="width:10px;height:10px;border-radius:50%;background:${colorToneColors[ch.color_tone]||'#888'};border:1px solid rgba(255,255,255,0.2)"></div>` : ''}
+        </div>
+        <span class="csi-chevron">▶</span>
+      </div>
+      <div class="csi-body">
+        <div class="csi-grid">
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label">章节名</label>
+            <input class="form-input" id="skel-name-${ch.id}" value="${ch.name}" oninput="markSkeletonDirty()">
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label">氛围</label>
+            <input class="form-input" id="skel-atm-${ch.id}" value="${ch.atmosphere||''}" oninput="markSkeletonDirty()">
+          </div>
+        </div>
+        <div class="form-group" style="margin-top:10px">
+          <label class="form-label">章节描述</label>
+          <textarea class="form-textarea" id="skel-desc-${ch.id}" style="min-height:70px" oninput="markSkeletonDirty()">${ch.description||''}</textarea>
+        </div>
+        <div class="csi-grid">
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label">玩家目标</label>
+            <input class="form-input" id="skel-goal-${ch.id}" value="${ch.goal||''}" oninput="markSkeletonDirty()">
+          </div>
+          <div class="form-group" style="margin-bottom:0">
+            <label class="form-label">核心冲突</label>
+            <input class="form-input" id="skel-conflict-${ch.id}" value="${ch.key_conflict||''}" oninput="markSkeletonDirty()">
+          </div>
+        </div>
+        <div style="margin-top:10px">
+          <label class="form-label">色调</label>
+          <div class="color-tone-select">
+            ${['amber','crimson','teal','violet','slate'].map(ct => `
+              <div class="ct-option ct-${ct} ${ch.color_tone===ct?'selected':''}" title="${ct}"
+                   data-chid="${ch.id}" data-ct="${ct}"
+                   onclick="selectColorTone('${ch.id}','${ct}')"></div>
+            `).join('')}
+          </div>
+        </div>
+        <div style="margin-top:10px">
+          <label class="form-label">BGM 情绪</label>
+          <select class="form-select" id="skel-bgm-${ch.id}" onchange="markSkeletonDirty()">
+            ${['melancholy','tense','hopeful','mysterious','triumphant'].map(m =>
+              `<option value="${m}" ${ch.bgm_mood===m?'selected':''}>${m}</option>`
+            ).join('')}
+          </select>
+        </div>
+
+        <!-- ★ 可编辑子任务模板 -->
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border)">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <span style="font-size:12px;color:var(--accent);font-weight:500">🧩 子任务模板 (<span id="st-count-${ch.id}">${(ch.sub_task_templates||[]).length}</span>)</span>
+            <button class="btn btn-sm" onclick="addSubTaskTemplate('${ch.id}')" style="color:var(--accent);border-color:var(--accent-dim)">＋ 新增</button>
+          </div>
+          <div id="st-container-${ch.id}">
+            ${(ch.sub_task_templates && ch.sub_task_templates.length > 0) ?
+              ch.sub_task_templates.map(st => renderSubTaskCard(ch.id, st)).join('') :
+              '<div class="st-empty-msg" id="st-empty-${ch.id}">暂无预定义子任务模板 — 点击「＋ 新增」添加</div>'}
+          </div>
+        </div>
+      </div>
+    </div>`).join('');
+
+  document.getElementById('skeleton-subtitle').textContent = `${data.name} — 共 ${data.chapters.length} 章`;
+}
+
+function toggleChapterSkeleton(chId) {
+  const el = document.getElementById(`csi-${chId}`);
+  el.classList.toggle('expanded');
+}
+
+// ═══════════════════════════════════════════════
+// Sub-task template CRUD (skeleton view)
+// ═══════════════════════════════════════════════
+
+const SUBTASK_MODES = [
+  { value: 'dialogue',     label: '对话' },
+  { value: 'acquire_item', label: '获取道具' },
+  { value: 'explore',      label: '探索' },
+  { value: 'deliver',      label: '传递' },
+  { value: 'relation',     label: '关系' },
+];
+
+function renderSubTaskCard(chapterId, st) {
+  const modeLabel = SUBTASK_MODES.find(m => m.value === st.mode)?.label || st.mode;
+  const stId = st.id || `st_${chapterId}_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
+  // Store in DOM dataset for save
+  return `
+    <div class="st-card" id="st-card-${stId}" data-st-id="${stId}" style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 10px;margin-bottom:6px">
+      <div class="st-summary" id="st-sum-${stId}" style="display:flex;align-items:center;gap:8px">
+        <span style="font-size:10px;padding:2px 6px;border-radius:10px;border:1px solid var(--border);color:var(--accent);flex-shrink:0" id="st-mode-badge-${stId}">${modeLabel}</span>
+        <span style="flex:1;font-size:13px;color:var(--text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="st-title-display-${stId}">${st.title||''}</span>
+        <button class="btn btn-sm btn-icon" onclick="toggleStEdit('${stId}')" title="编辑" style="padding:2px 6px;font-size:11px">✎</button>
+        <button class="btn btn-sm btn-icon" onclick="deleteSubTask('${chapterId}','${stId}')" title="删除" style="padding:2px 6px;font-size:11px;color:var(--red)">✕</button>
+      </div>
+      <div class="st-editor" id="st-edit-${stId}" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
+        <div style="display:flex;gap:8px;margin-bottom:6px">
+          <select id="st-mode-${stId}" style="background:var(--bg-deep);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px;padding:4px 6px;flex-shrink:0">
+            ${SUBTASK_MODES.map(m => `<option value="${m.value}" ${st.mode===m.value?'selected':''}>${m.label}</option>`).join('')}
+          </select>
+          <input id="st-title-${stId}" value="${st.title||''}" placeholder="子任务标题" style="flex:1;background:var(--bg-deep);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px;padding:4px 8px">
+        </div>
+        <textarea id="st-desc-${stId}" placeholder="子任务描述" style="width:100%;background:var(--bg-deep);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px;padding:6px 8px;min-height:40px;resize:vertical;font-family:var(--font-sans)">${st.description||''}</textarea>
+        <div style="display:flex;gap:8px;margin-top:6px;align-items:center">
+          <label style="font-size:11px;color:var(--text-dim);flex-shrink:0">目标 NPC:</label>
+          <input id="st-npc-${stId}" value="${st.target_npc_id||''}" placeholder="npc_xxx" style="flex:1;background:var(--bg-deep);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:12px;padding:4px 8px">
+          <button class="btn btn-sm" onclick="toggleStEdit('${stId}')" style="color:var(--accent)">完成</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function toggleStEdit(stId) {
+  const editor = document.getElementById(`st-edit-${stId}`);
+  editor.style.display = editor.style.display === 'none' ? 'block' : 'none';
+  // If closing, update the summary display
+  if (editor.style.display === 'none') {
+    const modeEl = document.getElementById(`st-mode-${stId}`);
+    const titleEl = document.getElementById(`st-title-${stId}`);
+    const modeLabel = SUBTASK_MODES.find(m => m.value === modeEl?.value)?.label || '';
+    if (modeEl) document.getElementById(`st-mode-badge-${stId}`).textContent = modeLabel;
+    if (titleEl) document.getElementById(`st-title-display-${stId}`).textContent = titleEl.value || '(未命名)';
+    markSkeletonDirty();
+  }
+}
+
+function deleteSubTask(chapterId, stId) {
+  const card = document.getElementById(`st-card-${stId}`);
+  if (card) card.remove();
+  updateStCount(chapterId);
+  markSkeletonDirty();
+}
+
+function addSubTaskTemplate(chapterId) {
+  const newSt = { id: '', title: '', mode: 'dialogue', description: '', target_npc_id: '' };
+  const cardHtml = renderSubTaskCard(chapterId, newSt);
+  const container = document.getElementById(`st-container-${chapterId}`);
+  // Remove empty message
+  const emptyMsg = document.getElementById(`st-empty-${chapterId}`);
+  if (emptyMsg) emptyMsg.remove();
+  container.insertAdjacentHTML('beforeend', cardHtml);
+  // Auto-expand editor for new sub-task
+  const lastCard = container.lastElementChild;
+  if (lastCard) {
+    const stId = lastCard.dataset.stId;
+    if (stId) toggleStEdit(stId);
+  }
+  updateStCount(chapterId);
+  markSkeletonDirty();
+}
+
+function updateStCount(chapterId) {
+  const container = document.getElementById(`st-container-${chapterId}`);
+  const count = container ? container.querySelectorAll('.st-card').length : 0;
+  const countEl = document.getElementById(`st-count-${chapterId}`);
+  if (countEl) countEl.textContent = count;
+  // Show empty message if no sub-tasks
+  if (count === 0) {
+    const existingEmpty = document.getElementById(`st-empty-${chapterId}`);
+    if (!existingEmpty) {
+      container.innerHTML = '<div class="st-empty-msg" id="st-empty-' + chapterId + '">暂无预定义子任务模板 — 点击「＋ 新增」添加</div>';
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════
+// Script sessions linkage（蓝图 → 游戏记录）
+// ═══════════════════════════════════════════════
+
+async function loadScriptSessions() {
+  if (!state.scriptId) return;
+  const listEl = document.getElementById('script-sessions-list');
+  listEl.innerHTML = '加载中…';
+  try {
+    const data = await apiFetch(`/plays?script_id=${encodeURIComponent(state.scriptId)}`);
+    const plays = data.plays || [];
+    if (plays.length === 0) {
+      listEl.innerHTML = '<span style="color:var(--text-dim)">暂无使用此剧本的游玩记录</span>';
+      return;
+    }
+    listEl.innerHTML = plays.map(p => {
+      const date = p.updated_at || '';
+      return `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">
+          <div>
+            <span style="color:var(--text-primary)">${p.player_name || '玩家'}</span>
+            <span style="color:var(--text-dim);margin-left:8px">${p.chapter_count} 章</span>
+            ${p.game_ended ? '<span style="color:var(--accent);margin-left:6px;font-size:11px"> [结局]</span>' : ''}
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="color:var(--text-dim);font-size:11px;font-family:monospace">${date}</span>
+            <button class="btn btn-sm" style="color:var(--accent);border-color:var(--accent-dim);font-size:11px;padding:3px 10px" onclick="viewStory('${p.session_id}')">📖 查看剧本</button>
+          </div>
+        </div>`;
+    }).join('');
+  } catch (e) {
+    listEl.innerHTML = `<span style="color:var(--red)">加载失败: ${e.message}</span>`;
+  }
+}
+
+async function viewStory(sessionId) {
+  showLoading('加载完善剧本…');
+  try {
+    const data = await apiFetch(`/plays/${sessionId}`);
+    renderStoryModal(data);
+  } catch (e) {
+    toast(`加载失败: ${e.message}`, 'error');
+  } finally {
+    hideLoading();
+  }
+}
+
+function renderStoryModal(data) {
+  const chapters = data.chapters || [];
+  const html = `
+    <div style="display:flex;flex-direction:column;gap:14px;max-height:55vh;overflow-y:auto;padding-right:4px">
+      ${chapters.map(ch => {
+        const task = ch.task;
+        const statusTag = ch.is_completed ? '<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:rgba(90,170,122,0.15);color:#5aaa7a">已完成</span>' :
+                          ch.is_current ? '<span style="font-size:10px;padding:1px 6px;border-radius:8px;background:rgba(196,144,42,0.15);color:#c4902a">进行中</span>' : '';
+        return `
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:14px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            ${statusTag}
+            <span style="font-family:var(--font-serif);font-size:15px;color:var(--gold)">${ch.name}</span>
+          </div>
+          <div style="font-size:12px;color:var(--text-secondary);line-height:1.7">
+            ${task?.description || ch.description || '（等待 AI 生成…）'}
+          </div>
+          ${task?.sub_tasks?.length ? `
+            <div style="margin-top:10px;display:flex;flex-direction:column;gap:5px">
+              ${task.sub_tasks.map(st => {
+                const modeLabels = { dialogue: '对话', acquire_item: '获取道具', explore: '探索', deliver: '传递', relation: '关系' };
+                const stStatus = st.status === 'completed' ? '✓' : st.status === 'active' ? '○' : '·';
+                const stColor = st.status === 'completed' ? '#5aaa7a' : st.status === 'active' ? '#c4902a' : '#555';
+                return `
+                <div style="display:flex;align-items:center;gap:6px;font-size:11px">
+                  <span style="color:${stColor};flex-shrink:0">${stStatus}</span>
+                  <span style="padding:0 4px;border-radius:6px;background:rgba(123,140,222,0.12);color:var(--accent);font-size:10px">${modeLabels[st.mode]||st.mode}</span>
+                  <span style="color:var(--text-primary)">${st.title}</span>
+                  ${st.target_npc_id ? `<span style="color:var(--text-dim);font-size:10px">→ ${st.target_npc_id}</span>` : ''}
+                </div>`;
+              }).join('')}
+            </div>
+          ` : ''}
+        </div>`;
+      }).join('')}
+    </div>`;
+  showConfirm('📖 完善剧本 — ' + (data.script_name || data.script_id || ''), html);
+  const modal = document.querySelector('#confirm-dialog .modal');
+  if (modal) modal.style.width = 'min(700px, calc(100vw - 40px))';
+}
+
+function toggleWorldviewEdit() {
+  const display = document.getElementById('worldview-display');
+  const input   = document.getElementById('worldview-input');
+  if (input.style.display === 'none') {
+    input.style.display = 'block';
+    display.style.display = 'none';
+  } else {
+    display.textContent = input.value;
+    display.style.display = 'block';
+    input.style.display = 'none';
+    markSkeletonDirty();
+  }
+}
+
+function selectColorTone(chId, ct) {
+  document.querySelectorAll(`[data-chid="${chId}"]`).forEach(el => el.classList.remove('selected'));
+  document.querySelector(`[data-chid="${chId}"][data-ct="${ct}"]`)?.classList.add('selected');
+  markSkeletonDirty();
+}
+
+function markSkeletonDirty() { state.skeletonDirty = true; }
+
+async function saveSkeleton() {
+  if (!state.skeleton || !state.scriptId) { toast('没有可保存的骨架', 'error'); return; }
+
+  showLoading('保存骨架…');
+  try {
+    const chapters = state.skeleton.chapters.map(ch => {
+      const nameEl  = document.getElementById(`skel-name-${ch.id}`);
+      const descEl  = document.getElementById(`skel-desc-${ch.id}`);
+      const goalEl  = document.getElementById(`skel-goal-${ch.id}`);
+      const atmEl   = document.getElementById(`skel-atm-${ch.id}`);
+      const conflEl = document.getElementById(`skel-conflict-${ch.id}`);
+      const bgmEl   = document.getElementById(`skel-bgm-${ch.id}`);
+      const selCt   = document.querySelector(`[data-chid="${ch.id}"].selected`);
+
+      // ★ Collect sub-task templates from DOM
+      const stContainer = document.getElementById(`st-container-${ch.id}`);
+      const subTasks = [];
+      if (stContainer) {
+        stContainer.querySelectorAll('.st-card').forEach(card => {
+          const stId = card.dataset.stId;
+          const modeEl = document.getElementById(`st-mode-${stId}`);
+          const titleEl = document.getElementById(`st-title-${stId}`);
+          const descEl = document.getElementById(`st-desc-${stId}`);
+          const npcEl = document.getElementById(`st-npc-${stId}`);
+          subTasks.push({
+            id: stId,
+            mode: modeEl ? modeEl.value : 'dialogue',
+            title: titleEl ? titleEl.value : '',
+            description: descEl ? descEl.value : '',
+            target_npc_id: npcEl ? npcEl.value : null,
+          });
+        });
+      }
+
+      return {
+        ...ch,
+        name:          nameEl  ? nameEl.value  : ch.name,
+        description:   descEl  ? descEl.value  : ch.description,
+        goal:          goalEl  ? goalEl.value  : ch.goal,
+        atmosphere:    atmEl   ? atmEl.value   : ch.atmosphere,
+        key_conflict:  conflEl ? conflEl.value : ch.key_conflict,
+        bgm_mood:      bgmEl   ? bgmEl.value   : ch.bgm_mood,
+        color_tone:    selCt   ? selCt.dataset.ct : ch.color_tone,
+        sub_task_templates: subTasks,
+      };
+    });
+
+    const worldviewInput = document.getElementById('worldview-input');
+    const worldview = worldviewInput.style.display !== 'none' ? worldviewInput.value : null;
+
+    await apiFetch(`/scripts/${state.scriptId}/skeleton`, {
+      method: 'PATCH',
+      body: JSON.stringify({ chapters, worldview }),
+    });
+
+    state.skeletonDirty = false;
+    toast('骨架已保存', 'success');
+
+    // Notify parent (iframe) or opener (popup window)
+    const msg = { type: 'SKELETON_SAVED', script_id: state.scriptId };
+    if (window !== window.parent) {
+      window.parent.postMessage(msg, '*');
+    }
+    if (window.opener) {
+      window.opener.postMessage(msg, '*');
+    }
+  } catch (e) {
+    toast(`保存失败: ${e.message}`, 'error');
+  } finally {
+    hideLoading();
+  }
+}
+
+// ═══════════════════════════════════════════════
+// View: Chapter Detail Editor
+// ═══════════════════════════════════════════════
+async function loadChapterDetail(sessionId, chapterId) {
+  showLoading('加载章节详情…');
+  try {
+    const data = await apiFetch(`/game/${sessionId}/chapter/${chapterId}/detail`);
+    state.chapterDetail = data;
+    state.sessionId = sessionId;
+    state.chapterId = chapterId;
+    renderChapterDetail(data);
+  } catch (e) {
+    toast(`加载章节详情失败: ${e.message}`, 'error');
+    document.getElementById('chapter-empty-state').style.display = 'flex';
+  } finally {
+    hideLoading();
+  }
+}
+
+function renderChapterDetail(data) {
+  const isEmpty = !data.chapter_def && !data.task;
+  document.getElementById('chapter-empty-state').style.display = isEmpty ? 'flex' : 'none';
+  if (isEmpty) return;
+
+  const colorMap = { amber: '#c4902a', crimson: '#aa3030', teal: '#2a8080', violet: '#7a50a0', slate: '#607090' };
+  const ch = data.chapter_def || {};
+
+  // Chapter Info Bar
+  const bar = document.getElementById('chapter-info-bar');
+  bar.style.display = 'flex';
+  document.getElementById('ci-color-dot').style.background = colorMap[ch.color_tone] || '#888';
+  document.getElementById('ci-chapter-name').textContent = ch.name || data.chapter_id;
+  document.getElementById('ci-chapter-desc').textContent = ch.description || '';
+
+  let statusHtml = '';
+  if (data.is_completed) statusHtml = `<span class="tag tag-green">已完成</span>`;
+  else if (data.is_current) statusHtml = `<span class="tag tag-amber">进行中</span>`;
+  else statusHtml = `<span class="tag">未开始</span>`;
+  document.getElementById('ci-status').innerHTML = statusHtml;
+
+  // Chapter Desc Card
+  const descCard = document.getElementById('chapter-desc-card');
+  descCard.style.display = 'block';
+  document.getElementById('chapter-desc-input').value = data.task?.description || ch.description || '';
+
+  // NPC Snapshots
+  const npcSection = document.getElementById('npc-snapshot-section');
+  const npcSnapshots = data.npc_snapshots || [];
+  if (npcSnapshots.length > 0) {
+    npcSection.style.display = 'block';
+    document.getElementById('npc-snapshots').innerHTML = npcSnapshots.map(npc => {
+      const rel = npc.relationship || 0;
+      const relPct = ((rel + 100) / 200 * 100).toFixed(0);
+      const relColor = rel > 30 ? '#5aaa7a' : rel < -30 ? '#aa5a5a' : '#c4902a';
+      return `
+        <div class="npc-snap-card">
+          <div class="npc-snap-name">${npc.name}</div>
+          <div class="npc-snap-role">${npc.role}</div>
+          <div class="relationship-bar">
+            <div class="relationship-fill" style="width:${relPct}%;background:${relColor}"></div>
+          </div>
+          <div style="font-size:10px;color:var(--text-dim);margin-top:3px">好感 ${rel>0?'+':''}${rel} · 对话 ${npc.dialogue_round_count} 轮</div>
+        </div>`;
+    }).join('');
+  } else {
+    npcSection.style.display = 'none';
+  }
+
+  // Sub Tasks
+  const task = data.task;
+  const stSection = document.getElementById('subtask-section');
+  if (task && task.sub_tasks && task.sub_tasks.length > 0) {
+    stSection.style.display = 'block';
+    const completed = task.completed_subtasks || 0;
+    document.getElementById('subtask-count').textContent = `(${completed}/${task.sub_tasks.length} 完成)`;
+    document.getElementById('subtask-list').innerHTML = task.sub_tasks.map(st => renderSubtaskItem(st)).join('');
+  } else {
+    stSection.style.display = data.is_current ? 'block' : 'none';
+    document.getElementById('subtask-count').textContent = data.is_current ? '(暂无，章节可能尚未开始)' : '';
+    document.getElementById('subtask-list').innerHTML = '';
+  }
+
+  // Inject Context
+  const injectSection = document.getElementById('inject-section');
+  injectSection.style.display = data.is_current ? 'block' : 'none';
+  document.getElementById('inject-context-input').value = data.inject_context || '';
+
+  // Regen button
+  document.getElementById('btn-regen').style.display = data.is_current ? 'flex' : 'none';
+
+  document.getElementById('chapter-subtitle').textContent =
+    `${ch.name || data.chapter_id} · ${data.is_current ? '当前章节' : data.is_completed ? '已完成' : '未开始'}`;
+}
+
+function renderSubtaskItem(st) {
+  const modeColors = { dialogue: '#7b8cde', acquire_item: '#c4902a', explore: '#5aaa7a', deliver: '#aa7050', relation: '#aa5a9a' };
+  const modeLabels = { dialogue: '对话', acquire_item: '获取道具', explore: '探索', deliver: '传递', relation: '关系' };
+  return `
+    <div class="subtask-item" id="sti-${st.id}">
+      <div class="sti-header">
+        <div class="sti-status status-${st.status}"></div>
+        <div class="sti-mode-badge" style="color:${modeColors[st.mode]||'#888'}">${modeLabels[st.mode]||st.mode}</div>
+        <div class="sti-title" id="sti-title-${st.id}">${st.title}</div>
+        <button class="btn btn-sm btn-icon sti-edit-btn" onclick="toggleSubtaskEdit('${st.id}')" title="编辑">✎</button>
+      </div>
+      <div class="inline-editor" id="sti-editor-${st.id}">
+        <div class="form-group">
+          <label class="form-label">任务标题</label>
+          <input class="form-input" id="sti-input-title-${st.id}" value="${st.title}">
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label">任务描述</label>
+          <textarea class="form-textarea" id="sti-input-desc-${st.id}" style="min-height:60px">${st.description||''}</textarea>
+        </div>
+        ${st.target_npc_id ? `<div style="font-size:11px;color:var(--text-dim);margin-top:6px">目标 NPC: ${st.target_npc_id}</div>` : ''}
+      </div>
+    </div>`;
+}
+
+function toggleSubtaskEdit(stId) {
+  const editor = document.getElementById(`sti-editor-${stId}`);
+  editor.classList.toggle('open');
+}
+
+async function saveChapterDetail() {
+  if (!state.sessionId || !state.chapterId) { toast('请先加载章节数据', 'error'); return; }
+
+  const task = state.chapterDetail?.task;
+  const subTasks = task?.sub_tasks?.map(st => ({
+    id: st.id,
+    title: document.getElementById(`sti-input-title-${st.id}`)?.value || st.title,
+    description: document.getElementById(`sti-input-desc-${st.id}`)?.value || st.description,
+  })) || [];
+
+  const payload = {
+    description: document.getElementById('chapter-desc-input')?.value || '',
+    sub_tasks:   subTasks,
+    inject_context: document.getElementById('inject-context-input')?.value || '',
+  };
+
+  showLoading('保存并注入…');
+  try {
+    const result = await apiFetch(`/game/${state.sessionId}/chapter/${state.chapterId}/detail`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    });
+    toast('章节内容已保存并注入会话', 'success');
+
+    // Notify parent (iframe) or opener (popup window)
+    const saveMsg = {
+      type: 'CHAPTER_DETAIL_SAVED',
+      session_id: state.sessionId,
+      chapter_id: state.chapterId,
+      changes: result.changes,
+    };
+    if (window !== window.parent) {
+      window.parent.postMessage(saveMsg, '*');
+    }
+    if (window.opener) {
+      window.opener.postMessage(saveMsg, '*');
+    }
+  } catch (e) {
+    toast(`保存失败: ${e.message}`, 'error');
+  } finally {
+    hideLoading();
+  }
+}
+
+async function regenerateChapter() {
+  if (!state.sessionId || !state.chapterId) return;
+  const confirmed = await showConfirm('重新生成章节', `确认重新生成章节「${state.chapterDetail?.chapter_def?.name || state.chapterId}」的任务内容？<br><br>当前的 TaskInstance 将被覆盖。`);
+  if (!confirmed) return;
+
+  showLoading('重新生成中…');
+  try {
+    const result = await apiFetch(`/game/${state.sessionId}/chapter/${state.chapterId}/regenerate`, {
+      method: 'POST',
+    });
+    state.chapterDetail.task = result.task;
+    renderChapterDetail(state.chapterDetail);
+    toast('章节已重新生成', 'success');
+  } catch (e) {
+    toast(`重新生成失败: ${e.message}`, 'error');
+  } finally {
+    hideLoading();
+  }
+}
+
+function loadChapterManual() {
+  const sid = document.getElementById('manual-session-id').value.trim();
+  const cid = document.getElementById('manual-chapter-id').value.trim();
+  if (!sid || !cid) { toast('请输入会话 ID 和章节 ID', 'error'); return; }
+  loadChapterDetail(sid, cid);
+}
+
+// ═══════════════════════════════════════════════
+// Boot
+// ═══════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>

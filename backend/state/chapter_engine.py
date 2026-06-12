@@ -31,6 +31,12 @@ class ChapterEngine:
         if session.current_chapter_id and session.npcs:
             await self._compress_previous_chapter(session)
 
+        # ── 保存上一章生成内容到历史 ───────────────
+        if session.current_task and session.current_chapter_id:
+            session.completed_chapter_tasks[session.current_chapter_id] = session.current_task.to_dict()
+            # ★ 同步写入文件系统 play 记录
+            self._write_play_file(session)
+
         # 查找该章的 AI 大纲（如果有）
         outline = None
         ch_id = chapter_def.get("id", "")
@@ -324,3 +330,53 @@ class ChapterEngine:
             manager.persist_session(session)
         except Exception as e:
             logger.error(f"[ChapterEngine] 持久化失败: {e}")
+
+    def _write_play_file(self, session: GameSession) -> None:
+        """将已完成的章节写入文件系统 play 记录。"""
+        try:
+            from routes.plays import write_play_record
+
+            chapters_data = []
+            for ch_def in session.chapter_defs:
+                ch_id = ch_def.get("id", "")
+                task_data = session.completed_chapter_tasks.get(ch_id)
+
+                chapter_entry = {
+                    "chapter_id": ch_id,
+                    "name": ch_def.get("name", ""),
+                    "sort_order": ch_def.get("sort_order", 0),
+                    "blueprint": ch_def.get("description", ""),
+                    "goal": ch_def.get("goal", ""),
+                    "key_conflict": ch_def.get("key_conflict", ""),
+                    "atmosphere": ch_def.get("atmosphere", ""),
+                    "color_tone": ch_def.get("color_tone", ""),
+                    "bgm_mood": ch_def.get("bgm_mood", ""),
+                }
+
+                if task_data:
+                    chapter_entry["task"] = {
+                        "description": task_data.get("description", ""),
+                        "sub_tasks": [
+                            {
+                                "id": st.get("id", ""),
+                                "title": st.get("title", ""),
+                                "mode": st.get("mode", "dialogue"),
+                                "description": st.get("description", ""),
+                                "target_npc_id": st.get("target_npc_id"),
+                                "status": st.get("status", "locked"),
+                            }
+                            for st in task_data.get("sub_tasks", [])
+                        ],
+                    }
+
+                chapters_data.append(chapter_entry)
+
+            write_play_record(
+                session_id=session.session_id,
+                script_id=session.script_id,
+                player_name=session.player_name,
+                chapters=chapters_data,
+                game_ended=session.game_ended,
+            )
+        except Exception as e:
+            logger.warning(f"[ChapterEngine] Failed to write play file: {e}")

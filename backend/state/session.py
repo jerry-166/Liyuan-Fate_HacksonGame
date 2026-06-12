@@ -286,6 +286,7 @@ class GameSession:
     script_id: str = "liyuan_shengsi"
     current_chapter_id: Optional[str] = None
     completed_chapters: list[str] = field(default_factory=list)
+    completed_chapter_tasks: dict = field(default_factory=dict)  # ch_id → TaskInstance dict
     current_task: Optional[TaskInstance] = None
     chapter_defs: list[dict] = field(default_factory=list)
     item_defs: list[dict] = field(default_factory=list)

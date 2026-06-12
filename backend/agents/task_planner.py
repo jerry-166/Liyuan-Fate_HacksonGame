@@ -116,6 +116,18 @@ class TaskPlanner:
             logger.warning(f"[TaskPlanner] LLM 调用失败，使用模板兜底: {e}")
             result = self._fallback_from_templates(chapter_def)
 
+        # ★ 确保至少有一个子任务，否则游戏无法推进
+        if not result.get("sub_tasks"):
+            npc_id = (chapter_def.get("required_npcs") or [None])[0]
+            result["sub_tasks"] = [{
+                "id": f"{chapter_def.get('id', 'ch')}_st_auto",
+                "title": chapter_def.get("goal") or "推进剧情",
+                "mode": "dialogue",
+                "description": chapter_def.get("description", ""),
+                "target_npc_id": npc_id,
+            }]
+            logger.info("[TaskPlanner] 无子任务，自动生成兜底子任务")
+
         # 解析结果
         return self._parse_result(session, chapter_def, result)
 
@@ -147,6 +159,19 @@ class TaskPlanner:
         # 如果没有 LLM 生成的子任务，用模板兜底
         if not sub_tasks:
             sub_tasks = self._sub_tasks_from_templates(chapter_def)
+
+        # ★ 终极兜底：确保至少有一个子任务
+        if not sub_tasks:
+            npc_id = (chapter_def.get("required_npcs") or [None])[0]
+            sub_tasks.append(SubTask(
+                id=f"{chapter_def.get('id', 'ch')}_st_auto",
+                title=chapter_def.get("goal") or "推进剧情",
+                mode="dialogue",
+                description=chapter_def.get("description", ""),
+                target_npc_id=npc_id,
+                status="active",
+                min_dialogue_rounds=2,
+            ))
 
         related_npc_ids = list({
             st.target_npc_id or st.deliver_to_npc_id
