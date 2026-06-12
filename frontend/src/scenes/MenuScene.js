@@ -140,6 +140,7 @@ export class MenuScene extends Phaser.Scene {
 
   shutdown() {
     this.scale.off('resize', this._onResize, this);
+    if (this._resizeTimer) { clearTimeout(this._resizeTimer); this._resizeTimer = null; }
     if (this.editorPanel) { this.editorPanel.destroy(); this.editorPanel = null; }
     this._cleanupNameInput();
   }
@@ -160,6 +161,9 @@ export class MenuScene extends Phaser.Scene {
    * 实际执行 resize 重建
    */
   _doResize(width, height) {
+    // ★ 场景已销毁或相机不存在时跳过（300ms 防抖可能在 shutdown 后触发）
+    if (!this.sys || !this.sys.isActive() || !this.cameras || !this.cameras.main) return;
+
     // 保存状态
     const wasArchiveVisible = this.archivePanel && this.archivePanel.active && this.archivePanel.visible;
     const savedSessionData = this._archiveSessionData;
