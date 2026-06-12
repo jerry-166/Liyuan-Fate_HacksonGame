@@ -8,6 +8,7 @@
   GET  /api/scripts/{script_id}/skeleton  获取剧本骨架（章节大纲）
   PATCH /api/scripts/{script_id}/skeleton 修改剧本骨架
   GET  /api/scripts/{script_id}/chapters  获取完整章节列表
+  GET  /api/scripts/{script_id}/items     获取全量物品信息（含模板合并+坐标）
 """
 
 import json
@@ -76,6 +77,138 @@ def _sanitize_id(text: str) -> str:
     return s[:32] if s else "script"
 
 
+def _format_world_items_for_prompt() -> str:
+    """
+    加载世界物品数据并格式化为适合 LLM prompt 的文本。
+    按场景分组，每件物品附名称、描述和坐标。
+    """
+    import yaml as _yaml
+
+    items_path = SCRIPTS_DIR.parent / "world" / "items" / "world_items.yaml"
+    templates_path = SCRIPTS_DIR.parent / "world" / "items" / "templates.yaml"
+
+    # 加载模板
+    templates = {}
+    if templates_path.exists():
+        try:
+            with open(templates_path, "r", encoding="utf-8") as f:
+                raw = _yaml.safe_load(f)
+            for t in (raw.get("templates", []) if isinstance(raw, dict) else []):
+                tid = t.get("template_id", "")
+                if tid:
+                    templates[tid] = t
+        except Exception:
+            pass
+
+    # 加载物品
+    if not items_path.exists():
+        return "（暂无预置物品）"
+
+    try:
+        with open(items_path, "r", encoding="utf-8") as f:
+            raw = _yaml.safe_load(f)
+        item_defs = raw.get("items", []) if isinstance(raw, dict) else raw or []
+    except Exception:
+        return "（物品数据加载失败）"
+
+    if not item_defs:
+        return "（暂无预置物品）"
+
+    # 按场景分组
+    scene_groups: dict[str, list] = {}
+    for item in item_defs:
+        scene = item.get("scene", "未知场景")
+        scene_groups.setdefault(scene, []).append(item)
+
+    # 格式化输出
+    lines = []
+    scene_names = {
+        "father_house": "父亲旧居",
+        "stage_ruin": "戏台遗址",
+        "teahouse": "茶馆",
+        "temple": "祠堂",
+        "cemetery": "墓地",
+        "town": "镇上",
+        "dock": "渡口",
+    }
+
+    for scene, items in scene_groups.items():
+        scene_cn = scene_names.get(scene, scene)
+        lines.append(f"\n### {scene_cn}（{scene}）")
+        for item in items:
+            item_id = item.get("item_id", "")
+            name = item.get("name", item_id)
+            desc = item.get("base_description", "")
+            tmpl_ref = item.get("template_ref", "")
+            tmpl = templates.get(tmpl_ref, {})
+            category = item.get("category", tmpl.get("category", "misc"))
+            holdable = item.get("holdable", tmpl.get("holdable", True))
+            pos = item.get("position", {})
+            coord = f"({pos.get('col','?')},{pos.get('row','?')})" if pos else ""
+
+            hold_str = "可拾取" if holdable else "仅查看"
+            lines.append(f"- [{category}] **{name}** {coord} ({hold_str})")
+            if desc:
+                # 限制描述长度，避免 prompt 过长
+                desc_short = desc if len(desc) <= 120 else desc[:117] + "..."
+                lines.append(f"  {desc_short}")
+
+    return "\n".join(lines) if lines else "（暂无预置物品）"
+
+
+def _format_world_scenes_for_prompt() -> str:
+    """
+    加载世界场景数据并格式化为适合 LLM prompt 的文本。
+    包含场景名称、类型、描述、氛围、连接关系。
+    """
+    import yaml as _yaml
+
+    scenes_path = SCRIPTS_DIR.parent / "world" / "scenes.yaml"
+    if not scenes_path.exists():
+        return "（暂无世界场景定义）"
+
+    try:
+        with open(scenes_path, "r", encoding="utf-8") as f:
+            raw = _yaml.safe_load(f)
+        scene_defs = raw.get("scenes", []) if isinstance(raw, dict) else raw or []
+    except Exception:
+        return "（场景数据加载失败）"
+
+    if not scene_defs:
+        return "（暂无世界场景定义）"
+
+    lines = []
+
+    # 先列所有户外场景（主世界）
+    outdoor = [s for s in scene_defs if s.get("type") == "outdoor"]
+    indoor = [s for s in scene_defs if s.get("type") == "indoor"]
+
+    for s in outdoor:
+        sid = s.get("scene_id", "")
+        name = s.get("name", sid)
+        desc = s.get("description", "").strip()
+        atmos = "、".join(s.get("atmosphere", []))
+        connections = " | ".join(s.get("connections", []))
+        lines.append(f"\n### {name}（{sid}）[户外]")
+        lines.append(f"氛围: {atmos}")
+        lines.append(f"描述: {desc}")
+        lines.append(f"可前往: {connections}")
+
+    for s in indoor:
+        sid = s.get("scene_id", "")
+        name = s.get("name", sid)
+        desc = s.get("description", "").strip()
+        atmos = "、".join(s.get("atmosphere", []))
+        areas = "、".join(s.get("notable_areas", []))
+        lines.append(f"\n### {name}（{sid}）[室内]")
+        lines.append(f"氛围: {atmos}")
+        lines.append(f"描述: {desc}")
+        if areas:
+            lines.append(f"重要区域: {areas}")
+
+    return "\n".join(lines) if lines else "（暂无世界场景定义）"
+
+
 # ═══════════════════════════════════════════════════════════════
 # 请求/响应模型
 # ═══════════════════════════════════════════════════════════════
@@ -116,6 +249,21 @@ GENERATE_SCRIPT_PROMPT = """你是一位专精于「剧本杀·恐怖悬疑·规
 【章节数】{chapter_count}
 【主角背景】{protagonist_desc}
 【额外备注】{extra_notes}
+
+## 开放世界场景（重要）
+以下是当前开放世界中已存在的所有场景。你的剧本 **必须基于这些已有场景来设计**——
+不要把故事发生地设在游戏里不存在的场景中。每个场景的氛围和空间结构是固定的，
+你可以在这些空间里安排叙事。
+
+{world_scenes}
+
+## 开放世界预置物品（重要）
+以下是当前开放世界中已存在的所有预置物品。你的剧本 **必须基于这些已有物品来设计**——
+不要凭空编造不存在的物品。你可以决定哪些物品是叙事的核心，哪些是背景。
+你可以：让物品之间产生隐藏的联系、赋予物品新的叙事意义、设计 NPC 对物品的不同认知。
+——总之：**用已有的场景和物品，讲新的故事**。
+
+{world_items}
 
 ## 叙事风格要求
 你的故事必须有"细思极恐"的质感。技法：
@@ -239,15 +387,20 @@ async def generate_script(req: GenerateScriptRequest):
     AI 根据主题生成完整微剧本骨架，写入 data/scripts/{script_id}/。
 
     流程：
-    1. 调用 LLM 生成 JSON 结构化剧本
-    2. 校验并补全缺失字段
-    3. 写入 meta.yaml + chapters.yaml + personas/
-    4. 返回 script_id + 完整骨架供前端预览/编辑
+    1. 加载世界物品列表（作为生成约束）
+    2. 调用 LLM 生成 JSON 结构化剧本
+    3. 校验并补全缺失字段
+    4. 写入 meta.yaml + chapters.yaml + personas/
+    5. 返回 script_id + 完整骨架供前端预览/编辑
     """
     from llm.client import LLMClient
     from config import LLM_MODEL
 
     chapter_count = max(2, min(8, req.chapter_count))
+
+    # ── 1. 加载世界资产作为生成约束 ──
+    world_items_text = _format_world_items_for_prompt()
+    world_scenes_text = _format_world_scenes_for_prompt()
 
     prompt = GENERATE_SCRIPT_PROMPT.format(
         theme=req.theme,
@@ -255,6 +408,8 @@ async def generate_script(req: GenerateScriptRequest):
         chapter_count=chapter_count,
         protagonist_desc=req.protagonist_desc or "由玩家自行定义",
         extra_notes=req.extra_notes or "无",
+        world_items=world_items_text,
+        world_scenes=world_scenes_text,
     )
 
     messages = [
@@ -486,4 +641,104 @@ async def update_script_skeleton(script_id: str, req: UpdateSkeletonRequest):
         "script_id": script_id,
         "updated_chapter_count": len(updated_chapters),
         "chapters": updated_chapters,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
+# 脚本级别全量物品查询 — 供 AI 剧本生成使用（无需 session）
+# ═══════════════════════════════════════════════════════════════
+
+@router.get("/scripts/{script_id}/items")
+async def get_script_items(script_id: str):
+    """
+    获取剧本中【所有物品】的完整信息（含模板合并、坐标、NPC关联等）。
+
+    不需要游戏 session —— 直接读取 YAML 文件。
+    是 AI 生成剧本内容的核心数据源。
+
+    返回格式：
+    {
+      "script_id": "liyuan_shengsi",
+      "total": 10,
+      "summary": { ... },
+      "items": [ { ...完整物品信息... }, ... ]
+    }
+    """
+    import yaml as _yaml
+
+    # 读取剧本 meta 获取 items 文件路径
+    meta = _load_script_meta(script_id)
+    items_file_rel = meta.get("items_file") or "items/story_items.yaml"
+    items_path = SCRIPTS_DIR / script_id / items_file_rel
+    templates_path = SCRIPTS_DIR / script_id / "items" / "templates.yaml"
+
+    # 1. 加载模板
+    templates = {}
+    if templates_path.exists():
+        try:
+            with open(templates_path, "r", encoding="utf-8") as f:
+                raw = _yaml.safe_load(f)
+            for t in (raw.get("templates", []) if isinstance(raw, dict) else []):
+                tid = t.get("template_id", "")
+                if tid:
+                    templates[tid] = t
+        except Exception as e:
+            logger.error(f"[ScriptItems] 模板加载失败: {e}")
+
+    # 2. 加载物品定义
+    item_defs = []
+    if items_path.exists():
+        try:
+            with open(items_path, "r", encoding="utf-8") as f:
+                raw = _yaml.safe_load(f)
+            item_defs = raw.get("items", []) if isinstance(raw, dict) else raw or []
+        except Exception as e:
+            logger.error(f"[ScriptItems] 物品定义加载失败: {e}")
+
+    # 3. 加载章节（用于填充 stage_names）
+    chapters = _load_chapters(script_id)
+    chapter_map: dict[int, dict] = {}
+    for ch in chapters:
+        so = ch.get("sort_order", -1)
+        if so >= 0:
+            chapter_map[so] = {
+                "id": ch.get("id", ""),
+                "name": ch.get("name", ""),
+                "description": (ch.get("description", "") or "")[:80],
+            }
+
+    # 4. 合并（复用 item.py 的合并逻辑）
+    from routes.item import _merge_item_full
+    items = []
+    for item_def in item_defs:
+        full = _merge_item_full(item_def, templates)
+
+        # 填充章节名称
+        stage_names = []
+        for idx in full.get("stage_relevance", []):
+            ch_info = chapter_map.get(idx)
+            if ch_info:
+                stage_names.append(ch_info)
+        full["stage_names"] = stage_names
+
+        items.append(full)
+
+    # 5. 统计摘要
+    key_items = [i for i in items if i["is_key"]]
+    holdable_items = [i for i in items if i["holdable"]]
+    scene_dist = {}
+    for i in items:
+        sc = i["scene"] or "(无场景)"
+        scene_dist[sc] = scene_dist.get(sc, 0) + 1
+
+    return {
+        "script_id": script_id,
+        "total": len(items),
+        "summary": {
+            "key_count": len(key_items),
+            "holdable_count": len(holdable_items),
+            "by_scene": scene_dist,
+            "scenes": list(scene_dist.keys()),
+        },
+        "items": items,
     }
