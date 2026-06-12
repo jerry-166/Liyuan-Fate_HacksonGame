@@ -143,7 +143,7 @@ export class MenuScene extends Phaser.Scene {
     if (this._resizeTimer) { clearTimeout(this._resizeTimer); this._resizeTimer = null; }
     if (this.editorPanel) { this.editorPanel.destroy(); this.editorPanel = null; }
     this._cleanupNameInput();
-    this._wheelHandler = null;  // ★ 清除旧 handler，让下次 create 时重新 bind
+    this._unbindWheelHandler();  // ★ 清理 DOM wheel 监听
     this._fsListenerBound = false;  // ★ 全屏监听同理
   }
 
@@ -190,10 +190,7 @@ export class MenuScene extends Phaser.Scene {
     this._scriptSelectorContainer = null;
     this._scriptScrollContainer = null;
     this._nameDialogContainer = null;
-    if (this._scriptWheelHandler) {
-      this.input.off('wheel', this._scriptWheelHandler);
-      this._scriptWheelHandler = null;
-    }
+    // ★ 统一的 _domWheelHandler 不需要随 resize 重建（它只判断当前可见面板）
     this._cleanupNameInput();
 
     // 重建
@@ -212,22 +209,71 @@ export class MenuScene extends Phaser.Scene {
 
   // ==================== 一次性绑定 ====================
 
+  /**
+   * ★ 统一的 DOM wheel handler — 只绑定一次到 canvas，根据当前可见面板分发逻辑
+   * 绕开 Phaser input.on('wheel') 在场景重启后不可靠的问题
+   */
   _bindWheelHandler() {
-    if (this._wheelHandler) return;
-    this._wheelHandler = (_p, _go, _dx, deltaY) => {
-      // ★ 仅检查面板是否存在且可见（移除 active 检查，resize 后的一帧内 active 可能为 false）
-      if (!this.archivePanel || !this.archivePanel.visible) return;
-      const area = this._archiveListArea;
-      if (!area || !this.archiveListContentHeight || this.archiveListContentHeight <= area.h) return;
-      // ★ 校验当前 listContent 的父容器确是当前 panel（防止 resize 前后引用错乱）
-      const content = this.archiveListContent;
-      if (!content) return;
-      const maxScroll = this.archiveListContentHeight - area.h;
-      this.archiveScrollY = Math.max(-maxScroll, Math.min(0, this.archiveScrollY - deltaY * 0.5));
-      // ★ 直接设置 Y 坐标，不做 active 判断
-      content.setY(area.baseY + this.archiveScrollY);
+    // ★ 清理旧绑定（场景重启可能残留）
+    this._unbindWheelHandler();
+
+    this._domWheelHandler = (e) => {
+      // 优先处理：剧本选择器滚轮
+      if (this._scriptScrollContainer && this._scriptSelectorContainer &&
+          this._scriptSelectorContainer.visible) {
+        e.preventDefault();
+        const sensitivity = 0.6;
+        this._scriptScrollY = Phaser.Math.Clamp(
+          this._scriptScrollY + e.deltaY * sensitivity,
+          0, Math.max(0, this._scriptScrollMax)
+        );
+        this._scriptScrollContainer.y = -this._scriptScrollY;
+        return;
+      }
+      // 其次处理：存档面板滚轮
+      if (this.archivePanel && this.archivePanel.visible) {
+        const area = this._archiveListArea;
+        if (!area || !this.archiveListContentHeight || this.archiveListContentHeight <= area.h) return;
+        const content = this.archiveListContent;
+        if (!content) return;
+        e.preventDefault();
+        const maxScroll = this.archiveListContentHeight - area.h;
+        this.archiveScrollY = Math.max(-maxScroll, Math.min(0, this.archiveScrollY - e.deltaY * 0.5));
+        content.setY(area.baseY + this.archiveScrollY);
+      }
     };
-    this.input.on('wheel', this._wheelHandler);
+
+    const canvas = this.sys.game.canvas;
+    if (canvas) {
+      canvas.addEventListener('wheel', this._domWheelHandler, { passive: false });
+    }
+  }
+
+  _unbindWheelHandler() {
+    if (this._domWheelHandler) {
+      const canvas = this.sys && this.sys.game && this.sys.game.canvas;
+      if (canvas) {
+        canvas.removeEventListener('wheel', this._domWheelHandler);
+      }
+      this._domWheelHandler = null;
+    }
+    // 清理旧版独立 handler（向后兼容）
+    if (this._domScriptWheelHandler) {
+      const canvas = this.sys && this.sys.game && this.sys.game.canvas;
+      if (canvas) {
+        canvas.removeEventListener('wheel', this._domScriptWheelHandler);
+      }
+      this._domScriptWheelHandler = null;
+    }
+    // 清理旧版 Phaser input handler（向后兼容）
+    if (this._wheelHandler) {
+      try { this.input.off('wheel', this._wheelHandler); } catch (_) {}
+      this._wheelHandler = null;
+    }
+    if (this._scriptWheelHandler) {
+      try { this.input.off('wheel', this._scriptWheelHandler); } catch (_) {}
+      this._scriptWheelHandler = null;
+    }
   }
 
   _bindFullscreenListener() {
@@ -911,20 +957,7 @@ export class MenuScene extends Phaser.Scene {
     );
     container.add(aiBtn);
 
-    // ── Scroll wheel handler ──
-    if (this._scriptWheelHandler) {
-      this.input.off('wheel', this._scriptWheelHandler);
-    }
-    this._scriptWheelHandler = (_p, _go, _dx, deltaY) => {
-      if (!this._scriptScrollContainer || !this._scriptSelectorContainer) return;
-      const sensitivity = 0.6;
-      this._scriptScrollY = Phaser.Math.Clamp(
-        this._scriptScrollY + deltaY * sensitivity,
-        0, Math.max(0, this._scriptScrollMax)
-      );
-      this._scriptScrollContainer.y = -this._scriptScrollY;
-    };
-    this.input.on('wheel', this._scriptWheelHandler);
+    // ★ 滚轮逻辑已统一在 _bindWheelHandler() 的 _domWheelHandler 中，此处无需额外绑定
 
     // Loading hint
     const loadingText = this.add.text(width / 2, panelY + panelH / 2, '加载剧本列表中……', {
@@ -1226,10 +1259,7 @@ export class MenuScene extends Phaser.Scene {
       this._scriptSelectorContainer.destroy(true);
       this._scriptSelectorContainer = null;
     }
-    if (this._scriptWheelHandler) {
-      this.input.off('wheel', this._scriptWheelHandler);
-      this._scriptWheelHandler = null;
-    }
+    // ★ 统一的 _domWheelHandler 会根据 _scriptSelectorContainer 是否存在自动跳过
     this._scriptScrollContainer = null;
     this._scriptScrollY = 0;
     this._scriptScrollMax = 0;
