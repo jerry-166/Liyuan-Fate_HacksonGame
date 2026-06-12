@@ -1,0 +1,97 @@
+# ============================================================
+# 世界物品清单
+# 这些是开放世界中预置的所有具体物品。
+# 每件物品引用一个模板 (template_ref)，模板提供物理属性。
+# 物品本身只描述它在世界中的位置和外表。
+#
+# 字段说明：
+#   item_id         - 物品唯一标识
+#   name            - 物品名称
+#   template_ref    - 引用的模板ID（来自 templates.yaml）
+#   base_description- 物品描述（AI 生成或预设）
+#   scene           - 所在场景
+#   position        - 坐标 {col, row}（80x50 tile 地图）
+#   desc_source     - 描述来源："fixed" 预设 / "ai" AI生成
+# ============================================================
+
+items:
+
+  - item_id: item_urn
+    name: 父亲的骨灰盒
+    template_ref: tmpl_urn
+    base_description: "一个简朴的深色木制骨灰盒，盒面光滑冰凉，没有多余的装饰。拿在手里沉甸甸的，像是承载了太多说不出口的话。"
+    scene: cemetery
+    position: {col: 38, row: 40}
+    desc_source: fixed
+
+  - item_id: item_child_costume
+    name: 孩童戏服
+    template_ref: tmpl_child_costume
+    base_description: "一件小号的戏曲戏服，红底金线绣着传统纹样，约五六岁孩童的尺寸。颜色已经褪得发白，袖口处有一小块暗红色的污渍——像是很久以前的血迹。叠得整整齐齐，仿佛有人叠好放回去，等着小主人再来穿。内衬用细墨笔写着一个「柳」字。"
+    scene: father_house
+    position: {col: 23, row: 7}
+    desc_source: fixed
+
+  - item_id: item_father_script
+    name: 父亲的手抄剧本
+    template_ref: tmpl_script_book
+    base_description: "一本泛黄的手抄戏曲台本，毛边纸装订，竖排毛笔小楷。翻开第一页是《长生殿·弹词》的唱段，笔迹工整中带着一股稚气——像是学戏的人一边听一边记下来的。末页空白处有人用铅笔潦草写了四个字：「不是意外」。"
+    scene: father_house
+    position: {col: 20, row: 5}
+    desc_source: fixed
+
+  - item_id: item_childhood_photo
+    name: 童年合影
+    template_ref: tmpl_old_photo
+    base_description: "一张褪色的老照片，边角卷起泛黄。照片里一个穿戏服的小男孩站在戏台中央，旁边一个中年男人蹲着给他整理衣领，两人都对着镜头笑。背面用钢笔写着：「1935年秋，小柳初次登台」。那个中年男人的脸被指甲划花了。"
+    scene: father_house
+    position: {col: 24, row: 5}
+    desc_source: fixed
+
+  - item_id: item_father_single_photo
+    name: 父亲旧照（单人）
+    template_ref: tmpl_old_photo
+    base_description: "一张泛黄的旧照片，照片上是一个穿着长衫的中年男人独自站在后台，侧脸逆光，表情模糊不清。照片背面写着「勿忘」，墨水已经洇开了。"
+    scene: father_house
+    position: {col: 23, row: 4}
+    desc_source: fixed
+
+  - item_id: item_genealogy
+    name: 柳家族谱
+    template_ref: tmpl_genealogy
+    base_description: "一本老旧的线装族谱，纸张薄脆泛黄。翻到柳家近三代，有一个名字被浓墨涂掉了，只留下一个模糊的轮廓。旁边用红笔批注：「逐出族籍，永不得归」。"
+    scene: temple
+    position: {col: 34, row: 12}
+    desc_source: fixed
+
+  - item_id: item_old_trunk
+    name: 旧戏服木箱
+    template_ref: tmpl_trunk
+    base_description: "一口老旧的大木箱，铜锁锈迹斑斑但已经打开了。箱子里叠着几件褪色的戏服和散了线的髯口，最上面空着一个小孩衣服大小的位置——像是原本有什么被人取走了。箱子底部散落着几张民国二十年的戏票存根。"
+    scene: stage_ruin
+    position: {col: 14, row: 10}
+    desc_source: fixed
+
+  - item_id: item_old_jinghu
+    name: 墙上的老京胡
+    template_ref: tmpl_jinghu
+    base_description: "一把挂在墙壁铁钉上的老京胡，竹制琴筒上蒙的蛇皮已经松弛，琴弦生锈断裂。琴杆上刻着「柳记」两个小字，漆面被长年累月的指法磨出了一道浅槽——是反复练习《夜深沉》那段快弓留下的痕迹。"
+    scene: stage_ruin
+    position: {col: 12, row: 8}
+    desc_source: fixed
+
+  - item_id: item_stage_group_photo
+    name: 戏班合影
+    template_ref: tmpl_old_photo
+    base_description: "挂在茶馆雅间墙上的一张大幅合影，十几个戏班成员穿着行头站在戏台前。前排正中间空了一个位置，像是有人被刻意从照片上剪掉了。剪痕很新，不像是陈年旧事。"
+    scene: teahouse
+    position: {col: 34, row: 16}
+    desc_source: fixed
+
+  - item_id: item_temple_tablet
+    name: 柳家祖先牌位
+    template_ref: tmpl_tablet
+    base_description: "一块沉黑的木质牌位立在供桌上，香灰积了厚厚一层。牌位上刻着柳家先祖的名讳，但最后一排被利器刮花了，看不出原本刻的是谁。供桌前放着一盏早已干涸的油灯。"
+    scene: temple
+    position: {col: 36, row: 8}
+    desc_source: fixed

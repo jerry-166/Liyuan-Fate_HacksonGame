@@ -1,0 +1,79 @@
+# ============================================================
+# 世界物品模板库（通用物理属性）
+# 只描述物品的客观物理属性，不含任何叙事绑定。
+# 世界中的所有具体物品通过 template_ref 引用这些模板。
+# ============================================================
+
+templates:
+
+  - template_id: tmpl_child_costume
+    category: clothing
+    name: 戏服
+    generic_desc: "一件小号的戏曲戏服，约5-8岁孩童尺寸，颜色鲜艳但已褪色，绣有传统纹样。"
+    size: medium
+    icon: "costume"
+    holdable: true
+    actions: [examine, show]
+
+  - template_id: tmpl_script_book
+    category: document
+    name: 戏本
+    generic_desc: "一本泛黄的手抄戏曲台本，毛边纸装订，竖排毛笔小楷，封面有墨迹书名。"
+    size: small
+    icon: "book"
+    holdable: true
+    actions: [examine, read, show]
+
+  - template_id: tmpl_old_photo
+    category: misc
+    name: 老照片
+    generic_desc: "一张褪色的老照片，边角卷曲，棕黄色调。"
+    size: tiny
+    icon: "photo"
+    holdable: true
+    actions: [examine, show]
+
+  - template_id: tmpl_trunk
+    category: container
+    name: 旧木箱
+    generic_desc: "老旧木箱，箱盖半开，露出里面折叠的衣物一角。铜锁已锈。"
+    size: large
+    icon: "trunk"
+    holdable: false
+    actions: [examine, open]
+
+  - template_id: tmpl_jinghu
+    category: instrument
+    name: 京胡
+    generic_desc: "一把传统京胡，竹制琴筒蒙蛇皮，琴杆暗沉有年头。琴弦松弛不响。"
+    size: medium
+    icon: "instrument"
+    holdable: true
+    actions: [examine, hold]
+
+  - template_id: tmpl_urn
+    category: misc
+    name: 骨灰盒
+    generic_desc: "一个简朴的木制骨灰盒，深色木纹。"
+    size: small
+    icon: "urn"
+    holdable: true
+    actions: [examine]
+
+  - template_id: tmpl_genealogy
+    category: document
+    name: 族谱
+    generic_desc: "一本老旧的线装族谱，纸张泛黄发脆，记载着家族世系。"
+    size: small
+    icon: "book"
+    holdable: true
+    actions: [examine, read]
+
+  - template_id: tmpl_tablet
+    category: misc
+    name: 牌位
+    generic_desc: "一块木质牌位，上刻姓名和生卒年月。"
+    size: tiny
+    icon: "tablet"
+    holdable: false
+    actions: [examine]
