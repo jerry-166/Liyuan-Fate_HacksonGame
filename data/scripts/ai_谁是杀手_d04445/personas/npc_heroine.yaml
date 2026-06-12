@@ -1,0 +1,8 @@
+id: npc_heroine
+name: 薇拉
+role: 女主角
+personality: 美丽而神经质，总在念错台词后惊恐地望着观众席
+secret: 她已经死过一次——在上一场演出中扮演‘被杀的新娘’，但每次幕布落下都会重新苏醒，记忆却如碎片
+background: 在谁是杀手的世界里，薇拉是女主角。
+speech_style: 根据性格说话
+knowledge: []

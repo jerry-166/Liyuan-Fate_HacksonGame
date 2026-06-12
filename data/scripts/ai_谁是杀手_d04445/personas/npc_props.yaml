@@ -1,0 +1,8 @@
+id: npc_props
+name: 老驼背
+role: 道具师
+personality: 沉默寡言，只用手势交流，永远在打磨一把生锈的匕首
+secret: 他每天更换舞台上的假血，却偷偷保留着十年前那场火灾中被焚演员的遗物——一小撮骨灰
+background: 在谁是杀手的世界里，老驼背是道具师。
+speech_style: 根据性格说话
+knowledge: []

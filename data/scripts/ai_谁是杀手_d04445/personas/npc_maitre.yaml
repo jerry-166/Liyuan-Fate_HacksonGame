@@ -1,0 +1,8 @@
+id: npc_maitre
+name: 霍桑
+role: 剧院经理
+personality: 圆滑殷勤，笑声空洞，总在后台阴影里整理破旧海报
+secret: 他是十年前火灾的唯一幸存者，当年曾亲手锁死了逃生门，只为独占《第七幕》的演出权
+background: 在谁是杀手的世界里，霍桑是剧院经理。
+speech_style: 根据性格说话
+knowledge: []

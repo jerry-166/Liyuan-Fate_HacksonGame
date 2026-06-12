@@ -1,0 +1,8 @@
+id: npc_specter
+name: 戴兜帽的观众
+role: 神秘看客
+personality: 坐在最后一排，从不鼓掌，面容藏在阴影里
+secret: 他就是凶手，但不是人——是剧本怨念的具象化，需要观众席上有一个‘活人替身’才能维持形态
+background: 在谁是杀手的世界里，戴兜帽的观众是神秘看客。
+speech_style: 根据性格说话
+knowledge: []

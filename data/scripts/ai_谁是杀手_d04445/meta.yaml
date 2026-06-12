@@ -1,0 +1,76 @@
+script_id: ai_谁是杀手_d04445
+name: 亡魂剧本
+version: '1.0'
+author: AI Generated (谁是杀手)
+worldview: 惊雷镇的旧剧院每逢雨夜便有演出，但布景永远潮湿，幕布上人形水渍拭之不去。观众席的座位会自己翻起，像有人刚落座。更诡异的是，后台的化妆镜照不出演员的脸，只映出扭曲的影子。剧院曾因一场火灾荒废十年，传闻那晚上演的《第七幕》谢幕后无人生还，只有一本烧焦的剧本流传至今。
+horror_core: 剧本《第七幕》是活着的诅咒：任何翻开它的人都会被拉入戏中，按固定场次以剧本描述的方式死去。凶手是“不存在于演员表上的角色”——他永远坐在观众席最后一排，鼓掌越响，舞台上的死亡越近，而唯一逃脱的办法是找出他，但每当你指认一个嫌疑者，剧本就会写出你的死法。
+system_prompt_file: null
+persona_dir: personas/
+chapters_file: chapters.yaml
+items_file: items/story_items.yaml
+npcs:
+- id: npc_maitre
+  name: 霍桑
+  role: 剧院经理
+  persona_file: npc_maitre.yaml
+  scene: stage
+  position:
+    col: 20
+    row: 15
+  sprite_key: npc_npc_maitre_idle
+  relationship_default: 0
+- id: npc_heroine
+  name: 薇拉
+  role: 女主角
+  persona_file: npc_heroine.yaml
+  scene: stage
+  position:
+    col: 28
+    row: 19
+  sprite_key: npc_npc_heroine_idle
+  relationship_default: 0
+- id: npc_hero
+  name: 亚瑟
+  role: 男主角
+  persona_file: npc_hero.yaml
+  scene: stage
+  position:
+    col: 36
+    row: 23
+  sprite_key: npc_npc_hero_idle
+  relationship_default: 0
+- id: npc_props
+  name: 老驼背
+  role: 道具师
+  persona_file: npc_props.yaml
+  scene: stage
+  position:
+    col: 44
+    row: 27
+  sprite_key: npc_npc_props_idle
+  relationship_default: 0
+- id: npc_specter
+  name: 戴兜帽的观众
+  role: 神秘看客
+  persona_file: npc_specter.yaml
+  scene: stage
+  position:
+    col: 52
+    row: 31
+  sprite_key: npc_npc_specter_idle
+  relationship_default: 0
+town_npcs: []
+prompt_overrides: {}
+ai_generated: true
+ai_theme: 谁是杀手
+ai_style: 恐怖惊悚
+ending_directions:
+- type: ending_A
+  condition: 在终幕选择接过匕首刺向兜帽人，但实际刺中的是自己的倒影
+  title: 永恒的替身
+- type: ending_B
+  condition: 撕碎剧本，导致所有角色化为灰烬，你失去言语能力，成为新的剧院幽灵
+  title: 哑口的守幕人
+- type: ending_C
+  condition: 将薇拉未散的记忆与老驼背的骨灰结合，还原十年前火场真相，令怨念消散
+  title: 烬中新生

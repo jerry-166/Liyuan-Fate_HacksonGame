@@ -1,0 +1,8 @@
+id: npc_hero
+name: 亚瑟
+role: 男主角
+personality: 暴躁专横，憎恨忘词的人，常对着空椅子排练
+secret: 他其实根本看不见观众席的‘凶手’，因为他是剧本虚构的角色，并非活人
+background: 在谁是杀手的世界里，亚瑟是男主角。
+speech_style: 根据性格说话
+knowledge: []
