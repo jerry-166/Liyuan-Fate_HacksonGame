@@ -159,8 +159,8 @@ export class EditorPanel {
           if (this.scene.taskPanel) this.scene.taskPanel.refreshContent();
           break;
         case 'SELECT_SCRIPT':
-          // Script selected — store and notify
-          if (this._onScriptSelected) this._onScriptSelected(data.script_id);
+          // Script selected from editor — pass both id and name for naming dialog
+          if (this._onScriptSelected) this._onScriptSelected(data.script_id, data.script_name);
           break;
         case 'SKELETON_SAVED':
           // Skeleton saved — could refresh
@@ -252,6 +252,24 @@ export class EditorPanel {
         if (gs) gs.events.emit('input:lock', false);
       } catch (_) { /* no GameScene */ }
     }, 250);
+  }
+
+  /**
+   * 暂停编辑器 — 隐藏 overlay 但保留 iframe 状态
+   * 用于在编辑器上方弹出命名对话框的场景，返回后可恢复
+   */
+  pause() {
+    if (!this._overlay) return;
+    this._overlay.style.display = 'none';
+    // ★ 不重置 iframe.src，保留编辑器状态
+  }
+
+  /**
+   * 恢复编辑器 — 重新显示 overlay（iframe 状态完整保留）
+   */
+  resume() {
+    if (!this._overlay || !this.visible) return;
+    this._overlay.style.display = 'flex';
   }
 
   toggle() {

@@ -124,10 +124,13 @@ export class MenuScene extends Phaser.Scene {
     // ★ 内联编辑器面板
     this.editorPanel = new EditorPanel(this);
     this.editorPanel.createPanel();
-    this.editorPanel.onScriptSelected((scriptId) => {
-      // 选中剧本后关闭编辑器和选择器，重新打开选择器以刷新
+    this.editorPanel.onScriptSelected((scriptId, scriptName) => {
+      // ★ 从剧本工坊选剧本：暂停工坊（不卸载）+ 关闭选择器 → 弹出命名对话框
+      this.editorPanel.pause();
       this._closeScriptSelector();
-      this.time.delayedCall(400, () => this._showScriptSelector());
+      this.time.delayedCall(200, () => {
+        this._showNameInputDialog(scriptId, scriptName || '未知剧本', true);
+      });
     });
 
     // 构建首次 UI
@@ -1110,9 +1113,49 @@ export class MenuScene extends Phaser.Scene {
     this._showNameInputDialog(scriptId, scriptName);
   }
 
-  _showNameInputDialog(scriptId, scriptName) {
+  // ★ CSS shake animation injected once (used for name validation feedback)
+  _injectNameInputStyles() {
+    if (document.getElementById('menu-name-input-styles')) return;
+    const styleEl = document.createElement('style');
+    styleEl.id = 'menu-name-input-styles';
+    styleEl.textContent = `
+      @keyframes name-input-shake {
+        0%, 100% { transform: translateX(0); }
+        20% { transform: translateX(-6px); }
+        40% { transform: translateX(6px); }
+        60% { transform: translateX(-4px); }
+        80% { transform: translateX(4px); }
+      }
+      .menu-name-input.shake {
+        animation: name-input-shake 0.45s ease;
+      }
+      .menu-name-input.error {
+        border-color: #cc5544 !important;
+        box-shadow: 0 0 8px rgba(204, 85, 68, 0.35);
+      }
+      .menu-name-input.valid {
+        border-color: #669955 !important;
+      }
+    `;
+    document.head.appendChild(styleEl);
+  }
+
+  /**
+   * 展示玩家命名对话框（模态、可复用）
+   * - 全屏遮罩，点击外部不关闭（严格模态）
+   * - 空名称校验 + 摇动动画 + 红色边框反馈
+   * - 字符数实时显示（0/12）
+   * - 支持键盘：Enter 确认 / ESC 取消
+   * @param {string} scriptId - 选中的剧本 ID
+   * @param {string} scriptName - 剧本名称
+   * @param {boolean} [fromEditor=false] - 是否从剧本工坊触发（影响「返回」行为）
+   */
+  _showNameInputDialog(scriptId, scriptName, fromEditor = false) {
     const { width, height } = this.cameras.main;
     const scale = Math.min(width / GAME.WIDTH, height / GAME.HEIGHT);
+
+    // ★ 注入 CSS 动画（幂等）
+    this._injectNameInputStyles();
 
     // ★ 先彻底清理所有可能的残留 DOM input（包括上一轮的）
     this._cleanupNameInput();
@@ -1123,19 +1166,37 @@ export class MenuScene extends Phaser.Scene {
       this._nameDialogContainer = null;
     }
 
-    const dW = Math.round(380 * scale), dH = Math.round(220 * scale);
+    const dW = Math.round(420 * scale), dH = Math.round(280 * scale);
     const dX = (width - dW) / 2, dY = (height - dH) / 2;
     const container = this.add.container(0, 0).setDepth(300);
     this._nameDialogContainer = container;
     this._uiContainer.add(container);
 
+    // ═══════════════════════════════════════
+    // ★ 全屏模态遮罩 — 拦截所有外部点击（严格模态，不关闭对话框）
+    // ═══════════════════════════════════════
+    const modalOverlay = this.add.graphics();
+    modalOverlay.fillStyle(0x000000, 0.72);
+    modalOverlay.fillRect(0, 0, width, height);
+    modalOverlay.setInteractive(
+      new Phaser.Geom.Rectangle(0, 0, width, height),
+      Phaser.Geom.Rectangle.Contains
+    );
+    // ★ 无 pointerdown handler → 仅吸收点击，不触发任何关闭逻辑
+    container.add(modalOverlay);
+
+    // Dialog box bg — refined premium look
     const bg = this.add.graphics();
-    bg.fillStyle(0x0d0d1e, 0.97);
-    bg.fillRoundedRect(dX, dY, dW, dH, 10);
-    bg.lineStyle(1.5, 0xd4b896, 0.6);
-    bg.strokeRoundedRect(dX, dY, dW, dH, 10);
+    bg.fillStyle(0x0d0d1e, 0.98);
+    bg.fillRoundedRect(dX, dY, dW, dH, 12);
+    bg.lineStyle(1.5, 0xd4b896, 0.55);
+    bg.strokeRoundedRect(dX, dY, dW, dH, 12);
+    // Inner subtle glow
+    bg.lineStyle(1, 0x887766, 0.15);
+    bg.strokeRoundedRect(dX + 1, dY + 1, dW - 2, dH - 2, 11);
     container.add(bg);
 
+    // ── Title ──
     const fs = Math.round(16 * scale);
     container.add(this.add.text(width / 2, dY + Math.round(30 * scale),
       `开始「${scriptName}」`, {
@@ -1144,9 +1205,29 @@ export class MenuScene extends Phaser.Scene {
         align: 'center',
       }).setOrigin(0.5));
 
-    container.add(this.add.text(width / 2, dY + Math.round(68 * scale), '请输入你的名字', {
-      fontFamily: '"Microsoft YaHei",sans-serif', fontSize: `${Math.round(14 * scale)}px`, color: '#887766',
+    // ── Label ──
+    const labelY = dY + Math.round(72 * scale);
+    const labelFS = Math.round(14 * scale);
+    container.add(this.add.text(width / 2, labelY, '请输入你的梨园艺名', {
+      fontFamily: '"Microsoft YaHei",sans-serif', fontSize: `${labelFS}px`, color: '#887766',
     }).setOrigin(0.5));
+
+    // ── Error text (initially hidden) ──
+    const errorY = dY + dH - Math.round(74 * scale);
+    const errorText = this.add.text(width / 2, errorY, '', {
+      fontFamily: '"Microsoft YaHei",sans-serif',
+      fontSize: `${Math.round(12 * scale)}px`, color: '#cc5544',
+      fontStyle: 'italic',
+    }).setOrigin(0.5).setAlpha(0);
+    container.add(errorText);
+
+    // ★ Character counter display
+    const counterY = dY + Math.round(130 * scale);
+    const counterText = this.add.text(width / 2, counterY, '0/12', {
+      fontFamily: '"Microsoft YaHei",sans-serif',
+      fontSize: `${Math.round(11 * scale)}px`, color: '#554433',
+    }).setOrigin(0.5);
+    container.add(counterText);
 
     // ★ 计算 canvas 在视口中的实际位置（Phaser 缩放后 canvas 坐标 ≠ CSS 坐标）
     const canvas = this.sys.game.canvas;
@@ -1154,54 +1235,121 @@ export class MenuScene extends Phaser.Scene {
     const cwRatio = canvasRect.width / width;   // canvas CSS 宽 / 逻辑宽
     const chRatio = canvasRect.height / height; // canvas CSS 高 / 逻辑高
 
-    const inputLeft = canvasRect.left + dX * cwRatio + dW * 0.15 * cwRatio;
-    const inputTop = canvasRect.top + dY * chRatio + dH * 0.44 * chRatio;
-    const inputW = dW * 0.7 * cwRatio;
-    const inputH = Math.round(38 * scale) * chRatio;
+    const inputLeft = canvasRect.left + dX * cwRatio + dW * 0.12 * cwRatio;
+    const inputTop = canvasRect.top + dY * chRatio + dH * 0.35 * chRatio;
+    const inputW = dW * 0.76 * cwRatio;
+    const inputH = Math.round(42 * scale) * chRatio;
 
-    // DOM input (overlay on canvas)
+    // ★ DOM input (overlay on canvas) — 无默认值，需要用户输入
     const inputEl = document.createElement('input');
     inputEl.type = 'text';
-    inputEl.value = '玩家';
+    inputEl.value = '';
+    inputEl.placeholder = '输入名字（1-12个字符）';
     inputEl.maxLength = 12;
-    inputEl.className = 'menu-name-input'; // ★ 添加 class 方便识别和清理
+    inputEl.className = 'menu-name-input';
     inputEl.style.cssText = `
       position: fixed;
       left: ${inputLeft}px;
       top: ${inputTop}px;
-      width: ${Math.max(100, inputW)}px;
-      height: ${Math.max(26, inputH)}px;
+      width: ${Math.max(120, inputW)}px;
+      height: ${Math.max(30, inputH)}px;
       background: #111122;
-      border: 1px solid #443322;
-      border-radius: 6px;
+      border: 2px solid #443322;
+      border-radius: 8px;
       color: #d4b896;
-      font-size: ${Math.max(12, Math.round(15 * scale))}px;
+      font-size: ${Math.max(13, Math.round(16 * scale))}px;
       font-family: "Microsoft YaHei", sans-serif;
       text-align: center;
       outline: none;
-      padding: 0 10px;
-      z-index: 9999;
+      padding: 0 12px;
+      z-index: 10000;
       box-sizing: border-box;
+      transition: border-color 0.25s ease, box-shadow 0.25s ease;
     `;
     document.body.appendChild(inputEl);
-    inputEl.focus();
-    inputEl.select();
+    // ★ 延迟 focus 确保 DOM 已挂载
+    setTimeout(() => { inputEl.focus(); }, 50);
     this._activeInputEl = inputEl;
 
-    // Shared callback for both button click and Enter key
+    // ═══════════════════════════════════════
+    // ★ 输入校验函数
+    // ═══════════════════════════════════════
+    const validateName = () => {
+      const trimmed = inputEl.value.trim();
+      if (!trimmed || trimmed.length === 0) {
+        // ── 空名称：红色边框 + 摇动动画 + 错误文字 ──
+        inputEl.classList.remove('valid');
+        inputEl.classList.add('error', 'shake');
+        errorText.setText('名字不能为空，请输入有效名字');
+        errorText.setAlpha(1);
+        setTimeout(() => { inputEl.classList.remove('shake'); }, 500);
+        // ★ 自动聚焦回输入框
+        setTimeout(() => { inputEl.focus(); }, 50);
+        return false;
+      }
+      // ── 校验通过：清除错误状态 ──
+      inputEl.classList.remove('error', 'shake');
+      inputEl.classList.add('valid');
+      errorText.setAlpha(0);
+      return true;
+    };
+
+    // ★ 实时输入反馈：清除错误 + 更新计数器
+    inputEl.addEventListener('input', () => {
+      counterText.setText(`${inputEl.value.length}/12`);
+      const trimmed = inputEl.value.trim();
+      if (trimmed.length > 0) {
+        inputEl.classList.remove('error', 'shake');
+        errorText.setAlpha(0);
+        // 仅当有内容时显示 valid 状态
+        if (trimmed.length >= 1) {
+          inputEl.classList.add('valid');
+        }
+      } else {
+        inputEl.classList.remove('valid');
+      }
+    });
+
+    // ═══════════════════════════════════════
+    // ★ 共享回调：校验通过后开始游戏
+    // ═══════════════════════════════════════
     const doStartGame = () => {
-      const name = (inputEl.value || '玩家').trim() || '玩家';
+      if (!validateName()) return;
+      const name = inputEl.value.trim();
+      // 禁用输入防止重复提交
+      inputEl.disabled = true;
       inputEl.style.display = 'none';
       inputEl.blur();
       this._cleanupNameInput();
       this._closeScriptSelector();
-      this._startNewGameWithScript(scriptId, name);
+      // ★ 如果来自工坊，彻底关闭工坊再进入游戏
+      if (fromEditor && this.editorPanel) {
+        this.editorPanel.hide();
+      }
+      // ★ 短暂延迟确保 UI 清理完毕再跳转
+      this.time.delayedCall(50, () => {
+        this._startNewGameWithScript(scriptId, name);
+      });
     };
 
-    // Buttons — left: 开始游戏, right: 取消
+    // ═══════════════════════════════════════
+    // ★ 取消/返回回调
+    // ═══════════════════════════════════════
+    const doCancel = () => {
+      this._cleanupNameInput();
+      container.destroy(true);
+      this._nameDialogContainer = null;
+      if (fromEditor && this.editorPanel) {
+        // ★ 从工坊进入 → 恢复工坊
+        this.editorPanel.resume();
+      }
+      // 否则回到剧本选择器（选择器仍在可见状态）
+    };
+
+    // ── Buttons ──
     const btnW = Math.round(130 * scale), btnH = Math.round(36 * scale);
-    const btnY = dY + dH - Math.round(34 * scale);
-    const margin = Math.round(20 * scale);
+    const btnY = dY + dH - Math.round(30 * scale);
+    const margin = Math.round(24 * scale);
     const confBtn = this._createStyledButton(
       dX + margin, btnY, btnW, btnH,
       '开始游戏', '#d4b896', doStartGame, 'left', scale
@@ -1210,23 +1358,21 @@ export class MenuScene extends Phaser.Scene {
 
     const cancelBtn = this._createStyledButton(
       dX + dW - margin, btnY, btnW, btnH,
-      '取消', '#665544', () => {
-        this._cleanupNameInput();
-        container.destroy(true);
-        this._nameDialogContainer = null;
-      }, 'right', scale
+      '返回', '#665544', doCancel, 'right', scale
     );
     container.add(cancelBtn);
 
+    // ═══════════════════════════════════════
+    // ★ 键盘事件
+    // ═══════════════════════════════════════
     inputEl.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
         doStartGame();
       }
       if (e.key === 'Escape') {
-        this._cleanupNameInput();
-        container.destroy(true);
-        this._nameDialogContainer = null;
+        e.preventDefault();
+        doCancel();
       }
     });
   }

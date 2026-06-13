@@ -913,6 +913,112 @@ html, body {
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }
+
+/* ═══════════════════════════════════════════════
+   View: World Items (items)
+═══════════════════════════════════════════════ */
+#view-items, #view-scenes { display: none; flex-direction: column; gap: 20px; }
+
+.world-items-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.item-card, .scene-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  transition: var(--transition);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.item-card:hover, .scene-card:hover {
+  border-color: var(--border-bright);
+  background: var(--bg-hover);
+}
+
+.item-card-header, .scene-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.item-icon, .scene-type-badge {
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+.item-icon { background: rgba(212,184,150,0.1); }
+.scene-type-badge {
+  font-size: 12px; font-weight: 600; width: auto; padding: 0 10px;
+  letter-spacing: 1px;
+}
+.scene-type-badge.outdoor { background: rgba(90,170,122,0.15); color: var(--green); }
+.scene-type-badge.indoor  { background: rgba(123,140,222,0.15); color: var(--accent); }
+
+.item-name, .scene-name {
+  font-family: var(--font-serif);
+  font-size: 16px; color: var(--gold);
+  flex: 1;
+}
+
+.item-meta, .scene-meta {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+
+.item-tag, .scene-tag {
+  font-size: 11px; padding: 2px 8px; border-radius: 100px;
+  background: rgba(212,184,150,0.08);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.item-tag.location { background: rgba(90,170,122,0.1); color: var(--green); }
+.scene-tag.atmosphere { background: rgba(196,144,42,0.1); color: var(--amber); }
+
+.item-desc, .scene-desc {
+  font-size: 13px; line-height: 1.7; color: var(--text-secondary);
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.scene-connections {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  font-size: 12px; color: var(--text-dim);
+}
+.scene-conn-arrow { color: var(--gold-dim); opacity: 0.5; }
+.scene-conn-name {
+  padding: 1px 8px; border-radius: 100px;
+  background: rgba(212,184,150,0.06);
+  color: var(--gold-dim);
+}
+
+.scene-areas {
+  display: flex; flex-wrap: wrap; gap: 4px;
+}
+.scene-area-tag {
+  font-size: 11px; padding: 1px 7px; border-radius: 100px;
+  background: rgba(123,140,222,0.08);
+  color: var(--accent-dim);
+}
+
+/* ── Filter bar for world views ── */
+.world-filter-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.world-filter-btn {
+  padding: 6px 14px; border-radius: 100px; border: 1px solid var(--border);
+  background: transparent; color: var(--text-secondary); cursor: pointer;
+  font-size: 13px; font-family: var(--font-sans); transition: var(--transition);
+}
+.world-filter-btn:hover, .world-filter-btn.active {
+  border-color: var(--gold-dim); color: var(--gold);
+  background: rgba(212,184,150,0.08);
+}
 </style>
 </head>
 <body>
@@ -946,6 +1052,14 @@ html, body {
       </div>
       <div class="nav-item" data-view="chapter" id="nav-chapter" onclick="switchView('chapter')">
         <span class="icon">✏️</span> 章节详情
+      </div>
+
+      <div class="nav-section-title" style="margin-top:8px">世界资产</div>
+      <div class="nav-item" data-view="items" onclick="switchView('items')">
+        <span class="icon">📦</span> 世界物品
+      </div>
+      <div class="nav-item" data-view="scenes" onclick="switchView('scenes')">
+        <span class="icon">🏞</span> 世界场景
       </div>
     </nav>
 
@@ -1168,6 +1282,42 @@ html, body {
         </div>
       </div>
 
+      <!-- ══ View: World Items ══ -->
+      <div id="view-items">
+        <div class="section-header">
+          <div>
+            <div class="section-title">世界物品</div>
+            <div class="section-subtitle">开放世界中所有预置的物品资产 · 世界先行，游戏后行</div>
+          </div>
+          <button class="btn" onclick="loadWorldItems()">↻ 刷新</button>
+        </div>
+        <div class="world-filter-bar" id="items-filter-bar"></div>
+        <div class="world-items-grid" id="items-grid">
+          <div class="empty-state">
+            <div class="es-icon">📦</div>
+            <div class="es-text">加载物品列表……</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ View: World Scenes ══ -->
+      <div id="view-scenes">
+        <div class="section-header">
+          <div>
+            <div class="section-title">世界场景</div>
+            <div class="section-subtitle">开放世界中所有可探索的场景 · 先有世界，后有故事</div>
+          </div>
+          <button class="btn" onclick="loadWorldScenes()">↻ 刷新</button>
+        </div>
+        <div class="world-filter-bar" id="scenes-filter-bar"></div>
+        <div class="world-items-grid" id="scenes-grid">
+          <div class="empty-state">
+            <div class="es-icon">🏞</div>
+            <div class="es-text">加载场景列表……</div>
+          </div>
+        </div>
+      </div>
+
     </main>
 
     <!-- Inspector Panel -->
@@ -1312,6 +1462,10 @@ function switchView(view) {
   const navEl = document.querySelector(`[data-view="${view}"]`);
   if (navEl) navEl.classList.add('active');
 
+  // ★ 切换到世界资产视图时自动加载数据
+  if (view === 'items') loadWorldItems();
+  if (view === 'scenes') loadWorldScenes();
+
   updatePageTitle();
 }
 
@@ -1321,6 +1475,8 @@ function updatePageTitle() {
     generate: 'AI 创作新剧本',
     skeleton: '骨架编辑',
     chapter: '章节详情编辑',
+    items:   '世界物品',
+    scenes:  '世界场景',
   };
   document.getElementById('page-title').textContent = titles[state.currentView] || '';
 }
@@ -1499,15 +1655,153 @@ function showInspector(type, id) {
   }
 }
 
+// ═══════════════════════════════════════════════
+// World Items View
+// ═══════════════════════════════════════════════
+
+let worldItemsCache = null;
+let worldItemsFilter = 'all';
+
+const ITEM_CATEGORY_LABELS = {
+  clothing: '衣物', document: '文书', misc: '杂项',
+  container: '容器', instrument: '乐器',
+};
+
+async function loadWorldItems() {
+  const grid = document.getElementById('items-grid');
+  grid.innerHTML = `<div class="empty-state"><div class="es-icon">⌛</div><div class="es-text">加载中…</div></div>`;
+  try {
+    const data = await apiFetch('/world/items');
+    worldItemsCache = data.items || [];
+    renderWorldItems();
+  } catch (e) {
+    grid.innerHTML = `<div class="empty-state"><div class="es-icon">⚠️</div><div class="es-text">加载失败: ${e.message}</div></div>`;
+  }
+}
+
+function renderWorldItems() {
+  const grid = document.getElementById('items-grid');
+  const filterBar = document.getElementById('items-filter-bar');
+  const items = worldItemsCache || [];
+
+  if (items.length === 0) {
+    grid.innerHTML = `<div class="empty-state"><div class="es-icon">📦</div><div class="es-text">暂无物品数据</div></div>`;
+    return;
+  }
+
+  // Build category filter buttons
+  const cats = ['all', ...new Set(items.map(i => i.category))];
+  filterBar.innerHTML = cats.map(c =>
+    `<button class="world-filter-btn ${worldItemsFilter === c ? 'active' : ''}"
+       onclick="worldItemsFilter='${c}';renderWorldItems()">${c === 'all' ? '全部' : (ITEM_CATEGORY_LABELS[c] || c)}</button>`
+  ).join('');
+
+  const filtered = worldItemsFilter === 'all' ? items : items.filter(i => i.category === worldItemsFilter);
+
+  grid.innerHTML = filtered.map(item => `
+    <div class="item-card">
+      <div class="item-card-header">
+        <div class="item-icon">${getItemIconEmoji(item.icon)}</div>
+        <div class="item-name">${escapeHtml(item.name)}</div>
+      </div>
+      <div class="item-meta">
+        <span class="item-tag">${ITEM_CATEGORY_LABELS[item.category] || item.category}</span>
+        ${item.size ? `<span class="item-tag">${item.size}</span>` : ''}
+        ${item.holdable ? '<span class="item-tag">可拾取</span>' : '<span class="item-tag">定点</span>'}
+        ${item.scene ? `<span class="item-tag location">📍 ${item.scene}</span>` : ''}
+      </div>
+      <div class="item-desc">${escapeHtml(item.base_description || item.generic_desc || '')}</div>
+    </div>
+  `).join('');
+}
+
+function getItemIconEmoji(icon) {
+  const map = {
+    costume: '👘', book: '📖', photo: '📷', trunk: '📦',
+    instrument: '🎻', urn: '⚱️', tablet: '📜',
+  };
+  return map[icon] || '📦';
+}
+
+// ═══════════════════════════════════════════════
+// World Scenes View
+// ═══════════════════════════════════════════════
+
+let worldScenesCache = null;
+let worldScenesFilter = 'all';
+
+async function loadWorldScenes() {
+  const grid = document.getElementById('scenes-grid');
+  grid.innerHTML = `<div class="empty-state"><div class="es-icon">⌛</div><div class="es-text">加载中…</div></div>`;
+  try {
+    const data = await apiFetch('/world/scenes');
+    worldScenesCache = data.scenes || [];
+    renderWorldScenes();
+  } catch (e) {
+    grid.innerHTML = `<div class="empty-state"><div class="es-icon">⚠️</div><div class="es-text">加载失败: ${e.message}</div></div>`;
+  }
+}
+
+function renderWorldScenes() {
+  const grid = document.getElementById('scenes-grid');
+  const filterBar = document.getElementById('scenes-filter-bar');
+  const scenes = worldScenesCache || [];
+
+  if (scenes.length === 0) {
+    grid.innerHTML = `<div class="empty-state"><div class="es-icon">🏞</div><div class="es-text">暂无场景数据</div></div>`;
+    return;
+  }
+
+  // Build type filter buttons
+  const types = ['all', ...new Set(scenes.map(s => s.type))];
+  filterBar.innerHTML = types.map(t =>
+    `<button class="world-filter-btn ${worldScenesFilter === t ? 'active' : ''}"
+       onclick="worldScenesFilter='${t}';renderWorldScenes()">${t === 'all' ? '全部' : (t === 'outdoor' ? '户外' : '室内')}</button>`
+  ).join('');
+
+  const filtered = worldScenesFilter === 'all' ? scenes : scenes.filter(s => s.type === worldScenesFilter);
+
+  grid.innerHTML = filtered.map(scene => `
+    <div class="scene-card">
+      <div class="scene-card-header">
+        <div class="scene-type-badge ${scene.type}">${scene.type === 'outdoor' ? '户外' : '室内'}</div>
+        <div class="scene-name">${escapeHtml(scene.name)}</div>
+      </div>
+      <div class="scene-meta">
+        ${(scene.atmosphere || []).map(a => `<span class="scene-tag atmosphere">${escapeHtml(a)}</span>`).join('')}
+        ${scene.scene_id ? `<span class="scene-tag">${escapeHtml(scene.scene_id)}</span>` : ''}
+      </div>
+      <div class="scene-desc">${escapeHtml(scene.description || '').replace(/\n/g, ' ')}</div>
+      ${scene.notable_areas && scene.notable_areas.length ? `
+      <div class="scene-areas">
+        ${scene.notable_areas.map(a => `<span class="scene-area-tag">${escapeHtml(a)}</span>`).join('')}
+      </div>` : ''}
+      ${scene.connections && scene.connections.length ? `
+      <div class="scene-connections">
+        可通往：${scene.connections.map((c, i) => `${i > 0 ? '<span class="scene-conn-arrow">→</span>' : ''}<span class="scene-conn-name">${escapeHtml(c)}</span>`).join('')}
+      </div>` : ''}
+    </div>
+  `).join('');
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
 function useScriptForGame(scriptId) {
-  const msg = { type: 'SELECT_SCRIPT', script_id: scriptId };
+  const script = state.scripts.find(s => s.script_id === scriptId);
+  const scriptName = script ? script.name : scriptId;
+  const msg = { type: 'SELECT_SCRIPT', script_id: scriptId, script_name: scriptName };
   if (window !== window.parent) {
     window.parent.postMessage(msg, '*');
   }
   if (window.opener) {
     window.opener.postMessage(msg, '*');
   }
-  toast(`已选择剧本: ${scriptId}，请在游戏主菜单中开始游戏`, 'success', 4000);
+  // ★ 不关闭工坊 — 父级会在工坊上方弹出命名对话框
+  toast(`已选择剧本「${scriptName}」，请在命名框中输入名字`, 'success', 1800);
 }
 
 function editSkeleton(scriptId) {
